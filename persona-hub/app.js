@@ -49,105 +49,38 @@
   }
 
   var DATA_URL = "../local/persona_settings_index.json";
-  // 手元編集(スクラッチパッド)。★静的ページは正本(persona_avatars.json / R2)へ書けないので、
-  // ここでの追加/削除は「この端末の手元だけ」に残す(未反映)。Chamiが内容を人事部門へ伝えたら
-  // 人事部門が正本へ反映する=そのための"差分に名前(#1/#2/id)を付けて指せる化"と変更メモが役目。
-  var EDIT_KEY = "persona_hub_edits_v1";
 
   // 直接アップロード(ページから正本へ)。go5-sync Worker に PUT /api/img → POST /api/persona/enqueue。
   // ★トークンはページに埋めない=Chamiがこの端末のlocalStorageへ1回だけ入れる(埋めると誰でも書けてしまう・デブライネ制約)。
   var SYNC_BASE = "https://go5-sync.trustsignalbot.workers.dev";
   var TOKEN_KEY = "go5_sync_token_v1";
 
-  var state = { personas: {}, names: [], filtered: [], selected: null, edits: {}, addSeq: 0 };
+  // 折り畳みの開閉状態(この端末だけ・見た目の好み)。既定=全開。閉じたsectionのタイトルだけ覚える。
+  var COLLAPSE_KEY = "persona_hub_collapsed_v1";
+
+  var state = { personas: {}, names: [], filtered: [], selected: null };
   var els = {};
 
   document.addEventListener("DOMContentLoaded", init);
 
-  function loadEdits() {
-    try { return JSON.parse(localStorage.getItem(EDIT_KEY)) || {}; } catch (e) { return {}; }
+  // 折り畳みの開閉状態(この端末だけ)。閉じた section のタイトルを集合で覚える=次に開いた時も閉じたまま。
+  function loadCollapsed() {
+    try { return JSON.parse(localStorage.getItem(COLLAPSE_KEY)) || {}; } catch (e) { return {}; }
   }
-  function saveEdits() {
-    try { localStorage.setItem(EDIT_KEY, JSON.stringify(state.edits)); } catch (e) {}
-  }
-  function personaEdits(name) {
-    var e = state.edits[name];
-    return e || { removed: [], added: [] };
-  }
-  function setPersonaEdits(name, e) {
-    // order は後付けフィールド(並び替え・不具合C)。旧スキーマ(removed/addedのみ)の保存分は
-    // order 無しで読まれるが、参照側が常に (ed.order || []) で受けるので後方互換。
-    var has = (e.removed && e.removed.length) || (e.added && e.added.length) || (e.order && e.order.length);
-    if (has) { state.edits[name] = e; } else { delete state.edits[name]; }
-    saveEdits();
+  function saveCollapsed(map) {
+    try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify(map)); } catch (e) {}
   }
   function shortId(url) {
     var s = String(url || "").split("?")[0];
     var seg = s.split("/").pop() || s;
     return seg.slice(-6) || seg;
   }
-  function currentUrls(name) {
-    return normalizeUrls(((state.personas[name] || {}).アイコン || {}).url);
-  }
-  // 保存済みの並び順(order)を現行URL群へ適用する。order内で現存するURLを記録順に先へ、
-  // orderに無い現行URL(=データ再生成で増えた分)を自然順で後ろへ。死んだURLは黙って落ちる。
-  function applyOrder(urls, order) {
-    var seen = {};
-    var out = [];
-    (order || []).forEach(function (u) {
-      if (urls.indexOf(u) >= 0 && !seen[u]) { seen[u] = 1; out.push(u); }
-    });
-    urls.forEach(function (u) { if (!seen[u]) { seen[u] = 1; out.push(u); } });
-    return out;
-  }
-  // 実効的な並び替えがあるか。自然順と同じなら null(=メモに載せない・件数にも数えない)。
-  function reorderInfo(name) {
-    var urls = currentUrls(name);
-    var order = personaEdits(name).order || [];
-    if (!order.length || urls.length < 2) return null;
-    var eff = applyOrder(urls, order);
-    for (var i = 0; i < urls.length; i++) {
-      if (eff[i] !== urls[i]) return eff;
-    }
-    return null;
-  }
-  // 削除指定を現行データと突き合わせて棚卸し(不具合B)。live=現行画像に居る削除指定、
-  // stale=もう存在しない亡霊(data.js再生成でURLが変わった等)。staleは黙ってメモに出さない。
-  function splitRemoved(name) {
-    var urls = currentUrls(name);
-    var live = [], stale = [];
-    (personaEdits(name).removed || []).forEach(function (u) {
-      (urls.indexOf(u) >= 0 ? live : stale).push(u);
-    });
-    return { live: live, stale: stale };
-  }
-  // データ読込時の棚卸し。並び順(order)は表示上の好みなので、現行URLだけに刈り込み、
-  // 自然順と一致するなら無効化する(applyOrderが生存分の相対順を保つ=それ自体が救済)。
-  // ★removed の亡霊はここで自動削除しない=画面で警告し、メモでは「未解決」枠に出す(Chamiが判断)。
-  function reconcileEdits() {
-    Object.keys(state.edits).forEach(function (n) {
-      if (!state.personas[n]) return; // データに居ない人格の分は触らない(メモの未解決枠行き)
-      var e = state.edits[n];
-      if (e.order && e.order.length) {
-        var urls = currentUrls(n);
-        var eff = applyOrder(urls, e.order);
-        var changed = false;
-        for (var i = 0; i < urls.length; i++) {
-          if (eff[i] !== urls[i]) { changed = true; break; }
-        }
-        e.order = changed ? eff : [];
-        setPersonaEdits(n, e);
-      }
-    });
-  }
-
   function init() {
     els.list = document.getElementById("personaList");
     els.detail = document.getElementById("detailPane");
     els.count = document.getElementById("personaCount");
     els.error = document.getElementById("errorBanner");
-    els.editBar = document.getElementById("editBar");
-    state.edits = loadEdits();
+    els.footer = document.getElementById("hubFooter");
 
     // 公開ページ(GitHub Pages)では data.js が window.PERSONA_HUB_DATA を焼き込んでいる。
     // local/ はgitignore配下でPagesに配信されないため、まず埋め込みを使い、無い時だけ
@@ -167,11 +100,11 @@
 
   function onData(json) {
     state.personas = (json && json.personas) || {};
+    state.meta = (json && json._meta) || {};
     state.names = Object.keys(state.personas).sort(function (a, b) { return a.localeCompare(b, "ja"); });
     state.filtered = state.names.slice();
-    reconcileEdits();
     renderList();
-    renderEditBar();
+    renderFooter();
     if (state.filtered.length) selectPersona(state.filtered[0]);
   }
 
@@ -200,7 +133,6 @@
       var fromWhom = (e.呼称 || {}).この人が誰をどう呼ぶか || [];
       var namingCount = toWhom.length + fromWhom.length;
       var active = name === state.selected ? " is-active" : "";
-      var hasEdit = !!state.edits[name];
       return "" +
         '<li class="persona-item' + active + '" data-name="' + esc(name) + '">' +
           '<div class="persona-item-name">' + esc(name) + "</div>" +
@@ -209,7 +141,6 @@
             '<span class="badge badge-icon">画像 ' + iconCount + "</span>" +
             '<span class="badge ' + (hasTone ? "badge-on" : "badge-off") + '">口調 ' + (hasTone ? "設定あり" : "未設定") + "</span>" +
             '<span class="badge badge-naming">呼称 ' + namingCount + "件</span>" +
-            (hasEdit ? '<span class="badge badge-edit">未反映</span>' : "") +
           "</div>" +
         "</li>";
     }).join("");
@@ -235,12 +166,42 @@
     html += renderToneSection(e.口調);
     html += renderNamingToSection((e.呼称 || {}).この人をどう呼ぶか);
     html += renderNamingFromSection((e.呼称 || {}).この人が誰をどう呼ぶか);
-    html += renderSourceSection(e.設定所在);
+    // ⑥ 設定所在の各キャラ表示は廃止=まとめ置き場をページ下部に1回だけ出す(renderFooter)。
     els.detail.innerHTML = html;
     wireCopyButtons();
     wireAvatarButtons(name);
-    wireAvatarDrag(name);
+    wireSectionToggles();
     wireThumbZoom();
+  }
+
+  // ── ⑤ section の開閉(開けるだけでなく閉じられるように)──
+  // 各 .detail-section のタイトル(.section-toggle)クリックで .is-collapsed をトグル。
+  // 閉じた状態はタイトル文言をキーに localStorage へ覚える=次に別キャラを開いても好みが残る。
+  function applyCollapsedState(sec) {
+    var map = loadCollapsed();
+    var key = sec.getAttribute("data-sec") || "";
+    sec.classList.toggle("is-collapsed", !!map[key]);
+  }
+  function toggleSection(sec) {
+    var map = loadCollapsed();
+    var key = sec.getAttribute("data-sec") || "";
+    var nowCollapsed = !sec.classList.contains("is-collapsed");
+    sec.classList.toggle("is-collapsed", nowCollapsed);
+    if (nowCollapsed) map[key] = 1; else delete map[key];
+    saveCollapsed(map);
+  }
+  function wireSectionToggles() {
+    Array.prototype.forEach.call(els.detail.querySelectorAll(".detail-section"), function (sec) {
+      applyCollapsedState(sec);
+      var t = sec.querySelector(".section-toggle");
+      if (!t) return;
+      t.addEventListener("click", function () { toggleSection(sec); });
+      t.addEventListener("keydown", function (ev) {
+        if (ev.key === "Enter" || ev.key === " " || ev.key === "Spacebar") {
+          ev.preventDefault(); toggleSection(sec);
+        }
+      });
+    });
   }
 
   // ── 画像ズーム(ライトボックス) ──
@@ -358,201 +319,59 @@
     return esc(String(v));
   }
 
+  // ⑤ 折り畳めるsection見出し。タイトルクリックで開閉(右端の▾で状態表示)。
+  function sectionTitle(title, countText) {
+    return '<h3 class="section-title section-toggle" role="button" tabindex="0" aria-label="' +
+        esc(title) + 'を開閉">' +
+      esc(title) +
+      (countText ? ' <span class="section-count">' + esc(countText) + "</span>" : "") +
+      '<span class="sec-caret" aria-hidden="true">▾</span>' +
+    "</h3>";
+  }
+
+  // ★読み取り専用の一覧に戻した(Chami ①④=手元の変更/手元メモは不要)。正本(persona_avatars.json / R2)へ
+  //   足すのは「直接アップロード」だけ=削除/並び替え/手元メモのスクラッチパッドは廃止。画像は全部そのまま出す。
   function renderAvatarSection(icon, name) {
     var urls = normalizeUrls(icon && icon.url);
     var count = urls.length;
-    var ed = personaEdits(name);
-    var removedSet = {};
-    (ed.removed || []).forEach(function (u) { removedSet[u] = 1; });
-    var ordered = applyOrder(urls, ed.order || []);   // 手元の並び替えを適用した表示順
-    var reordered = !!reorderInfo(name);
-    var sp = splitRemoved(name);                       // stale=現行画像に無い亡霊の削除指定
-
-    // ★削除したものは表から消す(Chami msg1546525688914251846)。ordered から removed を除いた
-    //   「適用後に残る」ものだけを本体グリッドへ出す。削除指定は下の av-removed 帯へ畳んで戻せる。
-    // #番号は現行正本での自然順(並び替えても番号は動かさない=人事部門がidで指せるように)。
-    var visible = ordered.filter(function (u) { return !removedSet[u]; });
-    var cells = visible.map(function (u) {
-      var i = urls.indexOf(u);
+    var cells = urls.map(function (u, i) {
       return '<div class="av-cell" data-url="' + esc(u) + '">' +
-        '<span class="av-drag" draggable="true" title="ドラッグで並び替え(手元メモ)">⠿</span>' +
         '<img class="avatar-thumb" src="' + esc(u) + '" alt="" loading="lazy">' +
         '<span class="av-label">#' + (i + 1) + ' <span class="av-id">' + esc(shortId(u)) + "</span></span>" +
-        '<button class="av-btn av-del" data-act="remove" data-url="' + esc(u) + '">🗑 削除</button>' +
       "</div>";
     });
-    // 削除指定(現行画像に在るもの)は本体グリッドから外し、畳んだ「削除予定」帯で戻せるようにする。
-    var removedHtml = "";
-    if (sp.live.length) {
-      removedHtml = '<div class="av-removed">' +
-        '<div class="av-removed-head">削除予定 ' + sp.live.length + '件(反映すると正本から消える・戻せる)</div>' +
-        '<div class="av-removed-list">' +
-          sp.live.map(function (u) {
-            return '<span class="av-removed-chip">#' + (urls.indexOf(u) + 1) +
-              ' <span class="av-id">' + esc(shortId(u)) + '</span>' +
-              '<button class="av-btn av-undo" data-act="undo-remove" data-url="' + esc(u) + '">↩ 戻す</button></span>';
-          }).join("") +
-        '</div></div>';
-    }
-
-    // 亡霊の削除指定(不具合B)=現行画像のどれも指していない。黙って出さず、ここで明示して選ばせる。
-    var staleHtml = "";
-    if (sp.stale.length) {
-      staleHtml = '<div class="av-stale">' +
-        '<div class="av-stale-head">⚠ この削除指定は現在の画像に無い(データが更新された)。変更メモには「未解決(要再確認)」として載る。</div>' +
-        sp.stale.map(function (u) {
-          return '<div class="av-stale-row"><span class="av-id">id ' + esc(shortId(u)) + '</span>' +
-            '<button class="av-btn av-undo" data-act="undo-remove" data-url="' + esc(u) + '">この指定を消す</button></div>';
-        }).join("") +
-      "</div>";
-    }
-    var added = (ed.added || []).map(function (a) {
-      return '<div class="av-cell is-added">' +
-        '<img class="avatar-thumb" src="' + esc(a.dataUrl) + '" alt="" loading="lazy">' +
-        '<span class="av-label">追加 <span class="av-id">' + esc(a.name || "") + "</span></span>" +
-        '<span class="av-tag av-tag-add">追加予定</span><button class="av-btn av-undo" data-act="undo-add" data-id="' + esc(a.id) + '">↩ 取消</button>' +
-      "</div>";
-    });
-    var body = (cells.length || added.length) ? cells.concat(added).join("") : '<div class="section-empty">画像なし</div>';
+    var body = cells.length ? cells.join("") : '<div class="section-empty">画像なし</div>';
     return "" +
-      '<section class="detail-section av-section" data-name="' + esc(name) + '">' +
-        '<h3 class="section-title">アイコン差分 <span class="section-count">(' + count + "枚)</span></h3>" +
-        '<div class="avatar-grid av-grid">' + body + "</div>" +
-        removedHtml +
-        staleHtml +
-        '<div class="av-actions">' +
-          '<button class="av-add-btn av-up-btn" data-act="upload">⬆ 直接アップロード(正本へ)</button>' +
-          '<button class="av-add-btn av-add-local" data-act="add">＋ 手元メモに追加</button>' +
-          '<button class="av-token-btn" data-act="settoken">🔑 トークン' + (getSyncToken() ? "設定済" : "未設定") + '</button>' +
-          (reordered ? '<button class="av-btn av-undo av-order-reset" data-act="reset-order">↩ 並び替えを戻す</button>' : "") +
-          '<input type="file" class="av-file" accept="image/*" hidden>' +
-          '<input type="file" class="av-file-up" accept="image/*" hidden>' +
+      '<section class="detail-section av-section" data-name="' + esc(name) + '" data-sec="アイコン差分">' +
+        sectionTitle("アイコン差分", "(" + count + "枚)") +
+        '<div class="section-body">' +
+          '<div class="avatar-grid av-grid">' + body + "</div>" +
+          '<div class="av-actions">' +
+            '<button class="av-add-btn av-up-btn" data-act="upload">⬆ 直接アップロード(正本へ)</button>' +
+            '<input type="file" class="av-file-up" accept="image/*" hidden>' +
+          "</div>" +
+          '<div class="av-upmsg" hidden></div>' +
+          '<p class="av-hint"><b>Discord添付は不要。</b>「直接アップロード」を押して画像を選ぶだけで正本へ入る(書き込みトークンはページ下部で1回だけ設定する=ページには埋め込まない)。取り込み常駐が動けば数十秒で台帳に反映される。<br>ネット越しが使えない時の別口=取り込みフォルダ <code>local/persona_inbox/&lt;キャラ名&gt;/</code> に置いて <code>scripts/hr/ingest_persona_images.py</code>。サムネはクリックで拡大できる。</p>' +
         "</div>" +
-        '<div class="av-upmsg" hidden></div>' +
-        '<p class="av-hint"><b>Discord添付は不要。</b>「直接アップロード」を押して画像を選ぶだけで正本へ入る(この端末に書き込みトークンを1回だけ設定する=🔑ボタン。ページには埋め込まない)。取り込み常駐が動けば数十秒で台帳に反映される。<br>ネット越しが使えない時の別口=取り込みフォルダ <code>local/persona_inbox/&lt;キャラ名&gt;/</code> に置いて <code>scripts/hr/ingest_persona_images.py</code>。「手元メモに追加」はこの端末だけの下書き(未反映)。サムネはクリックで拡大できる。<br>並び順は左の ⠿ をドラッグで変えられる(これも手元メモ=変更メモで人事部門へ伝わる。正本には書かない)。</p>' +
       "</section>";
   }
 
-  // ── 手元編集(差分の追加/削除・localStorageスクラッチパッド) ──
+  // ── アイコンの直接アップロードだけを配線(①④=手元メモ/削除/並び替えは廃止・読み取り専用)。
+  //   トークン設定はページ下部(renderFooter)へ移した(③)。ここでは未設定なら下部設定を促して中止する。
   function wireAvatarButtons(name) {
     var sec = els.detail.querySelector(".av-section");
     if (!sec) return;
     Array.prototype.forEach.call(sec.querySelectorAll("[data-act]"), function (btn) {
       btn.addEventListener("click", function () {
         var act = btn.getAttribute("data-act");
-        if (act === "remove") markRemove(name, btn.getAttribute("data-url"), true);
-        else if (act === "undo-remove") markRemove(name, btn.getAttribute("data-url"), false);
-        else if (act === "undo-add") undoAdd(name, btn.getAttribute("data-id"));
-        else if (act === "add") { var f = sec.querySelector(".av-file"); if (f) f.click(); }
-        else if (act === "upload") {
-          if (!getSyncToken() && !setSyncToken()) { setUploadMsg("トークン未設定=中止した(🔑で1回だけ設定が要る)。", true); return; }
+        if (act === "upload") {
+          if (!getSyncToken() && !setSyncToken()) { setUploadMsg("トークン未設定=中止した(ページ下部で1回だけ設定が要る)。", true); return; }
           var fu = sec.querySelector(".av-file-up"); if (fu) fu.click();
         }
-        else if (act === "settoken") { setSyncToken(); if (state.selected) renderDetail(state.selected); }
-        else if (act === "reset-order") {
-          var edo = personaEdits(name); edo.order = [];
-          setPersonaEdits(name, edo);
-          refreshAfterEdit(name);
-        }
       });
     });
-    var file = sec.querySelector(".av-file");
-    if (file) file.addEventListener("change", function () { handleAddFile(name, file.files && file.files[0]); file.value = ""; });
     var fileUp = sec.querySelector(".av-file-up");
     if (fileUp) fileUp.addEventListener("change", function () { directUpload(name, fileUp.files && fileUp.files[0]); fileUp.value = ""; });
-  }
-
-  // ── アイコンの並び替え(ドラッグ・不具合C) ──
-  // .av-cell 内の ⠿ ハンドルだけを draggable にする=サムネのクリック(ライトボックス拡大)と衝突しない。
-  // 並び順は localStorage(edits.order=URL配列)に貯め、変更メモへ載せる(★正本には書かない)。
-  // renderDetail のたびに innerHTML ごと作り直す=リスナーは常に新要素へ付くので二重登録は起きない。
-  function wireAvatarDrag(name) {
-    var sec = els.detail.querySelector(".av-section");
-    if (!sec) return;
-    var grid = sec.querySelector(".av-grid");
-    if (!grid) return;
-    var cells = Array.prototype.slice.call(grid.querySelectorAll(".av-cell[data-url]"));
-    if (cells.length < 2) return; // 1枚以下は並び替え不能
-    var dragUrl = null;
-
-    function clearDropMarks() {
-      cells.forEach(function (c) { c.classList.remove("is-drop-before", "is-drop-after"); });
-    }
-    function endDrag() {
-      dragUrl = null;
-      clearDropMarks();
-      cells.forEach(function (c) { c.classList.remove("is-dragging"); });
-    }
-    cells.forEach(function (cell) {
-      var handle = cell.querySelector(".av-drag");
-      if (handle) {
-        handle.addEventListener("dragstart", function (e) {
-          dragUrl = cell.getAttribute("data-url");
-          cell.classList.add("is-dragging");
-          // Firefoxは setData 無しだとドラッグ自体が始まらない
-          try { e.dataTransfer.setData("text/plain", dragUrl); e.dataTransfer.effectAllowed = "move"; } catch (err) {}
-        });
-        handle.addEventListener("dragend", endDrag);
-      }
-      cell.addEventListener("dragover", function (e) {
-        if (!dragUrl || dragUrl === cell.getAttribute("data-url")) return;
-        e.preventDefault(); // drop を許可
-        try { e.dataTransfer.dropEffect = "move"; } catch (err) {}
-        var r = cell.getBoundingClientRect();
-        var before = e.clientY < r.top + r.height / 2;
-        clearDropMarks();
-        cell.classList.add(before ? "is-drop-before" : "is-drop-after");
-      });
-      cell.addEventListener("dragleave", function () {
-        cell.classList.remove("is-drop-before", "is-drop-after");
-      });
-      cell.addEventListener("drop", function (e) {
-        if (!dragUrl) return;
-        e.preventDefault();
-        var target = cell.getAttribute("data-url");
-        if (target === dragUrl) { endDrag(); return; }
-        var r = cell.getBoundingClientRect();
-        var before = e.clientY < r.top + r.height / 2;
-        // 今画面に出ている順(=applyOrder適用済み)から新しい順を組む
-        var disp = cells.map(function (c) { return c.getAttribute("data-url"); });
-        disp.splice(disp.indexOf(dragUrl), 1);
-        var to = disp.indexOf(target);
-        disp.splice(before ? to : to + 1, 0, dragUrl);
-        endDrag();
-        applyReorder(name, disp);
-      });
-    });
-  }
-
-  function applyReorder(name, dispOrder) {
-    var urls = currentUrls(name);
-    var same = dispOrder.length === urls.length;
-    if (same) {
-      for (var i = 0; i < urls.length; i++) {
-        if (dispOrder[i] !== urls[i]) { same = false; break; }
-      }
-    }
-    var ed = personaEdits(name);
-    ed.removed = ed.removed || []; ed.added = ed.added || [];
-    ed.order = same ? [] : dispOrder.slice(); // 自然順へ戻したら並び替え指定ごと消す
-    setPersonaEdits(name, ed);
-    refreshAfterEdit(name);
-  }
-
-  function markRemove(name, url, on) {
-    if (!url) return;
-    var ed = personaEdits(name); ed.removed = ed.removed || []; ed.added = ed.added || [];
-    var i = ed.removed.indexOf(url);
-    if (on && i < 0) ed.removed.push(url);
-    if (!on && i >= 0) ed.removed.splice(i, 1);
-    setPersonaEdits(name, ed);
-    refreshAfterEdit(name);
-  }
-
-  function undoAdd(name, id) {
-    var ed = personaEdits(name); ed.added = (ed.added || []).filter(function (a) { return a.id !== id; });
-    setPersonaEdits(name, ed);
-    refreshAfterEdit(name);
   }
 
   // ── 範囲トリミング(画像を編集)。追加/直接アップロードの前に、適用する矩形をChamiが厳密に選ぶ。
@@ -760,19 +579,6 @@
     return new Blob([arr], { type: mime || "application/octet-stream" });
   }
 
-  function handleAddFile(name, file) {
-    if (!file) return;
-    // ★追加前に範囲トリミング(Chami msg1546525688914251846)。適用した矩形だけを手元メモへ入れる。
-    openCropper(file, function (res) {
-      if (!res) return; // キャンセル
-      var ed = personaEdits(name); ed.added = ed.added || []; ed.removed = ed.removed || [];
-      state.addSeq += 1;
-      ed.added.push({ id: "local-" + state.addSeq, name: file.name || "image", dataUrl: res.dataUrl });
-      setPersonaEdits(name, ed);
-      refreshAfterEdit(name);
-    });
-  }
-
   // ── 直接アップロード(ページ→正本)。PUT /api/img(先)→ POST /api/persona/enqueue ──
   function getSyncToken() {
     try { return localStorage.getItem(TOKEN_KEY) || ""; } catch (e) { return ""; }
@@ -841,106 +647,57 @@
     });
   }
 
-  function refreshAfterEdit(name) {
-    renderList();
-    renderEditBar();
-    if (state.selected) renderDetail(state.selected);
+  // ── ページ下部(③トークン設定 + ⑥まとめ置き場フォルダ)。各キャラの中からは外し、ここに1回だけ出す。
+  function renderFooter() {
+    if (!els.footer) return;
+    var meta = state.meta || {};
+    var src = meta._sources || {};
+    // ⑥ 各キャラの「設定所在」は廃止。設定はここ1か所にまとまっている、という置き場フォルダだけを出す。
+    var folderRows = [
+      ["アイコン差分", src.アイコン],
+      ["口調ルール", src.口調],
+      ["呼称ルール", src.呼称],
+      ["原典(character file)", src.原典]
+    ].map(function (pair) {
+      var v = pair[1];
+      var content = v
+        ? '<code class="path-code copyable" data-copy="' + esc(v) + '" title="クリックでコピー">' + esc(v) + "</code>"
+        : '<span class="val-empty">無し</span>';
+      return '<div class="source-row"><span class="source-k">' + esc(pair[0]) + "</span>" + content + "</div>";
+    }).join("");
+
+    var hasToken = !!getSyncToken();
+    els.footer.innerHTML =
+      '<section class="footer-section">' +
+        '<h3 class="footer-title">設定のまとめ置き場</h3>' +
+        '<p class="footer-note">各キャラの設定は下記のフォルダ/ファイルに集約されている(このページはそこから作った読み取り専用ビュー)。</p>' +
+        '<div class="source-list">' + folderRows + "</div>" +
+      "</section>" +
+      '<section class="footer-section">' +
+        '<h3 class="footer-title">書き込みトークン設定</h3>' +
+        '<p class="footer-note">「直接アップロード」で正本へ画像を送るための go5-sync トークンを、この端末のブラウザにだけ保存する(ページには埋め込まない)。' +
+          '現在: <span class="token-state ' + (hasToken ? "is-on" : "is-off") + '">' + (hasToken ? "設定済" : "未設定") + "</span></p>" +
+        '<div class="footer-btns">' +
+          '<button class="footer-btn" data-fact="settoken">🔑 トークンを設定/更新</button>' +
+          (hasToken ? '<button class="footer-btn footer-btn-sub" data-fact="cleartoken">消去</button>' : "") +
+        "</div>" +
+      "</section>";
+    wireFooter();
+    wireCopyButtons(els.footer);
   }
 
-  function renderEditBar() {
-    if (!els.editBar) return;
-    var names = Object.keys(state.edits);
-    var total = 0;
-    names.forEach(function (n) {
-      var e = state.edits[n];
-      total += ((e.removed || []).length) + ((e.added || []).length) + (reorderInfo(n) ? 1 : 0);
-    });
-    if (!total) { els.editBar.hidden = true; els.editBar.innerHTML = ""; return; }
-    els.editBar.hidden = false;
-    els.editBar.innerHTML =
-      '<div class="edit-bar-head">手元の変更 ' + total + "件 <span class=\"edit-bar-sub\">(未反映)</span></div>" +
-      '<div class="edit-bar-btns">' +
-        '<button class="eb-btn eb-copy">変更メモをコピー</button>' +
-        '<button class="eb-btn eb-reset">全部取り消す</button>' +
-      "</div>";
-    els.editBar.querySelector(".eb-copy").addEventListener("click", copyChangeMemo);
-    els.editBar.querySelector(".eb-reset").addEventListener("click", resetEdits);
-  }
-
-  function buildChangeMemo() {
-    var lines = ["【人格ハブ 手元の変更(正本へ反映して)】"];
-    var unresolved = [];
-    Object.keys(state.edits).sort(function (a, b) { return a.localeCompare(b, "ja"); }).forEach(function (n) {
-      var e = state.edits[n];
-      var urls = currentUrls(n);
-      var parts = [];
-      // 削除は現行データに解決できたものだけを #番号+id で出す(不具合B)。
-      // 解決できない亡霊(data.js再生成でURLが変わった等)は黙って出さず、末尾の未解決枠へ。
-      var sp = splitRemoved(n);
-      sp.live.forEach(function (u) {
-        parts.push("削除 #" + (urls.indexOf(u) + 1) + " (id " + shortId(u) + ")");
+  function wireFooter() {
+    if (!els.footer) return;
+    Array.prototype.forEach.call(els.footer.querySelectorAll("[data-fact]"), function (btn) {
+      btn.addEventListener("click", function () {
+        var fact = btn.getAttribute("data-fact");
+        if (fact === "settoken") { setSyncToken(); renderFooter(); }
+        else if (fact === "cleartoken") {
+          try { localStorage.removeItem(TOKEN_KEY); } catch (e) {}
+          renderFooter();
+        }
       });
-      sp.stale.forEach(function (u) {
-        unresolved.push("■" + n + ": 削除指定 (id " + shortId(u) + ") … 現行データに該当画像なし(データ更新で消えた可能性)");
-      });
-      if (e.added && e.added.length) parts.push("追加 " + e.added.length + "枚 (画像は local/persona_inbox/" + n + "/ に置く=Discord添付は不要)");
-      var eff = reorderInfo(n);
-      if (eff) {
-        parts.push("並び替え(新しい順・#は現行の番号): " + eff.map(function (u) {
-          return "#" + (urls.indexOf(u) + 1) + "(id " + shortId(u) + ")";
-        }).join(" → "));
-      }
-      if (parts.length) lines.push("■" + n + ": " + parts.join(" / "));
     });
-    if (unresolved.length) {
-      lines.push("");
-      lines.push("【未解決(要再確認)=現行画像に一致しない指定。このまま反映しないこと】");
-      unresolved.forEach(function (l) { lines.push(l); });
-    }
-    return lines.join("\n");
-  }
-
-  function copyChangeMemo() {
-    var memo = buildChangeMemo();
-    // ★成功した時だけ「✓ コピーした」を出す(不具合A)。失敗を成功に見せると
-    // Chamiが古いクリップボード内容を貼る=「前と一緒」事故になる。
-    copyTextChecked(memo).then(function (ok) {
-      var b = els.editBar && els.editBar.querySelector(".eb-copy"); // 再描画後でも生きている方を取る
-      if (ok) {
-        var manual = els.editBar && els.editBar.querySelector(".eb-manual");
-        if (manual) manual.parentNode.removeChild(manual);
-        if (b) { b.textContent = "✓ コピーした"; setTimeout(function () { b.textContent = "変更メモをコピー"; }, 1200); }
-      } else {
-        if (b) { b.textContent = "✗ コピー失敗(下の本文を手動で)"; setTimeout(function () { b.textContent = "変更メモをコピー"; }, 3000); }
-        showManualMemo(memo);
-      }
-    });
-  }
-
-  // 自動コピーが全滅した時の最後の砦=メモ本文を選択可能なtextareaで出す。黙って成功を装わない。
-  function showManualMemo(text) {
-    if (!els.editBar) return;
-    var old = els.editBar.querySelector(".eb-manual");
-    if (old) old.parentNode.removeChild(old);
-    var d = document.createElement("div");
-    d.className = "eb-manual";
-    d.innerHTML =
-      '<div class="eb-manual-msg">自動コピーに失敗した(権限/非フォーカス等)。下の本文を全選択して手動でコピーして(Ctrl+C / 長押し→コピー):</div>' +
-      '<textarea class="eb-manual-ta" readonly rows="8"></textarea>';
-    els.editBar.appendChild(d);
-    var ta = d.querySelector(".eb-manual-ta");
-    ta.value = text; // innerHTMLでなくvalueに入れる=エスケープ不要で安全
-    ta.addEventListener("focus", function () { ta.select(); });
-    ta.focus();
-    ta.select();
-  }
-
-  function resetEdits() {
-    state.edits = {};
-    saveEdits();
-    renderList();
-    renderEditBar();
-    if (state.selected) renderDetail(state.selected);
   }
 
   var TONE_KNOWN_KEYS = ["first_person", "second_person", "signature_tails", "plain_only", "forbidden", "forbidden_to"];
@@ -955,8 +712,8 @@
 
   function renderToneSection(tone) {
     if (!tone) {
-      return '<section class="detail-section"><h3 class="section-title">口調</h3>' +
-        '<div class="section-empty">口調ルール未登録</div></section>';
+      return '<section class="detail-section" data-sec="口調">' + sectionTitle("口調", "") +
+        '<div class="section-body"><div class="section-empty">口調ルール未登録</div></div></section>';
     }
     var body = "";
     if (tone.first_person && tone.first_person.length) body += toneRow("一人称", tone.first_person);
@@ -979,8 +736,8 @@
         return '<div class="tone-sub-label">' + esc(k) + '</div><div class="section-raw">' + esc(JSON.stringify(tone[k])) + "</div>";
       }).join("");
     }
-    return '<section class="detail-section"><h3 class="section-title">口調</h3>' +
-      (body || '<div class="section-empty">項目なし</div>') + "</section>";
+    return '<section class="detail-section" data-sec="口調">' + sectionTitle("口調", "") +
+      '<div class="section-body">' + (body || '<div class="section-empty">項目なし</div>') + "</div></section>";
   }
 
   function renderRuleTable(rows, keyField) {
@@ -1009,47 +766,32 @@
     var honorific = toWhom["敬称必須(honorific_required)"];
     var chamiEx = toWhom["Chami宛の例外"];
     var rules = toWhom["自分を対象にした個別ルール"] || [];
-    var html = '<section class="detail-section"><h3 class="section-title">呼称: この人をどう呼ぶか</h3>';
+    // ⑤ 呼称は見出しに件数を出し、折り畳めるように(見やすさ)。
+    var html = '<section class="detail-section naming-section" data-sec="呼称: この人をどう呼ぶか">' +
+      sectionTitle("呼称: この人をどう呼ぶか", "(" + rules.length + "件)") + '<div class="section-body">';
     html += '<div class="naming-meta">' +
       '<div><span class="meta-k">敬称必須</span>' + fmtVal(honorific) + "</div>" +
       '<div><span class="meta-k">Chami宛の例外</span>' + fmtVal(chamiEx) + "</div>" +
     "</div>";
     html += rules.length ? renderRuleTable(rules, "speaker") : '<div class="section-empty">個別ルールなし</div>';
-    html += "</section>";
+    html += "</div></section>";
     return html;
   }
 
   function renderNamingFromSection(fromWhom) {
     fromWhom = fromWhom || [];
-    var html = '<section class="detail-section"><h3 class="section-title">呼称: この人が誰をどう呼ぶか</h3>';
+    var html = '<section class="detail-section naming-section" data-sec="呼称: この人が誰をどう呼ぶか">' +
+      sectionTitle("呼称: この人が誰をどう呼ぶか", "(" + fromWhom.length + "件)") + '<div class="section-body">';
     html += fromWhom.length ? renderRuleTable(fromWhom, "target") : '<div class="section-empty">個別ルールなし</div>';
-    html += "</section>";
+    html += "</div></section>";
     return html;
   }
 
-  var SOURCE_LABELS = {
-    原典_characterfile: "原典(character file)",
-    口調ルール: "口調ルール",
-    呼称ルール: "呼称ルール",
-    アイコン差分: "アイコン差分",
-    スプライト: "スプライト",
-    文脈: "文脈"
-  };
+  // 設定所在の各キャラ表示は廃止(⑥)。まとめ置き場はページ下部 renderFooter に1回だけ出す。
 
-  function renderSourceSection(src) {
-    src = src || {};
-    var rows = Object.keys(SOURCE_LABELS).map(function (k) {
-      var v = src[k];
-      var content = v
-        ? '<code class="path-code copyable" data-copy="' + esc(v) + '" title="クリックでコピー">' + esc(v) + "</code>"
-        : '<span class="val-empty">無し</span>';
-      return '<div class="source-row"><span class="source-k">' + esc(SOURCE_LABELS[k]) + "</span>" + content + "</div>";
-    }).join("");
-    return '<section class="detail-section"><h3 class="section-title">設定所在</h3><div class="source-list">' + rows + "</div></section>";
-  }
-
-  function wireCopyButtons() {
-    Array.prototype.forEach.call(els.detail.querySelectorAll(".copyable"), function (node) {
+  function wireCopyButtons(root) {
+    root = root || els.detail;
+    Array.prototype.forEach.call(root.querySelectorAll(".copyable"), function (node) {
       node.addEventListener("click", function () {
         var orig = node.textContent;
         copyTextChecked(node.getAttribute("data-copy") || node.textContent).then(function (ok) {
