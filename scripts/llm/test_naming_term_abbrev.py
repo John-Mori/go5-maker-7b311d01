@@ -21,6 +21,7 @@
   ④ 呼称違反が1つも無い便でも効くこと(早期リターンの穴)
 ★ルールはここで固定する= 人事部門が正本を育てても、その都度赤にならない。
 """
+import json
 import os
 import sys
 
@@ -64,6 +65,25 @@ SAFE = [
     "発売はスクウェア・エニックスだ。",
     "ニックネームを変える口は1つだけだ。",
     "サーバー内ニックネームはUnicode可だ。",
+    # ★2026-09-09 追加= 実コーパス(00_AI-HQ と local 配下 2,002ファイル)を走査して
+    #   実在を確かめたカタカナ語。**正規のカタカナ語は閉じた集合ではない**ことの証拠で、
+    #   除外語ホワイトリスト方式を採らなかった理由そのもの(naming_gate.py の
+    #   `_TERM_ABBREV_JOIN` 上のコメント)。
+    "ヘドニック適応の話だ。",
+    "パナソニックの製品だ。",
+    "タイタニックを観た。",
+    "メカニックに任せる。",
+]
+
+# ★カタカナ隣接の穴(2026-09-09・依頼= 人事部門 DISPATCH-aegis-gl-1788918169505)。
+#   0歩目(壊れている実物)= local/llm/send_audit.jsonl L1621
+#   (2026-09-06T14:57:37 dept=hr-room persona=ククール)。
+#   「ニック」の直前が長音符「ー」だと、前後カタカナ境界で落ちて素通しになっていた。
+KATA_JOIN = [
+    ("表示名のサーバーニック設定(Snake🐍Codex)も前から怜に回ってる話だ。",
+     "表示名のサーバーニックネーム設定(Snake🐍Codex)も前から怜に回ってる話だ。"),
+    ("ユーザーニックを変えるのは怜だ。",
+     "ユーザーニックネームを変えるのは怜だ。"),
 ]
 
 # ★2026-09-06 07:02:52 に本番で起きた誤爆の実物(naming_audit.jsonl dept=hq
@@ -129,6 +149,38 @@ def main():
           == "禁止形は「ニック」だ。だが本文のニックネームは直せ。")
     check("言及: 丸括弧は囲みに入れない(補足の中の略りは直す)",
           fix("(ニックの話だ)")["fixed"] == "(ニックネームの話だ)")
+
+    # ---- 2.7) ★カタカナ隣接= 長音符「ー」の切れ目だけを捕まえる ----
+    print("[2.7] カタカナ隣接(長音符の切れ目)")
+    for src, want in KATA_JOIN:
+        r = fix(src, persona="ククール", dept="hr-room")
+        check(f"長音: {src[:14]}… が伸びる", r["fixed"] == want)
+        check("長音: applied は reason=term_abbrev",
+              [a for a in r["applied"] if a.get("reason") == "term_abbrev"])
+    check("長音: 既に正式形なら二重に伸ばさない",
+          fix("サーバーニックネームはUnicode可だ。")["fixed"]
+          == "サーバーニックネームはUnicode可だ。")
+    check("長音: 事故の引用(「サーバーニック設定」)は既存の引用マスクが守る",
+          fix("14:57の便に「サーバーニック設定」って書いてた。",
+              persona="ククール", dept="hr-room")["fixed"]
+          == "14:57の便に「サーバーニック設定」って書いてた。")
+    check("長音: 半角長音も同じ扱い",
+          fix("ｻｰﾊﾞｰニックを直す。")["fixed"] == "ｻｰﾊﾞｰニックネームを直す。")
+    # ★台帳側の逃げ道= 化ける語が出たら**コードではなく呼称ルール.json で殺す**。
+    #   正本は人事部門(この部屋は鍵を読むだけ)。fail-open: 鍵が無ければ挙動は変わらない。
+    check("除外: exempt が無ければ長音の枝は効く(ミューニック=理論上の誤爆)",
+          fix("ミューニックへ飛ぶ。")["fixed"] == "ミューニックネームへ飛ぶ。")
+    EX = json.loads(json.dumps(RULES))
+    EX["abbreviation_forbidden"]["ニックネーム"]["autofix_exempt"] = ["ミューニック"]
+    check("除外: exempt に載せた語は台帳だけで殺せる",
+          fix("ミューニックへ飛ぶ。", rules=EX)["fixed"] == "ミューニックへ飛ぶ。")
+    check("除外: exempt は本物の略りまでは殺さない",
+          fix("サーバーニックを直す。", rules=EX)["fixed"] == "サーバーニックネームを直す。")
+    check("除外: 鍵が無い/形が違えば空(fail-open)",
+          ng._term_abbrev_exempt(RULES, "ニックネーム") == frozenset()
+          and ng._term_abbrev_exempt(None, "ニックネーム") == frozenset()
+          and ng._term_abbrev_exempt({"abbreviation_forbidden": {"x": 1}}, "x")
+          == frozenset())
 
     # ---- 3) autofix を立てていない規則は挙動不変(C-035) ----
     print("[3] 既存規則の不変(C-035)")
@@ -204,6 +256,29 @@ def main():
               and "forbidden_forms=[ニックネーム]" in r2["fixed"])
         check("must-fail: 囲み除外の前には TERM_ABBREV_QUOTE_PAIRS が無い",
               not hasattr(old2, "TERM_ABBREV_QUOTE_PAIRS"))
+
+    # 長音の切れ目を入れる直前の写し= 囲み除外まで在るが、カタカナ隣接で落ちる世界。
+    bak3 = os.path.join(HERE, "naming_gate.py.bak_20260909_nick_kata")
+    if not os.path.exists(bak3):
+        check("must-fail: カタカナ隣接修正前の .bak が在る(C-003)", False)
+    else:
+        import importlib.machinery
+        import importlib.util
+        loader = importlib.machinery.SourceFileLoader("naming_gate_nokata", bak3)
+        spec = importlib.util.spec_from_loader("naming_gate_nokata", loader)
+        old3 = importlib.util.module_from_spec(spec)
+        loader.exec_module(old3)
+        src3, want3 = KATA_JOIN[0]
+        r3 = old3.naming_corrections("ククール", "hr-room", src3, RULES)
+        check("must-fail: 長音の切れ目の前は事故の実物を素通ししていた",
+              r3["fixed"] == src3 and r3["fixed"] != want3)
+        check("must-fail: 長音の切れ目の前には _TERM_ABBREV_JOIN が無い",
+              not hasattr(old3, "_TERM_ABBREV_JOIN"))
+        check("must-fail: 前の世界でもカタカナ語は無事だった(緩めた訳ではない証拠)",
+              old3.naming_corrections("ククール", "hr-room",
+                                      "パニックになったりしないようだな。",
+                                      RULES)["fixed"]
+              == "パニックになったりしないようだな。")
 
     print()
     ng_fail = [n for n, ok in results if not ok]

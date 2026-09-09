@@ -755,25 +755,86 @@ TERM_ABBREV_QUOTE_PAIRS = {
 }
 
 
-def _term_abbrev_spans(s, form):
-    """略形の「前後どちらもカタカナでない」出現を [(start, end)] で返す。
+# ★カタカナ隣接の穴(2026-09-09・依頼= 人事部門 DISPATCH-aegis-gl-1788918169505)=========
+#   壊れた実物= `local/llm/send_audit.jsonl` L1621(2026-09-06T14:57:37 dept=hr-room
+#   persona=ククール)「表示名の**サーバーニック設定**(Snake🐍Codex)も前から怜に回ってる」。
+#   直前が長音符「ー」なので上の境界(前後どちらもカタカナでない)で落ちていた。
+#   ★ここを「カタカナ隣接も捕まえる」へ素朴に広げてはいけない= 実測(2026-09-09・
+#     00_AI-HQ と local 配下 2,002ファイル / 「ニック」769出現)で、カタカナ隣接の
+#     最大カタカナ連続は パニック46・テクニック34+1・クリニック11+3・スクウェア-
+#     エニックス11+1・ピクニック4・**ヘドニック4**・**パナソニック3** …と続く。
+#     ★ヘドニック/パナソニックが示すとおり**正規のカタカナ語は閉じた集合ではない**=
+#     除外語ホワイトリストは必ず穴が空き、穴は「本文が化ける」側へ倒れる。採らない。
+#   ★採ったのは**複合語の切れ目=長音符**だけ。「ー」は語末に来る音で、外来語1語の
+#     内部で「ー」の直後に略形が続く形はほぼ存在しない(=切れ目の合図)。
+#     実測= 長音符直前の「ニック」は 49件、その内訳は
+#       ・サーバーニックネーム 38件(**既に正式形**=下の `to in run` で落ちる)
+#       ・サーバーニック 11件(**全部が本物の略り**)
+#     で、正規のカタカナ語は**1件も掛からない**(誤爆0)。
+#   ★言及(お詫び便が壊れた本文を「サーバーニック設定」と引く形)は、この関数へ来る前に
+#     `_mask_quoted_mentions`(同一行・60字上限)が覆っている=別に足す必要はない。
+#   ★それでも化ける語が出たら、**コードではなく台帳で殺す**=呼称ルール.json の
+#     当該規則へ `"autofix_exempt": ["ミューニック", …]`(正本=人事部門)。
+#     fail-open: 鍵が無ければ空=挙動は変わらない。
+_TERM_ABBREV_JOIN = ("ー", "ｰ")     # 全角/半角の長音符だけ。中黒「・」は入れない
 
+
+def _term_abbrev_katakana_run(s, i, end):
+    """位置 i〜end を含む「最大のカタカナ連続」を返す(判定の材料)。"""
+    left = i
+    while left > 0 and _is_katakana(s[left - 1]):
+        left -= 1
+    right = end
+    while right < len(s) and _is_katakana(s[right]):
+        right += 1
+    return s[left:right]
+
+
+def _term_abbrev_exempt(rules, full):
+    """規則ごとの除外語(カタカナ連続そのもの)を集合で返す。fail-open: 形が違えば空。"""
+    try:
+        spec = ((rules or {}).get("abbreviation_forbidden") or {}).get(full) or {}
+        if not isinstance(spec, dict):
+            return frozenset()
+        return frozenset(str(x) for x in (spec.get("autofix_exempt") or []) if str(x or ""))
+    except Exception:
+        return frozenset()
+
+
+def _term_abbrev_spans(s, form, to="", exempt=()):
+    """略形を正式形へ伸ばしてよい出現を [(start, end)] で返す。
+
+    採るのは2つの形だけ:
+      ① 前後どちらもカタカナでない単独出現(2026-09-06 から在る枠)
+      ② 直前が**長音符**で直後がカタカナでない出現(複合語の切れ目=上のコメント)
     ★囲み記号がその語だけをぴったり挟んでいる形(`[ニック]` `「ニック」`)は**言及**
       なので落とす(上のコメントの事故)。
     """
     out = []
     start = 0
+    to = str(to or "")
+    exempt = frozenset(exempt or ())
     while True:
         i = s.find(form, start)
         if i < 0:
             break
         end = i + len(form)
+        start = i + 1
         before = s[i - 1] if i > 0 else ""
         after = s[end] if end < len(s) else ""
-        quoted = TERM_ABBREV_QUOTE_PAIRS.get(before) == after and after != ""
-        if (not _is_katakana(before)) and (not _is_katakana(after)) and not quoted:
-            out.append((i, end))
-        start = i + 1
+        if TERM_ABBREV_QUOTE_PAIRS.get(before) == after and after != "":
+            continue                              # 言及(その語だけを括った形)
+        if _is_katakana(after):
+            continue                              # 後ろへ続く=別の語の頭(ニックネーム/エニックス)
+        if not _is_katakana(before):
+            out.append((i, end))                  # ①既存の枠(1文字も変えていない)
+            continue
+        if before not in _TERM_ABBREV_JOIN:
+            continue                              # ②以外のカタカナ隣接は従来どおり触らない
+        run = _term_abbrev_katakana_run(s, i, end)
+        if (to and to in run) or run in exempt:
+            continue                              # 既に正式形 / 人事が除外した語
+        out.append((i, end))
     return out
 
 
@@ -1504,7 +1565,8 @@ def naming_corrections(persona, dept, text, rules, vocative_only=None):
         if term_specs:
             for form, to, full in term_specs:
                 n = 0
-                for i, end in _term_abbrev_spans(masked, form):
+                for i, end in _term_abbrev_spans(
+                        masked, form, to, _term_abbrev_exempt(rules, full)):
                     repls.append((i, end, to))
                     n += 1
                 if not n:
