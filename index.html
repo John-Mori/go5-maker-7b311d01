@@ -14,7 +14,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="5秒動画">
 <meta name="theme-color" content="#0b0f17">
-<link rel="manifest" href="manifest.webmanifest?v=938">
+<link rel="manifest" href="manifest.webmanifest?v=939">
 <link rel="apple-touch-icon" href="assets/icons/app-180.png?v=938">
 <link rel="icon" type="image/png" sizes="192x192" href="assets/icons/app-192.png?v=938">
 <link rel="icon" type="image/png" sizes="512x512" href="assets/icons/app-512.png?v=938">
@@ -23,7 +23,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=938">
+<link rel="stylesheet" href="style.css?v=939">
 <script>
 /* 継ぎ目対策(2026-07-29): タブ背景のCSSフック(data-tab)を「描画前」に確定させる。
    これが無いと、復元先タブ(予約/分析/候補/ランキング)のクリーム封鎖が効くのは
@@ -123,6 +123,13 @@ try {
     <label for="photo" class="photo-btn photo-btn-sm" id="photoBtn">📷 写真を選ぶ / 撮る</label>
     <input id="photo" type="file" accept="image/*" hidden>
     <div class="hint" id="photoName">未選択</div>
+    <div id="bgVideoDrop" class="bg-video-drop" role="button" tabindex="0" aria-label="背景動画を選ぶかドロップ">
+      <label class="field-label" for="bgVideoFile">背景動画(任意)</label>
+      <span class="hint">ここへ動画をドロップ、またはタップして選択</span>
+      <input id="bgVideoFile" type="file" accept="video/*" hidden>
+      <div class="hint" id="bgVideoName">既定の背景動画を使用</div>
+      <button id="bgVideoClear" class="ghost" type="button" hidden>既定の背景へ戻す</button>
+    </div>
     <div class="movie-attrs">
       <div class="field-label" style="margin:10px 0 4px;font-size:.8rem;">この動画のカテゴリ(複数選択可・キャラ無し＝オリジナル)</div>
       <!-- カテゴリのチェックボックスは categories-ui.js が Go5Cats(core/categories.js)から動的に描画する。
@@ -189,6 +196,7 @@ try {
         <div class="preview-wrap">
           <div class="canvas-box">
             <canvas id="cv" width="1080" height="1920"></canvas>
+            <button id="cropDragHandle" class="crop-drag-handle" type="button" aria-label="画像の表示範囲をドラッグで移動" title="ここをドラッグして画像の表示範囲を移動">範囲移動</button>
             <!-- YouTube切れ範囲ガイドは廃止(Chami依頼2026-07-31)。切れ範囲を明示する代わりに、
                  前景画像を最初から安全域(中央82%幅)へ自動フィットさせて端が欠けないようにした(app.js FG_SAFE_W_RATIO)。 -->
           </div>
@@ -230,6 +238,13 @@ try {
                 <button class="ctl-btn" id="iyMinus" type="button" aria-label="画像を上へ">−</button>
                 <button class="ctl-btn" id="iyPlus" type="button" aria-label="画像を下へ">＋</button>
               </div>
+              <div class="promo-dpad-cap">画像の表示範囲</div>
+              <div class="promo-size-val" id="cropVal">100%</div>
+              <div class="promo-size">
+                <button class="ctl-btn" id="cropMinus" type="button" aria-label="画像の表示範囲を広くする">−</button>
+                <button class="ctl-btn" id="cropPlus" type="button" aria-label="画像の表示範囲を狭くする">＋</button>
+              </div>
+              <button id="cropReset" class="crop-reset" type="button">範囲を戻す</button>
             </div>
           </div>
         </div>
@@ -244,7 +259,7 @@ try {
           </select>
           <button type="button" id="promoTypeToggle" class="promo-type-btn" title="タップで ◯%OFF / ¥価格 を切り替え">◯%OFF</button>
         </label>
-        <div class="hint" id="previewZoomHint" style="text-align:center;margin-top:2px;">ラベルは指でドラッグして移動・画像の拡大縮小/上下移動はプレビュー横のボタンで</div>
+        <div class="hint" id="previewZoomHint" style="text-align:center;margin-top:2px;">ラベルは札の上だけをドラッグして移動。画像の表示範囲は左上の「範囲移動」だけをドラッグ</div>
         <!-- 実機(YouTube)は縦長端末で動画を画面高いっぱいに拡大し左右各約9%を切り落とす(cover)。
              ONにするとプレビューの表示だけを実機の可視域(中央82%幅・全高)に合わせる=書き出す動画は不変。
              Chami依頼2026-08-15「実際の動画に動画作成タブ内のプレビューを合わせたい」。 -->
@@ -940,7 +955,7 @@ try {
 <script src="core/video-integrity.js?v=938"></script>
 <!-- ── 機能層 ─────────────────────────────────────────────────────────────── -->
 <script src="js/idgen.js?v=938"></script>
-<script src="js/app.js?v=938"></script>
+<script src="js/app.js?v=939"></script>
 <script src="js/promo-label.js?v=938"></script>
 <script src="js/affiliate-core.js?v=938"></script>
 <script src="js/fanza-core.js?v=938"></script>

@@ -147,6 +147,10 @@
   let fgImg = null;               // 前景画像
   let fgFile = null;              // 実際に動画生成へ使った元ファイル(投稿履歴の使用画像を候補画像と分離して記録)
   let fgLoadSeq = 0;
+  // 表示範囲は元画像の中央を基準にした切り抜き。scale=1 は従来どおり全体を使う。
+  // 移動開始はキャンバス左上の専用ハンドルだけに限定し、画像やラベルの誤操作を防ぐ。
+  const fgCrop = { scale: 1, x: 0.5, y: 0.5 };
+  let customBgUrl = '';
   const K_PHOTO_CACHE = 'movie_photo_cache'; // リロード後の前景画像復元用キャッシュ
   let fontReady = false;
   let lastBlob = null, lastName = "video.mp4";
@@ -413,11 +417,15 @@
       if (a > 0) {
         // フィット倍率 × ユーザーの拡大率(OFF.imgScale)。プレビューも書き出しも同じ式=見た目と動画が一致する。
         // 幅は安全域(FG_SAFE_W_RATIO=82%)で、高さは FG_MAX_RATIO(92%)でフィット=左右の切れを自動で防ぐ。
-        const base = Math.min(W * FG_SAFE_W_RATIO / fgImg.width, H * FG_MAX_RATIO / fgImg.height) * (OFF.imgScale || 1);
+        const cropScale = Math.max(1, fgCrop.scale || 1);
+        const sw = fgImg.width / cropScale, sh = fgImg.height / cropScale;
+        const sx = (fgImg.width - sw) * Math.max(0, Math.min(1, fgCrop.x));
+        const sy = (fgImg.height - sh) * Math.max(0, Math.min(1, fgCrop.y));
+        const base = Math.min(W * FG_SAFE_W_RATIO / sw, H * FG_MAX_RATIO / sh) * (OFF.imgScale || 1);
         const sc = (a < 1 && FG_ZOOM > 0) ? base * ((1 - FG_ZOOM) + FG_ZOOM * a) : base;
-        const fw = fgImg.width * sc, fh = fgImg.height * sc;
+        const fw = sw * sc, fh = sh * sc;
         ctx.globalAlpha = a;
-        ctx.drawImage(fgImg, (W - fw) / 2, H * (FG_CENTER_Y + OFF.whole + (OFF.imgY || 0)) - fh / 2, fw, fh);  // 軸1：全体オフセット＋画像だけの個別オフセット(OFF.imgY)
+        ctx.drawImage(fgImg, sx, sy, sw, sh, (W - fw) / 2, H * (FG_CENTER_Y + OFF.whole + (OFF.imgY || 0)) - fh / 2, fw, fh);  // 軸1：全体オフセット＋画像だけの個別オフセット(OFF.imgY)
         ctx.globalAlpha = 1;
       }
     }
@@ -460,7 +468,7 @@
   }
   function bgRestoreSrc_() {
     try {
-      var want = (ACCOUNTS[curAccount] && ACCOUNTS[curAccount].bg) || ACCOUNTS.acc1.bg;
+      var want = customBgUrl || (ACCOUNTS[curAccount] && ACCOUNTS[curAccount].bg) || ACCOUNTS.acc1.bg;
       var cur = bg.getAttribute("src") || "";
       if (!cur.endsWith(want)) { bg.src = want; try { bg.load(); } catch (e) {} }
     } catch (e) {}
@@ -518,6 +526,8 @@
   }
   function loadForegroundFile_(f) {
     if (!f) return false;
+    // 別の写真へ切り替えた時、前の写真の切り抜き位置を引き継いで見失わせない。
+    fgCrop.scale = 1; fgCrop.x = 0.5; fgCrop.y = 0.5; updateCropUi_();
     const loadSeq = ++fgLoadSeq;
     fgFile = f;
     els.photoName.textContent = anonPhotoLabel_(f);
@@ -544,6 +554,65 @@
     // 候補転送は __go5FgCandAt を直前に打つ=1.5秒以内なら候補由来とみなす(取り違え防止・Chami 2026-08-24)。
     if (Date.now() - (window.__go5FgCandAt || 0) > 1500) window.__go5MovieSrcMark = null;
   });
+
+  function updateCropUi_() {
+    var el = $("cropVal"); if (el) el.textContent = Math.round((fgCrop.scale || 1) * 100) + "%";
+  }
+  function setCropScale_(delta) {
+    fgCrop.scale = Math.max(1, Math.min(3, +(fgCrop.scale + delta).toFixed(2)));
+    updateCropUi_(); preview();
+  }
+  function resetCrop_() { fgCrop.scale = 1; fgCrop.x = 0.5; fgCrop.y = 0.5; updateCropUi_(); preview(); }
+  var cropMinus = $("cropMinus"), cropPlus = $("cropPlus"), cropReset = $("cropReset");
+  if (cropMinus) cropMinus.addEventListener("click", function () { setCropScale_(-0.1); });
+  if (cropPlus) cropPlus.addEventListener("click", function () { setCropScale_(0.1); });
+  if (cropReset) cropReset.addEventListener("click", resetCrop_);
+  (function wireCropHandle_() {
+    var handle = $("cropDragHandle"); if (!handle || !window.PointerEvent) return;
+    var drag = null;
+    handle.addEventListener("pointerdown", function (ev) {
+      if (!fgImg || fgCrop.scale <= 1) return;
+      drag = { x: ev.clientX, y: ev.clientY, cx: fgCrop.x, cy: fgCrop.y };
+      try { handle.setPointerCapture(ev.pointerId); } catch (e) {}
+      ev.preventDefault(); ev.stopPropagation();
+    });
+    handle.addEventListener("pointermove", function (ev) {
+      if (!drag) return;
+      var box = cv.getBoundingClientRect(); if (!box.width || !box.height) return;
+      // 指の移動と反対方向へ表示範囲を動かす。余白を越えないよう中央位置を固定する。
+      var limit = (1 - 1 / fgCrop.scale) / 2;
+      fgCrop.x = Math.max(0, Math.min(1, drag.cx - (ev.clientX - drag.x) / box.width * 1 / Math.max(limit * 2, 0.01)));
+      fgCrop.y = Math.max(0, Math.min(1, drag.cy - (ev.clientY - drag.y) / box.height * 1 / Math.max(limit * 2, 0.01)));
+      preview(); ev.preventDefault(); ev.stopPropagation();
+    });
+    function end() { drag = null; }
+    handle.addEventListener("pointerup", end); handle.addEventListener("pointercancel", end);
+  })();
+
+  function setBackgroundFile_(file) {
+    if (!file || !(file.type || '').match(/^video\//i)) { setStatus("背景動画は動画ファイルを選んでください"); return false; }
+    if (customBgUrl) { try { URL.revokeObjectURL(customBgUrl); } catch (e) {} }
+    customBgUrl = URL.createObjectURL(file);
+    var name = $("bgVideoName"); if (name) name.textContent = "選択した背景動画: " + anonPhotoLabel_(file);
+    var clear = $("bgVideoClear"); if (clear) clear.hidden = false;
+    bg.src = customBgUrl; try { bg.load(); } catch (e) {} preview();
+    return true;
+  }
+  (function wireBackgroundDrop_() {
+    var drop = $("bgVideoDrop"), input = $("bgVideoFile"), clear = $("bgVideoClear"); if (!drop || !input) return;
+    input.addEventListener("change", function () { if (input.files && input.files[0]) setBackgroundFile_(input.files[0]); });
+    drop.addEventListener("click", function (ev) { if (ev.target !== clear && ev.target !== input) input.click(); });
+    drop.addEventListener("keydown", function (ev) { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); input.click(); } });
+    ["dragenter", "dragover"].forEach(function (type) { drop.addEventListener(type, function (ev) { ev.preventDefault(); drop.classList.add("is-dragover"); }); });
+    ["dragleave", "drop"].forEach(function (type) { drop.addEventListener(type, function (ev) { ev.preventDefault(); drop.classList.remove("is-dragover"); }); });
+    drop.addEventListener("drop", function (ev) { var f = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0]; if (f) setBackgroundFile_(f); });
+    if (clear) clear.addEventListener("click", function (ev) {
+      ev.preventDefault(); ev.stopPropagation(); if (customBgUrl) { try { URL.revokeObjectURL(customBgUrl); } catch (e) {} }
+      customBgUrl = ''; input.value = ''; clear.hidden = true;
+      var name = $("bgVideoName"); if (name) name.textContent = "既定の背景動画を使用";
+      bgRestoreSrc_(); preview();
+    });
+  })();
 
   // 前景画像をlocalStorageへ圧縮保存(リロード後に復元するため)。失敗は無害。
   function cachePhotoToStorage_(img) {
@@ -1015,8 +1084,9 @@
   // キャンバス内矩形。タッチ座標→写真内座標の変換に使う。(drawFrameと同じ式で計算)
   window.Go5PhotoRect = function () {
     if (!fgImg) return null;
-    const base = Math.min(W * FG_SAFE_W_RATIO / fgImg.width, H * FG_MAX_RATIO / fgImg.height) * (OFF.imgScale || 1); // drawFrameと同式(幅=安全域82%・拡大率込み)
-    const fw = fgImg.width * base, fh = fgImg.height * base;
+    const cropScale = Math.max(1, fgCrop.scale || 1), sw = fgImg.width / cropScale, sh = fgImg.height / cropScale;
+    const base = Math.min(W * FG_SAFE_W_RATIO / sw, H * FG_MAX_RATIO / sh) * (OFF.imgScale || 1); // drawFrameと同式(幅=安全域82%・拡大率込み)
+    const fw = sw * base, fh = sh * base;
     return {
       x: (W - fw) / 2,
       y: H * (FG_CENTER_Y + OFF.whole + (OFF.imgY || 0)) - fh / 2,
@@ -1029,6 +1099,7 @@
   // ---- 初期化 ----
   bg.addEventListener("loadeddata", preview);
   restorePhotoCache_(); // リロード後の前景画像復元
+  updateCropUi_();
   restoreTextCache_();   // リロード後の入力テキスト復元(setAccountの誘導文既定追従より前=書いた文面を尊重して残す)
   ensureFont().then(preview);
   // フォント確定後にもう一度描画(初回がフォールバックフォントの計測で描かれてしまうのを防ぐ＝

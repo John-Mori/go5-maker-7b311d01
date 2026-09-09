@@ -95,10 +95,19 @@ input[type=datetime-local]:focus{border-color:var(--accent);}
 .photo-btn{display:block;text-align:center;background:#0e1422;border:1.5px dashed var(--accent);
   color:var(--accent);font-weight:700;padding:18px;border-radius:12px;font-size:16px;cursor:pointer;}
 .photo-btn:active{background:#10203033;}
+.bg-video-drop{margin-top:12px;padding:10px 12px;border:1.5px dashed var(--line);border-radius:12px;cursor:pointer;}
+.bg-video-drop.is-dragover{border-color:var(--accent);background:#10203033;}
+.bg-video-drop .field-label{margin:0 0 2px;}
+.bg-video-drop .hint{margin-top:2px;}
+.bg-video-drop .ghost{width:auto;margin:7px 0 0;padding:6px 10px;font-size:12px;}
 .hint{color:var(--sub);font-size:12px;margin-top:6px;word-break:break-all;}
 .preview-wrap{display:flex;justify-content:center;align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0;}
 /* キャンバスを内包し、YouTube切れ範囲ガイド(CSSオーバーレイ)の位置基準にする。inline-blockでキャンバスにぴったり。 */
 .canvas-box{position:relative;display:inline-block;line-height:0;font-size:0;flex:0 0 auto;max-width:100%;}
+.crop-drag-handle{position:absolute;top:8px;left:8px;z-index:2;width:auto;margin:0;padding:7px 9px;
+  border:1px solid var(--accent);border-radius:8px;background:rgba(14,20,34,.9);color:var(--accent);
+  font-size:11px;font-weight:700;line-height:1;cursor:grab;touch-action:none;}
+.crop-drag-handle:active{cursor:grabbing;background:rgba(16,32,48,.96);}
 /* YouTube切れ範囲ガイド(.yt-safe-guide)は廃止(Chami依頼2026-07-31)。
    前景画像を安全域(中央82%幅)へ自動フィットさせる方式に変更したため、可視化オーバーレイは不要。 */
 /* プレビュー右横の操作列(ラベル位置・大きさ・画像調整)。上寄せ=「少し上に配置」(Chami依頼2026-07-30) */
@@ -124,6 +133,7 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .pd-r{grid-column:3;grid-row:2;} .pd-d{grid-column:2;grid-row:3;}
 .promo-size{display:flex;align-items:center;gap:4px;}
 .promo-size-val{min-width:32px;text-align:center;font-size:12px;color:var(--sub);font-variant-numeric:tabular-nums;}
+.crop-reset{width:auto;margin:1px 0 0;padding:5px 8px;border:1px solid var(--line);border-radius:7px;background:#0e1422;color:var(--sub);font-size:10px;cursor:pointer;}
 /* セールラベルの表示ON/OFF(Chami依頼2026-07-16)。既定ON・定価の作品では出ない旨を添える */
 /* ★恒久対策(縦書き化)：flex行で文言spanだけが縮む唯一の要素だと、CJKは1文字ごとに折り返せる
    =min-content=1文字幅まで潰れ「一行の文が縦表示」になる(◯%OFFボタン追加=2026-08-02⑥で再発)。
