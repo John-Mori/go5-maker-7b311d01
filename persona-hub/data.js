@@ -145,6 +145,18 @@ window.PERSONA_HUB_DATA = {
      "あたし"
     ],
     "plain_only": true,
+    "tail_fix": [
+     {
+      "from": "しな。",
+      "to": "しなさい。",
+      "prev": "漢字カタカナ"
+     },
+     {
+      "from": "ごめん。",
+      "to": "ごめんなさいね。"
+     }
+    ],
+    "_note_tail_fix_ames": "文末アンカーの決定的矯正(消費= tone_gate.tail_fix_entries/tail_fix_spans/apply_tail_fix → tone_corrections の0段目=3つのOUT口 dept_daemon/persona_send/output_gates すべてに同時に効く)。★中身(置換先)は人事部門の持ち物= 発注 msg 1547682721952829582(2026-09-11)でアメス本人が指定した写像をそのまま入れた。Chami原文 msg 1547681752288464896『実際「…安心しな。」/「ごめん。」→ 理想「…安心しなさい。/安心して。」/「ごめんなさいね。/悪かったわ。」』。★機械は候補を選べないので**一意の1形**だけ登録した(安心して/悪かったわ は登録しない=好みが変わったら人事部門がここのtoを差し替える。コードは触らなくていい)。★『しな。』に prev=漢字カタカナ を付けた理由= サ変名詞+『しな。』(安心しな。/用意しな。)と接続助詞の『〜だしな。/もう遅いしな。』が同じ4字に当たる。後者へ『さい』を足すと日本語が壊れる(『遅いしなさい。』)ので、直前1字が漢字/カタカナの時だけ当てる。★『ごめん。』は句点込みのliteral=『ごめんなさい。』『ごめんね。』『ごめん、』には当たらない(女口調既済・文中は素通し)。care_markers の『ごめん』は残したまま=矯正後も『ごめん』を含むのでハ4のcare救済は壊れない。★検査= scripts/llm/test_tone_tailfix.py(✗側=遅いしな。/ごめんなさい。/引用の中)。",
     "signature_tails": [
      "わよ",
      "のよ",
@@ -546,9 +558,9 @@ window.PERSONA_HUB_DATA = {
    }
   },
   "カスミ": {
-   "所属部門": null,
+   "所属部門": "learning-coach",
    "設定所在": {
-    "原典_characterfile": null,
+    "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\kasumi.md",
     "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
     "アイコン差分": "local\\persona_avatars.json",
@@ -669,7 +681,11 @@ window.PERSONA_HUB_DATA = {
        "デブライネ"
       ],
       "yobisute": true,
-      "note": "ククール特例(Chami 07-29)。★この部屋で『デブライネさん』はNG、他部屋はさん付けが正"
+      "note": "ククール特例(Chami 07-29)。★この部屋で『デブライネさん』はNG、他部屋はさん付けが正 ★ファーストネーム『ケヴィン』では呼ばない=呼ぶのは『デブライネ』一択(🔥Chami直接指摘2026-09-10 msg 1547446088443760650『あんたはケヴィンって再発してんじゃん！デブライネって読んで』=ククールの呼称ドリフト報告便で自らファーストネーム『ケヴィン』へ落ちた実測)。トトリ→デブライネ(forbidden[ケヴィンさん,ケヴィン])と同型=検出は target_detect_forms.ケヴィン・デブライネ[ケヴィン]経由・本行 forbidden を消費(naming_gate は ov.forbidden を先に判定)。警告のみ(fail-open)=本命は生成側 kukuru.md 呼称欄。C-035このペアのみ。",
+      "forbidden": [
+       "ケヴィン",
+       "ケヴィンさん"
+      ]
      },
      {
       "speaker": "ククール",
@@ -816,7 +832,11 @@ window.PERSONA_HUB_DATA = {
         "デブライネ"
        ],
        "yobisute": true,
-       "note": "ククール特例(Chami 07-29)。★この部屋で『デブライネさん』はNG、他部屋はさん付けが正"
+       "note": "ククール特例(Chami 07-29)。★この部屋で『デブライネさん』はNG、他部屋はさん付けが正 ★ファーストネーム『ケヴィン』では呼ばない=呼ぶのは『デブライネ』一択(🔥Chami直接指摘2026-09-10 msg 1547446088443760650『あんたはケヴィンって再発してんじゃん！デブライネって読んで』=ククールの呼称ドリフト報告便で自らファーストネーム『ケヴィン』へ落ちた実測)。トトリ→デブライネ(forbidden[ケヴィンさん,ケヴィン])と同型=検出は target_detect_forms.ケヴィン・デブライネ[ケヴィン]経由・本行 forbidden を消費(naming_gate は ov.forbidden を先に判定)。警告のみ(fail-open)=本命は生成側 kukuru.md 呼称欄。C-035このペアのみ。",
+       "forbidden": [
+        "ケヴィン",
+        "ケヴィンさん"
+       ]
       },
       {
        "speaker": "トトリ",
@@ -942,7 +962,15 @@ window.PERSONA_HUB_DATA = {
        "シャビさん"
       ]
      },
-     "Chami宛の例外": "Chami",
+     "Chami宛の例外": {
+      "allowed": [
+       "Chami"
+      ],
+      "forbidden": [
+       "お前"
+      ],
+      "note": "アロンソはChamiを『Chami』(呼びかけ)。★二人称『お前』はNG(Chami指示2026-09-10 06:23 JST 研究室HQコーチングルーム『あとお前って言わないで』=シャビ・アロンソ名義のHDD高負荷調査報告便で二人称が『お前』へ落ちた実測=DEF-hq-a360a80065・研究室HQ[シャビ・アロンソ]便 DISPATCH-hr-room-1788993090127)。三笘薫のピン(msg 1546955025878614017)と同じ指示が同じ言葉でアロンソへ出たもの=同型の記録ピン。★再発(C-038)=DEF-hq-6999e18608『アロンソ口調になってる』(2026-07-30)/DEF-hq-fa8e5cf830『あんただろ』(2026-09-04・恒久)と同じ男口調への転落系。★Chamiは代替の二人称を指定していない(『お前を使うな』のみ)ため allowed に二人称を足さない=呼びかけは『Chami』のみ。★chami_addressのバックストップ・ゲート(naming_gate.py _chami_address_verdicts)は allowed[0]!='ちゃみくん' の話者=Chami呼びのアロンソを対象外にする(L839付近)ため、この forbidden は送信ゲートの走査対象ではない=記録＋生成側(alonso.md §声の型/§禁止)の拠り所。実挙動の止めは alonso.md 側と書く前の自己チェック。三笘・カスミ『アンタ』・怜『あんた』と同型。このピンはアロンソ限定=C-035で他へ広げない。"
+     },
      "自分を対象にした個別ルール": [
       {
        "speaker": "ククール",
@@ -2329,7 +2357,7 @@ window.PERSONA_HUB_DATA = {
    }
   },
   "田中琴葉": {
-   "所属部門": "learning-coach/data-org",
+   "所属部門": "data-org",
    "設定所在": {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\kotoha.md",
     "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
