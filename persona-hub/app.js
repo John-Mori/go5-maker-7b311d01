@@ -81,6 +81,7 @@
     els.count = document.getElementById("personaCount");
     els.error = document.getElementById("errorBanner");
     els.footer = document.getElementById("hubFooter");
+    els.roster = document.getElementById("roomRoster");
 
     // 公開ページ(GitHub Pages)では data.js が window.PERSONA_HUB_DATA を焼き込んでいる。
     // local/ はgitignore配下でPagesに配信されないため、まず埋め込みを使い、無い時だけ
@@ -104,6 +105,7 @@
     state.names = Object.keys(state.personas).sort(function (a, b) { return a.localeCompare(b, "ja"); });
     state.filtered = state.names.slice();
     renderList();
+    renderRoomRoster();
     renderFooter();
     if (state.filtered.length) selectPersona(state.filtered[0]);
   }
@@ -153,6 +155,59 @@
     state.selected = name;
     renderList();
     renderDetail(name);
+  }
+
+  // ── 各部屋(=所属部門)のメンバー一覧(Chami要望 2026-09-11) ──
+  // データは各キャラの「所属部門」だけ(既に data.js に載っている公開情報)。ここを反転して
+  // 部屋ごとの在籍名簿を作る=正本にもchannel IDにも触れない、公開済みの値の見せ方だけを足す。
+  // 「a / b」形式の複数所属はそれぞれの部屋に出す。空/未設定は末尾の「(所属未設定)」へまとめる。
+  function buildRoomIndex() {
+    var rooms = {};
+    state.names.forEach(function (name) {
+      var e = state.personas[name] || {};
+      var dept = e.所属部門;
+      var keys = (dept && String(dept).trim())
+        ? String(dept).split("/").map(function (s) { return s.trim(); }).filter(Boolean)
+        : ["(所属未設定)"];
+      keys.forEach(function (k) { (rooms[k] || (rooms[k] = [])).push(name); });
+    });
+    return rooms;
+  }
+
+  function renderRoomRoster() {
+    if (!els.roster) return;
+    var rooms = buildRoomIndex();
+    // 人数の多い部屋を先に、同数は名前順。未設定は末尾。
+    var roomNames = Object.keys(rooms).sort(function (a, b) {
+      if (a === "(所属未設定)") return 1;
+      if (b === "(所属未設定)") return -1;
+      var d = rooms[b].length - rooms[a].length;
+      return d !== 0 ? d : a.localeCompare(b, "ja");
+    });
+    var cards = roomNames.map(function (rn) {
+      var members = rooms[rn].slice().sort(function (a, b) { return a.localeCompare(b, "ja"); });
+      var chips = members.map(function (m) {
+        return '<button class="roster-member" type="button" data-name="' + esc(m) + '">' + esc(m) + "</button>";
+      }).join("");
+      return '<div class="room-card">' +
+          '<div class="room-card-head">' +
+            '<span class="room-name">' + esc(rn) + "</span>" +
+            '<span class="room-count">' + members.length + "人</span>" +
+          "</div>" +
+          '<div class="room-members">' + chips + "</div>" +
+        "</div>";
+    }).join("");
+    els.roster.hidden = false;
+    els.roster.innerHTML =
+      '<h3 class="roster-title">部屋別メンバー一覧 <span class="roster-sub">(' + roomNames.length + "部屋 / 所属部門ごと)</span></h3>" +
+      '<p class="roster-note">各キャラの「所属部門」から集計した部屋ごとの在籍一覧。名前を押すと上の詳細に切り替わる(複数部門のキャラは各部屋に出る)。</p>' +
+      '<div class="roster-grid">' + (cards || '<div class="section-empty">部屋データなし</div>') + "</div>";
+    Array.prototype.forEach.call(els.roster.querySelectorAll(".roster-member"), function (btn) {
+      btn.addEventListener("click", function () {
+        selectPersona(btn.getAttribute("data-name"));
+        try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch (e) { window.scrollTo(0, 0); }
+      });
+    });
   }
 
   // ── 詳細 ──
