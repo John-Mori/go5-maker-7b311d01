@@ -1208,6 +1208,100 @@ def _canonical(words):
     return ws[0] if len(ws) == 1 else ""
 
 
+# ★2026-09-11 追加= **文末アンカーの決定的な矯正**(`tail_fix`)。★既定=見ない(登録制)。
+#   発注= 人事部門(アメス) msg 1547682721952829582 / C-038(再発の恒久段)。
+#   なぜ D-2(LLM書き直し)ではなく置換なのか=
+#     「〜しな。」→「〜しなさい。」・裸の「ごめん。」→「ごめんなさいね。」は**置換先が一意**で、
+#     語尾1字の付け替えではなく**語の末尾を伸ばすだけ**だから文法が壊れない。
+#     指紋語尾を「足す」型(signature_absent)とは別物= あちらは再生成が要る(下の分岐の説明)。
+#   ★偽陽性の殺し方= 直前1字の字種で縛る。「〜だしな。」「もう遅いしな。」は同じ4字に当たるが、
+#     ここへ「さい」を足すと日本語が壊れる(「遅いしなさい。」)。サ変名詞の尻(漢字/カタカナ)の
+#     時だけ当てれば、この型は構造で当たらない= 検査 test_tone_tailfix.py の✗側がこれ。
+_TAILFIX_PREV = {
+    "漢字カタカナ": re.compile(r"[一-鿿ァ-ヴー]"),
+}
+
+
+def tail_fix_entries(ent):
+    """人格エントリに登録された文末矯正の表を返す(無ければ空=その人格は従来どおり)。
+
+    形= `"tail_fix": [{"from": "しな。", "to": "しなさい。", "prev": "漢字カタカナ"}]`
+      from / to … literal。**`from` に句点まで入れる**=文末アンカーはここで表現する。
+      prev       … 任意。直前1字の字種の縛り。★**知らない字種名は行ごと捨てる**
+                   (綴りを間違えた時に「縛り無し」へ倒れると偽陽性が野に出るから=
+                    fail-safe は『当てない側』へ倒す)。
+    """
+    out = []
+    for e in ((ent or {}).get("tail_fix") or []):
+        if not isinstance(e, dict):
+            continue
+        frm, to, prev = str(e.get("from") or ""), str(e.get("to") or ""), str(e.get("prev") or "")
+        if not frm or not to or frm == to:
+            continue
+        if prev and prev not in _TAILFIX_PREV:
+            continue
+        out.append({"from": frm, "to": to, "prev": prev})
+    return out
+
+
+def tail_fix_spans(text, ent, rules=None):
+    """当てる位置を左から拾う(重なり無し・長い `from` を先に見る)。
+
+    ★保護span(引用・コード・引用行・パス)の中は当てない= 判定と同じマスクを引く。
+    """
+    ents = tail_fix_entries(ent)
+    if not ents or not text:
+        return []
+    masked = _mask_persona_names(_mask_protected(text), text, rules)
+    ents = sorted(ents, key=lambda e: len(e["from"]), reverse=True)
+    spans, i, n = [], 0, len(text)
+    while i < n:
+        hit = None
+        for e in ents:
+            if not masked.startswith(e["from"], i):
+                continue                  # 保護spanの中は全角空白で潰れている=一致しない
+            if e["prev"]:
+                if i == 0 or not _TAILFIX_PREV[e["prev"]].match(text[i - 1]):
+                    continue              # 字種の縛りに合わない=別の語
+            hit = e
+            break
+        if hit:
+            spans.append({"at": i, "from": hit["from"], "to": hit["to"]})
+            i += len(hit["from"])
+        else:
+            i += 1
+    return spans
+
+
+def apply_tail_fix(persona, text, rules):
+    """登録された文末矯正を当てる。返り値 (直した本文, applied[])。
+
+    ★当てた位置以外は1文字も触らない。長さの帳尻が合わなければ**元の本文を返す**(fail-open)。
+    """
+    try:
+        ent = _persona_entry(rules, persona) or {}
+        spans = tail_fix_spans(text, ent, rules)
+        if not spans:
+            return text, []
+        buf, last, counts = [], 0, {}
+        for sp in spans:
+            buf.append(text[last:sp["at"]])
+            buf.append(sp["to"])
+            last = sp["at"] + len(sp["from"])
+            counts[(sp["from"], sp["to"])] = counts.get((sp["from"], sp["to"]), 0) + 1
+        buf.append(text[last:])
+        fixed = "".join(buf)
+        delta = sum(c * (len(t) - len(f)) for (f, t), c in counts.items())
+        if len(fixed) - len(text) != delta:
+            return text, []
+        return fixed, [{
+            "persona": str(persona or ""),
+            "marker": f, "to": t, "count": c, "reason": "tail_fix",
+        } for (f, t), c in counts.items()]
+    except Exception:
+        return text, []               # この段が配送を殺さない
+
+
 def tone_corrections(persona, dept, text, rules):
     """口調違反を**その便だけ書き直す**(2026-08-12 格上げ。naming_corrections の兄弟)。
 
@@ -1220,8 +1314,16 @@ def tone_corrections(persona, dept, text, rules):
     ★保護span(引用・コード・引用行・パス)の中は**書き換えない**(判定と同じマスクを使う=ズレない)。
     ★例外は握り潰して元の本文を返す=ゲートが配送を殺さない。
     """
+    _orig = text
     out = {"fixed": text, "applied": [], "remaining": []}
     try:
+        # ★0段目= 文末アンカーの決定的矯正(`tail_fix`)。登録した人格だけ回る。
+        #   **判定より前**に置く= 矯正で指紋語尾(「なさい」)が生えて signature_absent が
+        #   自然に消える便が在るからだ。下の判定は矯正**後**の本文を見る。
+        text, _tail = apply_tail_fix(persona, text, rules)
+        if _tail:
+            out["fixed"] = text
+            out["applied"].extend(_tail)
         verdicts = tone_verdicts(persona, dept, text, rules) or []
         if not verdicts:
             return out
@@ -1305,12 +1407,13 @@ def tone_corrections(persona, dept, text, rules):
             return out
 
         out["fixed"] = fixed
-        out["applied"] = [{
+        # ★extend= 0段目(tail_fix)で積んだ分を**消さない**(以前は代入で上書きしていた)。
+        out["applied"].extend([{
             "persona": str(persona or ""),
             "marker": m, "to": plan[m], "count": c,
             "reason": "tone_rewrite",
-        } for m, c in counts.items()]
+        } for m, c in counts.items()])
         return out
     except Exception:
         # fail-open= 書き直しに失敗しても**元の本文で送る**(口調のゲートで沈黙を作らない)。
-        return {"fixed": text, "applied": [], "remaining": []}
+        return {"fixed": _orig, "applied": [], "remaining": []}
