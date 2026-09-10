@@ -494,7 +494,90 @@ def _audit_tone(persona, dept, applied, remaining):
         pass
 
 
-def tone_backstop(body, persona, dept):
+def _audit_tone_rewrite(persona, dept, before, res):
+    """ゲートD-2の結果を dept_daemon と**同じ1本**へ残す(src=persona_send・§4)。
+    常駐側 dept_daemon.audit_tone_rewrite が書く行と同じ形。失敗しても送信判定は変えない。"""
+    try:
+        os.makedirs(os.path.dirname(TONE_AUDIT), exist_ok=True)
+        with open(TONE_AUDIT, "a", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "dept": dept, "event": "tone_rewrite", "src": "persona_send",
+                "persona": str(persona or ""),
+                "ok": bool(res.get("ok")),
+                "targets": res.get("targets") or [],
+                "after": res.get("after") or [],
+                "why": res.get("why") or "",
+                "elapsed_ms": res.get("elapsed_ms", 0),
+                "engine": res.get("engine") or "",
+                "excerpt": str(before or "")[:200],          # ★書き直し**前**
+                "excerpt_after": str(res.get("text") or "")[:200],
+            }, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+def tone_rewrite_backstop(body, persona, dept, rules, remaining, audit=True, ask=None):
+    """出力ゲート**D-2**(案F)を合流点にも当てる(2026-09-11・Chami「寝る前Go」)。
+
+    ★なぜ足したか= D-2(`tone_rewrite.rewrite_once`)は 2026-08-16 に**常駐(dept_daemon)にだけ**
+      置かれた。だが外へ撃つ口は3つ在る(C-064)= dept_daemon / **ここ(webhookの合流点)** /
+      output_gates(ミラー)。実測(tone_audit.jsonl・書き直し対象reasonのtone行186件)で
+      **D-2が回っていない31件のうち13件がこの口**だった。基準便= 2026-09-11T03:58:34 の
+      アメス便(dept=aegis-gl・signature_absent「9文中0件」・src=persona_send)。
+      ゲートDは置換先が一意な分しか直せず、指紋語尾/方言/敬体は `remaining` へ落ちる。
+      **この口はそれを台帳へ書くだけで捨てていた**=崩れたままChamiの画面に出ていた。
+    ★handoff §7「最後の合流点にLLM往復を足すな=fail-openの設計を壊す。Goを取れ」への答え=
+      そのGoが出た(Chami msg 1547688457051177000)。壊さないための縛りを以下に置く:
+      - `remaining` が空なら**呼ばない**(正常便は往復ゼロ・1ミリも変わらない)。
+      - 例外・鍵なし・写像に人格が無い= 元の本文をそのまま返す(fail-open= 沈黙にしない)。
+      - 採否は tone_rewrite.accept 1本(数字/識別子/URLの不変 → 長さの帯 → 崩れが消えたか)。
+      - キルスイッチ `GO5_TONE_REWRITE=0`。3口すべてが同じ環境変数を見る。
+      - timeout は常駐(20秒)より短い12秒= ここはChamiの画面までの最後の1段だから。
+    ★`ask` 引数= must-fail検査が**外へ出る手だけ**を偽物にするための口(判定と分岐は本物のまま)。
+    ★★audit=False では**回さない**(2026-09-11・HQ-0253の但し書き)。
+      audit=False の唯一の呼び元は `dept_daemon._gated_like_persona_send`=
+      **送信の実在確認が「投げた形」を再現する再生**で、本当に送る場面ではない。
+      ここでD-2を回すと (a) 再生のたびに共有鍵のGemini枠(20/日/モデル)を焼き、
+      (b) LLMの出力は毎回違うので**再現にならない**(突合鍵がかえって食い違う)。
+      機械置換(ゲートD)は決定的なので従来どおり audit の有無で1ミリも変えない。
+      **非決定な段だけをこの但し書きの対象にする**= HQ-0253の狙い(再現できること)を守る側。
+
+    返り値: 送るべき本文(str)。採用された時だけ書き直し後、それ以外は入力を1ミリも変えない。
+    """
+    try:
+        if not remaining:
+            return body                       # 直せない崩れが無い= 往復しない
+        if not audit:
+            return body                       # 突合の再現= 非決定な段は回さない(上の但し書き)
+        if str(os.environ.get("GO5_TONE_REWRITE", "1")).strip().lower() in ("0", "off", "false"):
+            return body                       # キルスイッチ
+        if os.path.join(ROOT, "scripts", "llm") not in sys.path:
+            sys.path.insert(0, os.path.join(ROOT, "scripts", "llm"))
+        import tone_rewrite
+        res = tone_rewrite.rewrite_once(persona, dept or "", body, remaining, rules,
+                                        ask=ask, timeout=12) or {}
+        if not res.get("attempted"):
+            return body                       # 対象なし/鍵なし/写像に人格が無い= 静かに従来どおり
+        if audit:
+            _audit_tone_rewrite(persona, dept, body, res)
+        if res.get("ok"):
+            if audit:
+                print(f"[persona_send] ★口調D-2: 合流点で書き直した"
+                      f"({','.join(res.get('targets') or [])})。", file=sys.stderr)
+            return res.get("text") or body
+        if audit:
+            print(f"[persona_send] 口調D-2 不採用({res.get('why')})=元の本文で送る(fail-open)。",
+                  file=sys.stderr)
+        return body
+    except Exception as e:
+        if audit:
+            print(f"[persona_send] 口調D-2 不能({type(e).__name__})=素通し(送信は殺さない)。",
+                  file=sys.stderr)
+        return body                           # この段が配送を殺さない
+
+
+def tone_backstop(body, persona, dept, audit=True):
     """Discordへ出る**最後の合流点**の口調ゲート(2026-09-01 platform-se・一ノ瀬怜)。
 
     英語ダンプは english_backstop(2026-08-23)が合流点で塞いだが、**口調(男口調「俺」等)は
@@ -507,6 +590,9 @@ def tone_backstop(body, persona, dept):
     ★fail-open: ルール未ロード/例外は素通し=送信を殺さない(最悪の事故は沈黙)。
     ★ミラー名義(Chami(...))はChami本人の言葉=対象外(触らない)。
     ★persona は**正式名へ解決済み**で渡すこと(口調ルールは「アメス」で引く=ames のままだと引けない)。
+    ★audit=False(2026-09-09 HQ-0253)= 直した本文は同じだが**台帳へ書かず黙る**。実在確認側が
+      「実際に投げた本文」を再現するために同じゲートを通すので、そこで tone_audit が二重に増えると
+      口調違反の件数が嘘になる。★返す本文は audit の有無で1ミリも変えない(判定は1本・ORG-11)。
 
     返り値: 送るべき本文(str)。修正できた時だけ書き直し後を返す(それ以外は入力を1ミリも変えない)。
     """
@@ -524,17 +610,21 @@ def tone_backstop(body, persona, dept):
         res = tone_gate.tone_corrections(persona, dept or "", body, rules) or {}
         applied = res.get("applied") or []
         remaining = res.get("remaining") or []
-        if applied or remaining:
+        if (applied or remaining) and audit:
             _audit_tone(persona, dept, applied, remaining)
         if applied:
-            markers = ", ".join(f"{a.get('marker')}→{a.get('to')}" for a in applied)
-            print(f"[persona_send] ★口調を合流点で機械修正({markers})=上流ゲートを通らない"
-                  f"代打/直送の残穴を塞ぐ(DEF-99f9503e37)。", file=sys.stderr)
-            return res.get("fixed") or body
-        return body                           # 違反なし/直せない違反のみ=1ミリも変えない
+            if audit:
+                markers = ", ".join(f"{a.get('marker')}→{a.get('to')}" for a in applied)
+                print(f"[persona_send] ★口調を合流点で機械修正({markers})=上流ゲートを通らない"
+                      f"代打/直送の残穴を塞ぐ(DEF-99f9503e37)。", file=sys.stderr)
+            body = res.get("fixed") or body
+        # ★ゲートD-2(2026-09-11)= 機械が直せなかった `remaining` をここで1回だけ書き直す。
+        #   常駐と同じ順(D→D-2)。remaining が空ならこの下は即 return= 正常便は不変。
+        return tone_rewrite_backstop(body, persona, dept, rules, remaining, audit=audit)
     except Exception as e:
-        print(f"[persona_send] 口調ゲート不能({type(e).__name__})=素通し(送信は殺さない・fail-open)",
-              file=sys.stderr)
+        if audit:
+            print(f"[persona_send] 口調ゲート不能({type(e).__name__})=素通し(送信は殺さない・fail-open)",
+                  file=sys.stderr)
         return body
 
 
@@ -547,14 +637,17 @@ _ENJOH_HERE = os.path.dirname(os.path.abspath(__file__))
 if _ENJOH_HERE not in sys.path:
     sys.path.insert(0, _ENJOH_HERE)
 try:
-    from enjoh import ENJOH_EMOJI, enjoh_backstop as _enjoh_gate
+    from enjoh import ENJOH_EMOJI, ack_backstop as _ack_gate, enjoh_backstop as _enjoh_gate
 except Exception as _e:                        # 正本が読めない時も送信は殺さない(fail-open)
     print(f"[persona_send] 炎上表記ゲートの正本 enjoh.py を読めない({type(_e).__name__})=素通し。",
           file=sys.stderr)
     ENJOH_EMOJI = "<:enjoh:1541126866981752883>"
 
-    def _enjoh_gate(body, tag="persona_send"):
+    def _enjoh_gate(body, tag="persona_send", quiet=False):
         return body
+
+    def _ack_gate(body, tag="persona_send", peel=None, quiet=False):
+        return False                           # 判定が読めない= 落とさない側へ倒す
 
 
 # ★同形異字(ホモグリフ)ゲート(2026-09-04・依頼=人事部門ククール)。正本= homoglyph.py を
@@ -567,14 +660,14 @@ except Exception as _e:                        # 正本が読めない時も送�
     print(f"[persona_send] 同形異字ゲートの正本 homoglyph.py を読めない({type(_e).__name__})=素通し。",
           file=sys.stderr)
 
-    def _homo_gate(body, persona=None, dept=None, tag="", channel=None):
+    def _homo_gate(body, persona=None, dept=None, tag="", channel=None, audit=True):
         return body
 
     def _homo_canon(name, names=None):
         return "", "unavailable"
 
 
-def enjoh_backstop(body):
+def enjoh_backstop(body, quiet=False):
     """Discordへ出る本文の炎上表記ゲート(実装は enjoh.py が正本)。
 
     Chami原文(msg 1544213340853772331)=「🔥 は <:enjoh:1541126866981752883> に置き換えって
@@ -582,7 +675,31 @@ def enjoh_backstop(body):
     生成側が滑る型(英語漏れ・口調割れと同じ)なので、心がけではなく合流点で機械的に潰す。
     起票= 改善提案部門(トトリ)docs/departments/kaizen-analyst/型_素の炎上絵文字_送信ゲート正規化_2026-09-01.md
     """
-    return _enjoh_gate(body, tag="persona_send")
+    return _enjoh_gate(body, tag="persona_send", quiet=quiet)
+
+
+def apply_text_gates(body, persona=None, dept=None, tag="persona_send", audit=True):
+    """★Discordへ出る本文が**最後に通る3ゲートの合流点**。ここを通った文字列が実際に投稿される。
+
+    2026-09-09 HQ-0253(イージス研究室 第55世代)で切り出した。それまで3ゲートは main() の中に
+    並んで書かれているだけで、**外から「投げた形」を再現する手段が無かった**。
+    実害= 送信の実在確認(dept_daemon.verify_replied)は persona_send へ渡す**前**の本文から
+    突合鍵(先頭40字/末尾25字)を作っていたため、enjoh_backstop が末尾の素の🔥を
+    `<:enjoh:1541126866981752883>`(26字)へ膨らませた便で鍵が実物と食い違い、
+    実在するのに `replied_unverified` が積まれていた。
+    ★ゲートごとに突合側で対処してはいけない(ゲートは3つ在り、また増える)。
+      **合流点を1本にして、判定する側はそこを呼ぶ**(ORG-11= 同じ判定を2箇所に持たない・C-064)。
+
+    順序は main() の従来どおり 口調 → 炎上表記 → 同形異字。★勝手に入れ替えない。
+    ★english_backstop はここに**含めない**= あれは本文を直すだけでなく「送らない(None)」を
+      返す関門で、判定の意味が違う(突合の再現に使うと、送らない便を再現できなくなる)。
+    ★audit=False= 変換は同じまま台帳とstderrへ出さない。突合の再現で二重記帳しないため。
+    ★fail-open= 3ゲートはいずれも例外を自分で飲んで素通しする(送信を殺さない)。
+    """
+    body = tone_backstop(body, persona, dept, audit=audit)
+    body = enjoh_backstop(body, quiet=not audit)
+    body = _homo_gate(body, persona=persona, dept=dept, tag=tag, audit=audit)
+    return body
 
 
 # ★共通の送信ログ(2026-09-02・研究室HQからの恒久依頼)。Discordへ実際にHTTPを撃つ口は
@@ -716,6 +833,21 @@ def main():
     if gated is None:
         sys.exit(4)               # 英文ダンプ=保留。webhookを叩かない=Discordに英語を出さない
     body = gated
+    # ★2026-09-10 定型ack denylist(依頼= 改善提案部門トトリ・炎上 msg 1547305004069560351)。
+    #   「受け取った。処理を開始する。完了結果は保存してから返す。」= 日本語20字超で**空便ガードに
+    #   かからない**が中身は無い便。「内容の無い一次ackは沈黙より悪い」(共通規律§2)を機械へ落とす。
+    #   判定の正本は enjoh.ack_only_reason 1本(bot_send / codex_run / dept_daemon も同じ関数を引く)。
+    #   ★名乗り `[名前]` は本文ではないので剥がしてから見る= 「[オタコン] 受け取った。」も止まる。
+    def _peel_self_tag(ln):
+        m = re.match(r"^\s*[\[［]([^\]］\n]{1,20})[\]］]\s*", ln or "")
+        return (ln[m.end():] if m and m.group(1).strip() == str(persona).strip() else ln)
+
+    if _ack_gate(body, tag="persona_send", peel=_peel_self_tag):
+        _audit_send(body=body, event="blocked", status="ack_only",
+                    channel=str(channel or ""), dept=str(dept or ""), persona=str(persona))
+        print("内容の無い一次ackは沈黙より悪い(共通規律§2)ので送信しません。\n"
+              "  作業の結果か、今わかっている実物を本文にしてください。")
+        sys.exit(4)
     with open(os.path.join(LOCAL, "discord_bot_token.txt"), "r", encoding="utf-8") as f:
         token = f.read().strip()
     with open(os.path.join(LOCAL, "discord_channels.json"), "r", encoding="utf-8") as f:
@@ -729,14 +861,13 @@ def main():
     # ★口調の合流点ゲート(2026-09-01)。英語は上で塞いだが口調は支流(dept_daemon)だけだった=
     #   代打/直送の男口調「俺」等が素通りしていた(DEF-99f9503e37 の構造的真因)。resolve_persona の
     #   後=正式名で口調ルールを引くため。機械置換のみ・fail-open=送信は殺さない。
-    body = tone_backstop(body, persona, dept)
-    # ★絵文字の合流点ゲート(2026-09-01)。素の🔥を地の文に置くなという規律は在るのに生成側が滑る
-    #   (Chami msg 1544213340853772331=少なくとも2回目の指摘)。英語・口調と同じ出口で機械的に潰す。
-    body = enjoh_backstop(body)
-    # ★同形異字の合流点ゲート(2026-09-04)。地の文の自称・言及が化けても誰も直していなかった
-    #   (名義タグ側の救済は dept_daemon に在るが、本文は素通しだった)。既知の人格名の
-    #   **全体一致** でだけ寄せる= 「力」「口」等の単字は動かさない。
-    body = _homo_gate(body, persona=persona, dept=dept, tag="persona_send")
+    #   ★絵文字の合流点ゲート(2026-09-01)= 素の🔥を地の文に置くなという規律は在るのに生成側が滑る
+    #     (Chami msg 1544213340853772331=少なくとも2回目の指摘)。
+    #   ★同形異字の合流点ゲート(2026-09-04)= 地の文の自称・言及が化けても誰も直していなかった。
+    #   ★2026-09-09 HQ-0253= この3行を apply_text_gates() 1本へ寄せた(順序は従来のまま)。
+    #     実在確認(dept_daemon.verify_replied)が**同じ1本**を呼んで「投げた形」を再現するため。
+    #     ここをバラして書き戻すと、突合鍵がまた投稿前の本文からできて宙に浮く。
+    body = apply_text_gates(body, persona=persona, dept=dept, tag="persona_send")
     if not avatar and os.path.exists(AVATARS_FILE):
         with open(AVATARS_FILE, "r", encoding="utf-8") as f:
             avatar = json.load(f).get(persona)

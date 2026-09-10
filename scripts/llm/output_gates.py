@@ -69,6 +69,10 @@ try:
     import struct_drift_gate as _struct_drift  # ゲートJ(Claude既定のレポート骨格)
 except Exception:
     _struct_drift = None
+try:
+    import tone_rewrite as _tone_rewrite       # ゲートD-2(案F・LLM1往復の書き直し)
+except Exception:
+    _tone_rewrite = None                       # 読めなくてもD以降は動く(fail-open)
 # ★同形異字(ホモグリフ)の正本= scripts/discord/homoglyph.py。表を2か所に持たない(ORG-11)。
 try:
     _DISCORD_DIR = os.path.join(ROOT, "scripts", "discord")
@@ -274,17 +278,21 @@ def apply_naming_gate_only(dept, persona, text, source="dispatch", msg_id="",
         return text, summary
 
 
-def apply_gates(dept, persona, text, source="mirror", msg_id="", fix=None):
-    """本文にゲートC(呼称)→D(口調)を当て、監査へ残す。既定は**警告のみ**(本文を変えない)。
+def apply_gates(dept, persona, text, source="mirror", msg_id="", fix=None, ask=None):
+    """本文にゲートC(呼称)→D(口調)→D-2(書き直し)を当て、監査へ残す。既定は**警告のみ**。
 
     返り値: (text, summary)
       summary = {"naming_fix":n, "naming_warn":n, "tone_fix":n, "tone_warn":n}
       ★警告のみモードでは naming_fix/tone_fix は「直せたはずの件数」= 実際には直していない。
         監査の event も `*_fix_skipped` で分けて残す(後から格上げの是非を数字で決められる)。
     ★何が起きても例外を外へ出さない。壊れたら元の text をそのまま返す。
+    ★`ask`= ゲートD-2が外へ出す手(LLM)を差し替える口。must-fail検査が**判定と分岐は本物のまま**
+      経路を通すために使う(§3「ソース文字列一致で固めない」)。本番では None= ask_cascade。
     """
     do_fix = _fix_enabled() if fix is None else bool(fix)
+    tone_remaining, tone_rules = [], None      # ★ゲートD-2へ渡す(D側が転んでもNameErrorにしない)
     summary = {"naming_fix": 0, "naming_warn": 0, "tone_fix": 0, "tone_warn": 0,
+               "tone_rewrite": 0,
                "meta_strip": 0, "meta_emptied": False, "narration_leak": 0,
                "envelope_echo": 0,
                "kana_choice_fix": 0, "kana_choice_warn": 0,
@@ -398,6 +406,7 @@ def apply_gates(dept, persona, text, source="mirror", msg_id="", fix=None):
             res = _tone_gate.tone_corrections(persona, dept, s, rules) or {}
             applied = res.get("applied") or []
             remaining = res.get("remaining") or []
+            tone_remaining, tone_rules = remaining, rules      # ★D-2へ引き継ぐ
             rows = []
             for a in applied:
                 rows.append({"ts": ts, "dept": dept,
@@ -420,6 +429,42 @@ def apply_gates(dept, persona, text, source="mirror", msg_id="", fix=None):
                 s = res.get("fixed", s) or s
     except Exception:
         pass
+
+    # --- ゲートD-2(案F= 機械で直せなかった崩れをLLM1往復で書き直す)-------------
+    # ★2026-09-11(Chami「寝る前Go」msg 1547688457051177000)。D-2は2026-08-16に**常駐にだけ**
+    #   置かれた。外へ撃つ口は3つ(C-064)= dept_daemon:4794 / persona_send:527 / ここ。
+    #   ゲートDが `remaining` へ落とした指紋語尾・方言・敬体を、この経路も捨てていた。
+    # ★**do_fix に従う**= この経路の既定は「警告のみ」(GO5_MIRROR_GATE_FIX=1 で格上げ)。
+    #   Dが本文を直さない設定でD-2だけが本文を書き換えたら建て付けが割れるし、
+    #   直しもしないのにLLMの往復だけ毎便焼く(Gemini無料枠は20/日/モデル)。
+    #   ★台帳(event=tone_rewrite)は書く= 回った/弾かれたを後から数えられるようにする。
+    # ★fail-open: 例外・鍵なし・写像に人格が無い= 直前の本文 `s` をそのまま持ち越す。
+    try:
+        if _tone_rewrite is not None and do_fix and tone_remaining and tone_rules \
+                and str(os.environ.get("GO5_TONE_REWRITE", "1")).strip().lower() \
+                not in ("0", "off", "false"):
+            _before = s
+            _rw = _tone_rewrite.rewrite_once(persona, dept, s, tone_remaining, tone_rules,
+                                             ask=ask, timeout=20) or {}
+            if _rw.get("attempted"):
+                _append(TONE_AUDIT, [{
+                    "ts": ts, "dept": dept, "event": "tone_rewrite",
+                    "persona": str(persona or ""), "source": source,
+                    "ok": bool(_rw.get("ok")),
+                    "targets": _rw.get("targets") or [],
+                    "after": _rw.get("after") or [],
+                    "why": _rw.get("why") or "",
+                    "elapsed_ms": _rw.get("elapsed_ms", 0),
+                    "engine": _rw.get("engine") or "",
+                    "msg_id": str(msg_id or ""),
+                    "excerpt": str(_before or "")[:200],       # ★書き直し**前**
+                    "excerpt_after": str(_rw.get("text") or "")[:200],
+                }])
+                summary["tone_rewrite"] = 1 if _rw.get("ok") else 0
+                if _rw.get("ok"):
+                    s = _rw.get("text") or s
+    except Exception:
+        pass            # この段が送信を殺さない(沈黙が最悪の事故)
 
     # --- ゲートH(かな括弧の選択肢ラベル)= **話者非依存** ---------------------
     # ★2026-09-02 HQ-0232。Chamiが3回目の指摘(炎上+再発)を押した実物= (あ)(い) の選択肢。
