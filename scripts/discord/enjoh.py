@@ -26,9 +26,21 @@
   = 規律や実装の説明で素の🔥を**そのまま見せたい**場面があるため(誤発火する安全網は無視される)。
 ★fail-open: 例外は素通し=送信を殺さない(最悪の事故は沈黙)。
 """
+import json
 import os
 import re
 import sys
+import time
+
+# ★2026-09-12(イージス研究室)= 剥いだ事実を**残す**ための台帳。
+#   実測した穴: dept_daemon は persona_send を `capture_output=True` で起動し(L9885)、
+#   rc==0 の時は stderr を**捨てている**。つまり合流点のゲートが実便で仕事をしても、
+#   その audit 行はどのログにも残らない= 「入れた」を「効いた」へ上げる目が無い(§4.55)。
+#   → 剥いだ時だけ1行 append する。fail-open(書けなくても便を巻き込まない)。
+#   ★検査の行を本番の台帳へ混ぜない= sink_for(C-054・invisible.py と同じ正本を使う)。
+LOCAL = os.environ.get("GO5_LOCAL_DIR") or os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "local")
+SCRUB_AUDIT_FILE = os.path.join(LOCAL, "llm", "enjoh_scrub.jsonl")
 
 ENJOH_EMOJI = "<:enjoh:1541126866981752883>"
 _FIRE_RE = re.compile("\U0001F525️?")           # 素の🔥(異体字セレクタ付きも拾う)
@@ -269,6 +281,38 @@ _CONTROL_BLOCK_RE = re.compile(r"<(" + _CT + r")\b[^>\n]*>.*?</\1\s*>", re.S | r
 _CONTROL_LONE_RE = re.compile(r"</?(?:" + _CT + r")\b[^>\n]*>", re.I)
 
 
+def scrub_audit_file():
+    """この呼び出しが書くべき台帳のパス(本番 or 検査退避)。"""
+    try:
+        sys.path.insert(0, os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "lib"))
+        from test_sink import sink_for
+        return sink_for(SCRUB_AUDIT_FILE)
+    except Exception:
+        return SCRUB_AUDIT_FILE
+
+
+def scrub_audit(kind, tag, n, detail=""):
+    """合流点が**実便で**何を剥いだかを1行残す。剥いだ時だけ呼ぶ。
+
+    ★なぜ要るか= stderr は dept_daemon の capture_output に吸われて消える(モジュール冒頭の注記)。
+      残らないと、この部屋は「入れた(確認待ち)」から一生動けない。
+    ★fail-open= 書けなくても False を返すだけ。呼び出し元(=送信)は絶対に巻き込まない。
+    """
+    try:
+        row = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "kind": kind,
+               "tag": str(tag or ""), "n": int(n or 0), "detail": str(detail or "")[:200]}
+        path = scrub_audit_file()
+        if path != SCRUB_AUDIT_FILE:
+            row["test"] = True       # 退避先でも「検査の行」だと分かる形で残す(消さない)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a", encoding="utf-8", newline="") as f:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+        return True
+    except Exception:
+        return False
+
+
 def control_tag_scrub(body, tag="persona_send", quiet=False):
     """本文へ漏れた制御タグ(`<system>…</system>` 等)を剥ぐ純関数。
 
@@ -285,9 +329,12 @@ def control_tag_scrub(body, tag="persona_send", quiet=False):
         src = str(body)
         parts = _CODE_SPLIT_RE.split(src)
         n = 0
+        found = []                                   # 剥いだ札の現物(台帳へ残す証拠)
         for i in range(0, len(parts), 2):            # 偶数=地の文だけ(奇数=コード=触らない)
             s = parts[i]
+            found += [m.group(1) for m in _CONTROL_BLOCK_RE.finditer(s)]
             s, c1 = _CONTROL_BLOCK_RE.subn("", s)
+            found += [m.group(0) for m in _CONTROL_LONE_RE.finditer(s)]
             s, c2 = _CONTROL_LONE_RE.subn("", s)
             if c1 or c2:
                 n += c1 + c2
@@ -300,6 +347,11 @@ def control_tag_scrub(body, tag="persona_send", quiet=False):
         if not quiet:
             print(f"[{tag}] ★合流点で制御タグを剥いだ({n}件)= `<system>` 等は運転指示であって"
                   f"読み手への本文ではない(2026-09-11 恒久策)。", file=sys.stderr)
+        try:
+            scrub_audit("control_tag", tag, n, ",".join(found))
+        except Exception:
+            pass          # ★台帳の失敗で**剥ぎ取りを取り消さない**(外側の except は body を
+                          #   そのまま返す=漏れる。記録の都合で本文の安全を下げてはいけない)
         return out
     except Exception:
         return body
@@ -327,6 +379,12 @@ def english_para_scrub(body, tag="persona_send", quiet=False):
             print(f"[{tag}] ★合流点で英語段落を剥いだ({info['stripped']}件/英字"
                   f"{info['removed_latin']}字・by={','.join(info.get('by') or [])})= "
                   f"{(info.get('excerpts') or [''])[0][:60]}", file=sys.stderr)
+        try:
+            scrub_audit("english_para", tag, info.get("stripped"),
+                        f"latin={info.get('removed_latin')} by={','.join(info.get('by') or [])} "
+                        f"| {(info.get('excerpts') or [''])[0][:100]}")
+        except Exception:
+            pass          # ★control_tag_scrub と同じ理由= 台帳の失敗で本文を漏らさない
         return out
     except Exception as e:
         if not quiet:

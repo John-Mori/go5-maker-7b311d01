@@ -222,6 +222,55 @@ _tmps.append(t4)
 ok(mut2.strip_english_paragraphs(thin)[1]["stripped"] > 0,
    "E-5 must-fail 下限を外すと薄い便まで削る(=B-5は本当に効いている)")
 
+# ── F 剥いだ事実を残す台帳(2026-09-12 追加) ─────────────────────────────
+# なぜ足したか(実測): dept_daemon は persona_send を `capture_output=True` で起動し、
+#   rc==0 なら stderr を**捨てる**(scripts/llm/dept_daemon.py:9885)。つまり合流点の
+#   audit 行は実便では1行も残らない= 「入れた(確認待ち)」を「効いた」へ上げる目が無い(§4.55)。
+import json                                                       # noqa: E402
+
+AUD = enjoh.scrub_audit_file()
+ok(AUD != enjoh.SCRUB_AUDIT_FILE and AUD.endswith("_test.jsonl"),
+   "F-1 検査プロセスの行は本番の台帳へ入らない(sink_for・C-054)")
+
+
+def _rows():
+    if not os.path.exists(AUD):
+        return []
+    with open(AUD, encoding="utf-8") as f:
+        return [json.loads(x) for x in f if x.strip()]
+
+
+_n0 = len(_rows())
+enjoh.enjoh_backstop(REAL, tag="test-F", quiet=True)
+_new = _rows()[_n0:]
+ok(any(r.get("kind") == "control_tag" and r.get("n") >= 1 and r.get("test") is True
+       for r in _new), "F-2 制御タグを剥いだら台帳に1行(kind=control_tag)")
+ok(any(r.get("kind") == "english_para" and "by=" in (r.get("detail") or "")
+       for r in _new), "F-3 英語段落を剥いだら台帳に1行(latin/by が入る)")
+
+_n1 = len(_rows())
+enjoh.enjoh_backstop("[アメス]台帳は引けてるわよ。数字はあとで置くわね。", tag="test-F", quiet=True)
+ok(len(_rows()) == _n1,
+   "F-4 何も剥がない普通の便では1行も増えない(脈を検査と無検出で薄めない)")
+
+# F-5 must-fail= この目は今日入った(昨日の実物には無い)。
+old2, t5 = load_file("enjoh_old2", os.path.join(HERE, "enjoh.py.bak_20260912_scrublog"))
+_tmps.append(t5)
+ok(not hasattr(old2, "scrub_audit"),
+   "F-5 must-fail 改修前は剥いだ事実がどこにも残らなかった(stderrは捨てられる)")
+
+# F-6 must-fail 変異= 台帳が壊れても**本文の剥ぎ取りは取り消されない**。
+_real_audit = enjoh.scrub_audit
+try:
+    def _boom(*a, **k):
+        raise RuntimeError("台帳が書けない")
+    enjoh.scrub_audit = _boom
+    broke = enjoh.enjoh_backstop(REAL, tag="test-F", quiet=True)
+finally:
+    enjoh.scrub_audit = _real_audit
+ok("<system>" not in broke and "Let me investigate" not in broke,
+   "F-6 must-fail 台帳が例外でも剥ぎ取りは効く(記録の都合で本文の安全を下げない)")
+
 for t in _tmps:
     shutil.rmtree(t, ignore_errors=True)
 
