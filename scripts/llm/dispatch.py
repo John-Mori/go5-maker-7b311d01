@@ -461,13 +461,20 @@ def naming_gate_pass(sender, from_dept, body):
 #     `enjoh_backstop` ごと呼ばないのは、同梱の filler_line_scrub が「孤立した1語のASCII」を
 #     落とす作りで、封筒の本文に普通に出る識別子だけの行(例= `dispatch`)を消しかねないため。
 #     **依頼の情報を消す方が事故として重い**(規律§3= 誤発火する安全網は無視される)。
+#   ★2026-09-11= ここへ **control_tag_scrub も足した**(C-064= 外へ出る口は全部数えて同時に)。
+#     足す物と足さない物を分けた理由:
+#       足す  = 制御タグ剥ぎ。`<system>…</system>` は運転指示であって依頼の情報ではない
+#               = 消えて困る中身が無い。封筒でも本文でも同じく要らない。
+#       足さない= 英語段落剥ぎ。封筒には**英語の原文引用**が普通に載る(他部門の実物・ログ・
+#               エラー文)。ここで剥ぐと依頼の証拠が消える= filler_line_scrub と同じ理由で不可。
 def enjoh_gate_pass(body, dept):
     """投函する本文へ炎上表記ゲートを当てる。fail-open= 何が起きても便を止めない。"""
     try:
         d = os.path.join(ROOT, "scripts", "discord")
         if d not in sys.path:
             sys.path.insert(0, d)
-        from enjoh import fire_normalize
+        from enjoh import fire_normalize, control_tag_scrub
+        body = control_tag_scrub(body, tag=f"dispatch:{dept}")
         return fire_normalize(body, tag=f"dispatch:{dept}")
     except Exception as e:
         print(f"  [{dept}] 炎上表記ゲートの正本 enjoh.py を読めない({type(e).__name__})=素通し")

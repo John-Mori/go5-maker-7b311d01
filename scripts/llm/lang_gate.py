@@ -459,6 +459,113 @@ _CODEISH_RE = re.compile(r"[{};=<>|_\/\[\]#$]")
 _PARA_SPLIT_RE = re.compile(r"\n\s*\n")
 
 
+def _english_paragraph_spans(text, min_latin=35, min_words=5):
+    """英語の散文段落を**原文の位置つきで全部**返す(内部・判定の正本はここ1本)。
+
+    ★なぜ切り出したか(2026-09-11 イージス研究室 / 発注= 改善提案部門トトリ)=
+      `detect_english_paragraph` は最初の1つしか返さない作りだった。剥ぐ側(能動除去)は
+      **全部の位置**が要る。判定を2つ持つと必ず割れるので、判定はここへ集約し、
+      検知(detect_…)も除去(strip_…)もこの1本から引く(ORG-11)。
+    戻り= [{"start","end","latin","words","by","excerpt"}, …](原文のインデックス)
+    ★例外は握って [] (fail-safe)。判定器が転んでも本文は流れる。
+    """
+    out = []
+    try:
+        s = str(text or "")
+        masked = _mask_code_spans(s)          # 長さを保存する=index は原文基準のまま
+        pos = 0
+        for para in _PARA_SPLIT_RE.split(masked):
+            i = masked.find(para, pos)
+            if i < 0:
+                i = pos
+            pos = i + len(para)
+            body = para.strip()
+            if not body or _JP_RE.search(body):
+                continue                       # 日本語が1文字でも在る段落は触らない
+            latin = len(_LATIN_RE.findall(body))
+            if latin < min_latin:
+                continue
+            words = _EN_WORD_RE.findall(body)
+            if len(words) < min_words:
+                continue
+            if len(_CODEISH_RE.findall(body)) > max(2, len(body) * 0.05):
+                continue                       # コード/パス/コマンドの塊=散文ではない
+            by = "heuristic"
+            try:
+                import py3langid                # ★任意依存(無ければ純関数だけで判定する)
+                lang = py3langid.classify(body)[0]
+                if lang != "en":
+                    continue                   # 英語でないなら鳴らさない(精密化)
+                by = "py3langid"
+            except ImportError:
+                pass                           # 二重底= 第一段の純関数判定は生きる
+            except Exception:
+                pass                           # 判定器が転んでも純関数の結果を採る(fail-open)
+            # 段落の前後の空白は span に含めない= 原文の段落そのものだけを指す。
+            lead = len(para) - len(para.lstrip())
+            out.append({"start": i + lead, "end": i + lead + len(body),
+                        "latin": latin, "words": len(words), "by": by,
+                        "excerpt": body[:160]})
+        return out
+    except Exception:
+        return []
+
+
+def strip_english_paragraphs(text, min_latin=35, min_words=5, min_jp_left=20):
+    """日本語の便の**末尾/中間に居る純英語の散文段落**を能動的に剥ぐ(純関数・fail-safe)。
+
+    なぜ要るか(2026-09-11・実物 system-engineer msg 1547703386911285425):
+      投稿は3層だった= 日本語本文 + 漏れた `<system>…</system>` + 末尾の英語1文
+      `Let me investigate the data source behind the roster.`。Chami が 恒久+再発 を二重スタンプ。
+      ★既存のゲートが1枚も鳴らなかった理由(改善提案部門トトリが実物を通した実測):
+        ・detect_english_dump   = None(日本語優勢で jp<=latin*0.15 を満たさない)
+        ・strip_english_preamble= 先頭が日本語なので cut==0 → 先頭専用のこの関数は対象外
+        ・detect_latin_midband  = None(英字44字は20〜34帯の外)
+        ・detect_english_paragraph = **鳴っていた**(latin44/words9)。だが「検知だけ・挙動を
+          変えない」設計で、台帳と self-check へ回すだけ=**除去へ配線されていなかった**。
+      → 死角は閾値ではなく**形**だった。検知は見えているのに剥ぐ手が無い。ここがその手だ。
+      ★「本文に英語がそのまま出る」は 08-14 から少なくとも6波・平均5日に1回で、心がけでは
+        一度も止まっていない(改善提案部門の実測)。だから機械で止める。
+
+    安全弁(通常返信を1ミリも変えない・迷ったら残す):
+      ・日本語が1文字も無い本文は触らない= まるごと英語は `detect_english_dump` と
+        呼び側の english_gate(再生成/保留)の持ち場。ここで握り潰さない。
+      ・判定は `_english_paragraph_spans` と同一(日本語0字の段落 / 英字35字以上 / 5語以上 /
+        記号が濃くない / py3langid が在れば en だけ)。コード柵・インラインコード・URLは除外。
+      ・名乗りタグ `[...]` を含む段落は剥がない= 1行目の `[名前]` が壊れると前置き除去・
+        口調監査・監査記録がまとめて抜ける(HQ-0227 の実物と同じ壊れ方)。
+      ・剥いだ残りの日本語が min_jp_left(20)字未満なら**何もしない**= 実質まるごと英語は
+        後段(suppress/再生成)へ委ねる。空の本文を作らない(沈黙が最悪の事故)。
+
+    戻り= (out_text, {"stripped":int, "removed_latin":int, "excerpts":[…], "by":[…]})
+      stripped=0 のとき out_text は入力と同一。
+    """
+    info = {"stripped": 0, "removed_latin": 0, "excerpts": [], "by": []}
+    try:
+        s = str(text or "")
+        if not s or not _JP_RE.search(s):
+            return text, info                  # 日本語ゼロ=まるごと非日本語→後段へ委ねる
+        spans = [sp for sp in _english_paragraph_spans(s, min_latin, min_words)
+                 if not _NAME_TAG_RE.search(s[sp["start"]:sp["end"]])]
+        if not spans:
+            return text, info
+        keep, prev = [], 0
+        for sp in spans:
+            keep.append(s[prev:sp["start"]])
+            prev = sp["end"]
+        keep.append(s[prev:])
+        out = re.sub(r"\n{3,}", "\n\n", "".join(keep)).strip()
+        if len(_JP_RE.findall(out)) < min_jp_left:
+            return text, info                  # 残りが薄い=剥ぐと本文が死ぬ→触らない
+        info["stripped"] = len(spans)
+        info["removed_latin"] = sum(sp["latin"] for sp in spans)
+        info["excerpts"] = [sp["excerpt"] for sp in spans]
+        info["by"] = [sp["by"] for sp in spans]
+        return out, info
+    except Exception:
+        return text, info                      # fail-safe: ゲートで配送を殺さない
+
+
 def detect_english_paragraph(text, min_latin=35, min_words=5):
     """日本語の便の中に混じった**英語の散文段落**を返す(無ければ None)。
 

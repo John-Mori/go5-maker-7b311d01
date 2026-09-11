@@ -26,6 +26,7 @@
   = 規律や実装の説明で素の🔥を**そのまま見せたい**場面があるため(誤発火する安全網は無視される)。
 ★fail-open: 例外は素通し=送信を殺さない(最悪の事故は沈黙)。
 """
+import os
 import re
 import sys
 
@@ -54,7 +55,7 @@ _KEEP_WORDS = {
 }
 
 
-def filler_line_scrub(body, tag="persona_send"):
+def filler_line_scrub(body, tag="persona_send", quiet=False):
     """段落と段落の間に挟まった、生成ノイズの孤立フィラー行を落とす。
 
     実物(DEF-codex-care-noise-line-20260905 / QA起票):
@@ -104,17 +105,19 @@ def filler_line_scrub(body, tag="persona_send"):
             elif i - 1 >= 0 and lines[i - 1].strip() == "" and (i - 1) not in drop:
                 drop.add(i - 1)
         hit = [lines[i].strip() for i in sorted(drop) if lines[i].strip()]
-        print(f"[{tag}] ★生成ノイズの孤立フィラー行を合流点で除去({len(hit)}行"
-              f" / 語={','.join(sorted(set(hit)))})= DEF-codex-care-noise-line-20260905。",
-              file=sys.stderr)
+        if not quiet:
+            print(f"[{tag}] ★生成ノイズの孤立フィラー行を合流点で除去({len(hit)}行"
+                  f" / 語={','.join(sorted(set(hit)))})= DEF-codex-care-noise-line-20260905。",
+                  file=sys.stderr)
         return "\n".join(lines[i] for i in range(n) if i not in drop)
     except Exception as e:
-        print(f"[{tag}] フィラー行スクラブ不能({type(e).__name__})=素通し(送信は殺さない・fail-open)",
-              file=sys.stderr)
+        if not quiet:
+            print(f"[{tag}] フィラー行スクラブ不能({type(e).__name__})=素通し(送信は殺さない・fail-open)",
+                  file=sys.stderr)
         return body
 
 
-def fire_normalize(body, tag="dispatch"):
+def fire_normalize(body, tag="dispatch", quiet=False):
     """★炎上表記(A/B)**だけ**を当てる。フィラー行スクラブは含まない。
 
     ★2026-09-07 追加(イージス研究室)= **第6の口 `scripts/llm/dispatch.py` のため**に切り出した。
@@ -141,17 +144,198 @@ def fire_normalize(body, tag="dispatch"):
             m += j
         if not n and not m:
             return body                       # 対象はコードの中だけだった=触らない
-        print(f"[{tag}] ★炎上表記を合流点で正規化(素の🔥→<:enjoh:…> {n}件 / ラベル炎上→恒久 {m}件)"
-              f"= Chami指摘の再発を機械的に潰す(共通規律§5・REQ-kaizen-analyst-90ebe8bfc8)。",
-              file=sys.stderr)
+        if not quiet:
+            print(f"[{tag}] ★炎上表記を合流点で正規化(素の🔥→<:enjoh:…> {n}件 / ラベル炎上→恒久 {m}件)"
+                  f"= Chami指摘の再発を機械的に潰す(共通規律§5・REQ-kaizen-analyst-90ebe8bfc8)。",
+                  file=sys.stderr)
         return "".join(parts)
     except Exception as e:
-        print(f"[{tag}] 炎上表記ゲート不能({type(e).__name__})=素通し(送信は殺さない・fail-open)",
-              file=sys.stderr)
+        if not quiet:
+            print(f"[{tag}] 炎上表記ゲート不能({type(e).__name__})=素通し(送信は殺さない・fail-open)",
+                  file=sys.stderr)
         return body
 
 
-def enjoh_backstop(body, tag="persona_send"):
+# --- (3) 定型ack denylist ---------------------------------------------------------
+# ★2026-09-10(イージス研究室・発注= 改善提案部門トトリの上申)。炎上 + 再発の恒久策。
+#   実物= 🚬無線通信-オタコン 2026-09-10 02:56 に出た
+#     「受け取った。処理を開始する。完了結果は保存してから返す。」
+#   Chami原文=「このやり取りいらない」→(再発)「効いてません」。
+#   真因の1つ(codex_responder.py:546 notify_room の定型テキスト)は 09-10 09:36 に撤去済。
+#   だが**撤去は1箇所の守り**で、次の実装が同じ文を書けば戻る(送信印で一度やられている)。
+#   → 判定の正本をここに置き、Discordへ出る各口から引く(炎上表記ゲートと同じ型)。
+#
+# ★語ではなく**文**の集合で持つ / 部分一致で落とさない:
+#   本文を文へ割り、**全部の文が下の句**の時だけ「言うことが無い」とする。
+#   「受け取った。ログの末尾は 09-10 だ。」は2文目が句に無い= **送る**(情報を消さない)。
+# ★迷ったら喋る側へ倒す(規律§3): 長い本文は見ない / 句に無い1単位が在れば送る /
+#   例外は素通し。**誤って黙らせる方が事故として重い**。
+ACK_MAX_CHARS = 200
+_ACK_PHRASES = frozenset([
+    # 受領だけを言う文
+    "受け取った", "受け取りました", "受け取ります", "受けとった", "受領した", "受領しました",
+    "受け付けた", "受け付けました", "承知した", "承知しました", "了解した", "了解しました",
+    "把握した", "把握しました", "確認した", "確認しました",
+    # 着手だけを言う文
+    "処理を開始する", "処理を開始します", "処理を始める", "処理を始めます", "処理する",
+    "処理します", "対応を開始する", "対応を開始します", "対応する", "対応します",
+    "作業を開始する", "作業を開始します", "着手する", "着手します",
+    "これから対応する", "今から対応する", "確認を開始する", "確認する", "確認します",
+    # 結果を後で返すとだけ言う文
+    "完了結果は保存してから返す", "完了結果は保存してから返します",
+    "完了したら返す", "完了したら報告する", "完了したら報告します",
+    "完了後に報告する", "完了後に報告します", "終わり次第報告する", "終わり次第報告します",
+    "終わったら報告する", "結果は追って返す", "結果は追って報告する", "結果は追って共有する",
+    "追って返す", "追って報告する", "追って報告します", "追って共有する",
+    "少々お待ちください", "しばらくお待ちください", "お待ちください",
+    # 英語の同型(小文字で引く)
+    "ack", "acked", "acknowledged", "received", "roger", "understood", "noted",
+    "onit", "workingonit", "willreportback", "processing", "started",
+])
+_ACK_DROP_RE = re.compile(r"[\s\*`_~>#\-–—・:：]+")          # 空白と装飾は落としてから引く
+_ACK_EDGE = "。．.!！?？、,…‥ー()（）[]{}「」『』\"'“”‘’ 　"
+# 文の切れ目。★半角句点 ｡ も入れる= 割る前に NFKC を通すが、「割る」と「引く」で正規化が
+#   ずれると片方だけすり抜ける(実測= `受け取った｡処理を開始する｡` がすり抜けた)。
+_ACK_SPLIT_RE = re.compile(r"[。｡．.!！?？;；\n]+")
+
+
+def ack_norm(unit):
+    """1文を denylist と突き合わせる形へ(NFKC・空白と装飾を除去・両端の句読点を落とす)。"""
+    import unicodedata
+    s = unicodedata.normalize("NFKC", str(unit or ""))
+    return _ACK_DROP_RE.sub("", s).strip(_ACK_EDGE).lower()
+
+
+def ack_only_reason(body, peel=None):
+    """その本文は**既知の定型ackだけ**でできているか。戻り= 落とす理由の1行 / 送るなら ""。
+
+    peel= 行から名乗りタグ等を剥がす任意の関数(line)->line。渡さなければ行をそのまま見る。
+    ★空・空白だけの本文はここでは落とさない("" を返す)= 空の判定は各口の持ち場
+      (dept_daemon の `_is_empty_body` / persona_send の「本文が空です」)。判定を二重に持たない。
+    ★例外は握って "" (=送る)。ゲートの故障で部屋を黙らせない。
+    """
+    try:
+        import unicodedata
+        s = str(body or "").strip()
+        if not s or len(s) > ACK_MAX_CHARS:
+            return ""
+        units = []
+        for ln in s.split("\n"):
+            if not ln.strip():
+                continue
+            if callable(peel):
+                ln = peel(ln) or ""
+                if not ln.strip():
+                    continue
+            for u in _ACK_SPLIT_RE.split(unicodedata.normalize("NFKC", ln)):
+                n = ack_norm(u)
+                if n:
+                    units.append(n)
+        if not units or not all(u in _ACK_PHRASES for u in units):
+            return ""
+        return "定型ackだけで中身が無い(%d文= %s)" % (len(units), " / ".join(units[:4]))
+    except Exception:
+        return ""
+
+
+def ack_backstop(body, tag="persona_send", peel=None, quiet=False):
+    """出口用の薄い包み。落とすなら理由を stderr へ出して True を返す(送るなら False)。
+
+    ★黙って落とさない= 呼んだ口が必ず台帳(send_audit 等)へ blocked を残すこと。
+    """
+    why = ack_only_reason(body, peel=peel)
+    if not why:
+        return False
+    if not quiet:
+        print(f"[{tag}] ★定型ack denylist= {why} → 送らない。"
+              f"内容の無い一次ackは沈黙より悪い(共通規律§2・2026-09-10 恒久策)。", file=sys.stderr)
+    return True
+
+
+# --- (3) 生成が漏らす制御タグ ---------------------------------------------------------
+# 実物(2026-09-11 msg 1547703386911285425・system-engineer / Chami が 恒久+再発 を二重スタンプ):
+#   投稿が3層になっていた= 日本語本文 + `<system>WIPは付けない。実際に調べる。</system>` +
+#   末尾の英語1文。中の指示は**こちらが与えた運転指示**であって、Chamiへ見せる本文ではない。
+# ★scripts全体を grep して、この除去は**どこにも無かった**(改善提案部門トトリの実測・該当0)。
+#   名乗りタグ `[…]` の剥離は在るが、あれは行頭1個の別物。だから新設してここへ足す。
+_CONTROL_TAG_NAMES = (
+    "system", "thinking", "thought", "reasoning", "scratchpad", "internal",
+    "assistant", "human", "user", "instructions", "antml:thinking",
+)
+_CT = "|".join(re.escape(n) for n in _CONTROL_TAG_NAMES)
+# 対で閉じている塊= 中身ごと落とす。
+_CONTROL_BLOCK_RE = re.compile(r"<(" + _CT + r")\b[^>\n]*>.*?</\1\s*>", re.S | re.I)
+# 閉じ損ねて片方だけ残った札= その札だけ落とす(中身は本文かもしれないので消さない)。
+_CONTROL_LONE_RE = re.compile(r"</?(?:" + _CT + r")\b[^>\n]*>", re.I)
+
+
+def control_tag_scrub(body, tag="persona_send", quiet=False):
+    """本文へ漏れた制御タグ(`<system>…</system>` 等)を剥ぐ純関数。
+
+    かける面= Discordへ投稿される本文。かけない面= コードブロック / インラインコード
+      (規律や実装の説明で `<system>` を**そのまま見せたい**場面がある。誤発火する安全網は無視される)。
+    ★対で閉じた塊は中身ごと落とす= 中身は運転指示であって読み手への文章ではない。
+      片割れの札だけ残っている時は**札だけ**落とす= 本文を巻き添えにしない。
+    ★剥いだ結果が空/空白だけになるなら**元をそのまま返す**= 沈黙を作らない(最悪の事故は沈黙)。
+    ★fail-open: 例外は素通し。
+    """
+    try:
+        if not body:
+            return body
+        src = str(body)
+        parts = _CODE_SPLIT_RE.split(src)
+        n = 0
+        for i in range(0, len(parts), 2):            # 偶数=地の文だけ(奇数=コード=触らない)
+            s = parts[i]
+            s, c1 = _CONTROL_BLOCK_RE.subn("", s)
+            s, c2 = _CONTROL_LONE_RE.subn("", s)
+            if c1 or c2:
+                n += c1 + c2
+                parts[i] = s
+        if not n:
+            return body
+        out = re.sub(r"\n{3,}", "\n\n", "".join(parts)).strip()
+        if not out:
+            return body                              # 全部が制御タグだった=判断を後段へ委ねる
+        if not quiet:
+            print(f"[{tag}] ★合流点で制御タグを剥いだ({n}件)= `<system>` 等は運転指示であって"
+                  f"読み手への本文ではない(2026-09-11 恒久策)。", file=sys.stderr)
+        return out
+    except Exception:
+        return body
+
+
+# --- (4) 末尾/中間に居座る英語段落 -----------------------------------------------------
+def english_para_scrub(body, tag="persona_send", quiet=False):
+    """日本語の便に混じった純英語の散文段落を剥ぐ(判定と除去の正本は lang_gate.py)。
+
+    ★ここは**薄い包み**= 判定を持たない。言語の判定器を2本に増やすと必ず割れる(ORG-11)。
+      実体= scripts/llm/lang_gate.py の strip_english_paragraphs()(安全弁と根拠はそちらの
+      docstring に書いた)。読めなければ素通し= 便を止めない(fail-open)。
+    """
+    try:
+        if not body:
+            return body
+        d = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "llm")
+        if d not in sys.path:
+            sys.path.insert(0, d)
+        from lang_gate import strip_english_paragraphs
+        out, info = strip_english_paragraphs(body)
+        if not info.get("stripped"):
+            return body
+        if not quiet:
+            print(f"[{tag}] ★合流点で英語段落を剥いだ({info['stripped']}件/英字"
+                  f"{info['removed_latin']}字・by={','.join(info.get('by') or [])})= "
+                  f"{(info.get('excerpts') or [''])[0][:60]}", file=sys.stderr)
+        return out
+    except Exception as e:
+        if not quiet:
+            print(f"[{tag}] 英語段落ゲートの正本 lang_gate.py を読めない({type(e).__name__})=素通し",
+                  file=sys.stderr)
+        return body
+
+
+def enjoh_backstop(body, tag="persona_send", quiet=False):
     """Discordへ出る本文を合流点で正規化する(炎上表記 + 生成ノイズの孤立フィラー行)。
 
     引数 tag は stderr の出所表示だけに使う(判定には効かない)。
@@ -159,6 +343,16 @@ def enjoh_backstop(body, tag="persona_send"):
     ★名前は据え置き= 5口の呼び出しと既存の配線検査(co_names)を壊さないため。
     ★2026-09-07= 中身を fire_normalize() へ切り出しただけで、この関数の振る舞いは変えていない
       (フィラー行スクラブ → 炎上表記、の順も同じ)。
+    ★quiet=True(2026-09-09 HQ-0253・イージス研究室)= **変換はそのまま・stderr へ出さない**だけ。
+      送信の実在確認(dept_daemon.verify_replied)が「実際に投げた本文」を再現するために同じ
+      ゲートを通す。そこで「合流点で正規化した」と鳴ると、**送っていない2度目の正規化**が
+      起きたように読める(ログを読む人が事故を数え間違える)。返す本文は1ミリも変わらない。
+    ★2026-09-11= 前段に2枚足した(発注= 改善提案部門トトリ / 実物= msg 1547703386911285425)。
+      順番に理由が在る= 制御タグ(3)を先に剥ぐと、その中身の英語が英語段落(4)の判定へ混ざらない。
+      英語段落(4)の次にフィラー行(1)= 段落を剥いだ跡に1語だけ残った行をそこで拾える。
+      炎上表記(2)は最後= 置換であって除去ではないので、除去が全部済んだ本文に当てるのが素直。
     """
-    body = filler_line_scrub(body, tag=tag)       # ★炎上表記の有無に関係なく必ず通す
-    return fire_normalize(body, tag=tag)
+    body = control_tag_scrub(body, tag=tag, quiet=quiet)   # (3) 漏れた <system> 等
+    body = english_para_scrub(body, tag=tag, quiet=quiet)  # (4) 末尾/中間の純英語段落
+    body = filler_line_scrub(body, tag=tag, quiet=quiet)   # ★炎上表記の有無に関係なく必ず通す
+    return fire_normalize(body, tag=tag, quiet=quiet)
