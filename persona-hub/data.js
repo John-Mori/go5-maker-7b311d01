@@ -9,6 +9,32 @@ window.PERSONA_HUB_DATA = {
    "アイコン": "local\\persona_avatars.json",
    "原典": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md"
   },
+  "_source_fingerprint": {
+   "口調": {
+    "path": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
+    "sha1": "bb52b265188e4b36264f4228b0b1467e3486bd66",
+    "bytes": 40264,
+    "mtime": 1789067318.623
+   },
+   "呼称": {
+    "path": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
+    "sha1": "cadac1e9ce64338cd7501d3d041b2b93128327d2",
+    "bytes": 83668,
+    "mtime": 1789010624.199
+   },
+   "アイコン": {
+    "path": "local\\persona_avatars.json",
+    "sha1": "312da127767f8008d7f976bd12ac4d42ed99b1e3",
+    "bytes": 13654,
+    "mtime": 1788892296.349
+   },
+   "原典": {
+    "path": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md",
+    "sha1": "3f1ed8ce5b6fcf0f5893db7081a0bb9b79a60727",
+    "bytes": 7387,
+    "mtime": 1789072584.812
+   }
+  },
   "_count": 25
  },
  "personas": {

@@ -12,7 +12,7 @@ Chami依頼(2026-08-16 msg 1538499998671568906)の下地:
 
 使い方: python scripts/hr/persona_settings_index.py
 """
-import json, os, re, sys, io
+import json, os, re, sys, io, hashlib
 
 # --- パス(cwd=5SecMovieMaker 前提) ---
 HR   = os.path.join("..", "00_AI-HQ", "departments", "hr")
@@ -26,6 +26,18 @@ OUT     = os.path.join(LOCAL, "persona_settings_index.json")
 # 公開ページ(GitHub Pages)へ配信するJS埋め込み版。local/ はgitignore配下=Pagesに出ない
 # ため、ページが読める persona-hub/ 直下に window.PERSONA_HUB_DATA として焼き込む(派生物・手編集禁止)。
 DATAJS  = os.path.join("persona-hub", "data.js")
+
+def _fingerprint(p):
+    """正本ファイルの中身指紋(sha1)を取る。selfcheck が『data.jsが正本より古い』を出荷前に検出する材料。
+    mtime は checkout でズレるので照合は sha1 で行う(mtime/bytes は人間向けの参考値)。"""
+    try:
+        with open(p, "rb") as f:
+            b = f.read()
+        return {"path": p, "sha1": hashlib.sha1(b).hexdigest(),
+                "bytes": len(b), "mtime": round(os.path.getmtime(p), 3)}
+    except Exception as e:
+        print(f"[warn] fingerprint {p}: {e}", file=sys.stderr)
+        return {"path": p, "sha1": None, "bytes": None, "mtime": None}
 
 def _load_json(p):
     try:
@@ -147,6 +159,14 @@ def build():
             "呼称": os.path.join(PERS, "呼称ルール.json"),
             "アイコン": AVATARS,
             "原典": os.path.join(CHAR, "ROSTER.md"),
+        },
+        # 正本の中身指紋。selfcheck.py が現物の正本と突き合わせ、data.jsが古ければ出荷を止める
+        # (型C=正本を直したのに再生成し忘れて公開ページが古い名簿/口調のまま、の再発ガード)。
+        "_source_fingerprint": {
+            "口調": _fingerprint(os.path.join(PERS, "口調ルール.json")),
+            "呼称": _fingerprint(os.path.join(PERS, "呼称ルール.json")),
+            "アイコン": _fingerprint(AVATARS),
+            "原典": _fingerprint(os.path.join(CHAR, "ROSTER.md")),
         },
         "_count": len(out),
     }
