@@ -473,6 +473,83 @@ def test_multiblock_reply():
         cn.ROOT = real_root
 
 
+# ---------------------------------------------------------------- wip_fold_ok(2026-09-13 デブライネ指摘)
+def test_wip_fold_ok():
+    """WIPが立っていても畳んでよい条件(実データ由来= to_dept が hq の時だけ畳まない)。
+
+    実データの検算(local/llm/request_log.jsonl の wip 抑止44件をreplay)で、
+    「畳んでいたら実際に失っていたはずの件」は to_dept=hq の1件だけだった
+    (git add -A の事故回避・change_log.jsonl 実物)。他の30部門・34件には
+    同型の損失は無かった。→ 例外は to_dept=hq だけにする。
+    """
+    print("\n■ wip_fold_ok(WIPが立っていてもhq以外は畳む・実データ由来の例外はhqだけ)")
+
+    # W-1 to_dept=hq は WIP が立っていれば今までどおり畳まない(表へ出る)
+    write_ledgers(
+        [done("5001", "copy-director", 60, state="replied", landed="9001"),
+         {"ts": ts_ago(50), "request_id": "5001", "dept": "copy-director",
+          "state": cn.WORKING_STATE, "evidence": ""}],
+        [letter("5001", "copy-director", "hq", True)])
+    s = run()
+    chk("W-1 to_dept=hq はWIPが立っていれば手番ゼロを宣言しない(実物の唯一の損失例に対応)",
+        len(s) == 1 and s[0]["quiet_ok"] is False and "<<WIP>>" in s[0]["body"],
+        f"→ quiet_ok={s[0]['quiet_ok'] if s else None}")
+
+    # W-2 hq以外はWIPが立っていても、基底の手番ゼロ判定(quiet_ack_ok)に従って畳む
+    write_ledgers(
+        [done("5002", "copy-director", 60, state="replied", landed="9002"),
+         {"ts": ts_ago(50), "request_id": "5002", "dept": "copy-director",
+          "state": cn.WORKING_STATE, "evidence": ""}],
+        [letter("5002", "copy-director", "research-room", True)])
+    s = run()
+    chk("W-2 hq以外はWIPが立っていても手番ゼロなら畳む(実データで損失0件だった側)",
+        len(s) == 1 and s[0]["quiet_ok"] is True,
+        f"→ quiet_ok={s[0]['quiet_ok'] if s else None}")
+
+    # W-3 ★赤(C-053)= 旧実装(WIPが立てば一律畳まない)へ戻すと、W-2の緑が消える
+    #   = 新実装がここで効いていることの証明(ソースの文字列一致ではなく実行で示す)。
+    def old_wip_fold_ok(base_quiet, wip_ts, to_dept):
+        return base_quiet and not wip_ts
+
+    real_fn = cn.wip_fold_ok
+    cn.wip_fold_ok = old_wip_fold_ok
+    try:
+        write_ledgers(
+            [done("5003", "copy-director", 60, state="replied", landed="9003"),
+             {"ts": ts_ago(50), "request_id": "5003", "dept": "copy-director",
+              "state": cn.WORKING_STATE, "evidence": ""}],
+            [letter("5003", "copy-director", "research-room", True)])
+        s_red = run()
+    finally:
+        cn.wip_fold_ok = real_fn
+    chk("W-3 ★赤= 旧実装(and not wip_ts一律)へ戻すとhq以外もWIPで畳まなくなる",
+        len(s_red) == 1 and s_red[0]["quiet_ok"] is False,
+        f"→ quiet_ok={s_red[0]['quiet_ok'] if s_red else None}")
+
+    # W-3b 戻した後は再びhq以外は畳む(退行していない)
+    write_ledgers(
+        [done("5004", "copy-director", 60, state="replied", landed="9004"),
+         {"ts": ts_ago(50), "request_id": "5004", "dept": "copy-director",
+          "state": cn.WORKING_STATE, "evidence": ""}],
+        [letter("5004", "copy-director", "research-room", True)])
+    s_green = run()
+    chk("W-3b 戻した後は再びhq以外は畳む(旧実装の副作用が残っていない)",
+        len(s_green) == 1 and s_green[0]["quiet_ok"] is True,
+        f"→ quiet_ok={s_green[0]['quiet_ok'] if s_green else None}")
+
+    # W-4 完遂より**前**のWIPは対象外(従来どおり)= wip_ts が渡らないので、
+    #   hq宛でもWIPの影響を受けず基底のまま畳む(退行チェック)
+    write_ledgers(
+        [done("5005", "copy-director", 60, state="replied", landed="9005"),
+         {"ts": ts_ago(90), "request_id": "5005", "dept": "copy-director",
+          "state": cn.WORKING_STATE, "evidence": ""}],
+        [letter("5005", "copy-director", "hq", True)])
+    s = run()
+    chk("W-4 完遂より前のWIPは無視する(hq宛でも基底のまま畳む・従来どおり)",
+        len(s) == 1 and s[0]["quiet_ok"] is True and "<<WIP>>" not in s[0]["body"],
+        f"→ quiet_ok={s[0]['quiet_ok'] if s else None}")
+
+
 # ---------------------------------------------------------------- dispatch の記録側
 def test_dispatch_records_from_dept():
     print("\n■ dispatch.py が便レコードへ発注元を残す(一時キューDBで経路実行)")
@@ -623,6 +700,7 @@ def main():
         test_notify()
         test_spot_path()
         test_multiblock_reply()
+        test_wip_fold_ok()
         test_dispatch_records_from_dept()
         test_env_from_dept()
     finally:

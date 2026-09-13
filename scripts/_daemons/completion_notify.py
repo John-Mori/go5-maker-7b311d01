@@ -425,6 +425,34 @@ def quiet_ack_ok(spot, had_text, landed="", state=""):
     return bool(spot or had_text or (landed and state == "replied"))
 
 
+# ★★2026-09-13・イージス研究室(デブライネ)指摘 msg=1548697831382978773=
+#   従来の `and not wip_ts` は WIP が立っていれば**一律**畳まなかった。実データで検算した
+#   (request_log.jsonl の wip 抑止行 44件・全件を replay)=
+#     ・「畳んでいたら実際に失っていたはずの件」は **to_dept=hq の1件だけ**
+#       (2026-09-13T19:11:25 の完遂通知→HQが読んで「git add -A を使うな」と指示→
+#        同tree内の他部門の未commit差分961件を巻き込む事故を回避。change_log.jsonl 実物で確認)。
+#     ・残り34件(hq以外の to_dept)は、同時間帯±2hの change_log.jsonl を事故語彙
+#       (事故/見落とし/炎上/止めた/危な/誤発火/間違え/取り消し/止まった)で突き合わせても、
+#       ヒットした9件は全て**無関係な別件の作業記録**(通常語彙が一致しただけ)で、
+#       この便を畳んだこと自体が原因の損失は1件も無かった。
+#   → 例外は **to_dept=hq だけ**にする(n=1の実例を一般化し過ぎない=fail-open側へ残す)。
+#     hq 以外は WIP が立っていても、手番ゼロの基底判定(quiet_ack_ok)に従って畳んでよい。
+WIP_FOLD_NEVER_DEPTS = ("hq",)
+
+
+def wip_fold_ok(base_quiet, wip_ts, to_dept):
+    """WIPが立っている便でも畳んでよいか。実データで唯一裏づけられた例外=to_dept が hq。
+
+    ★本文もmsg内容も読まない(quiet_ack_target と同じ筋=構造だけで決める)。
+      wip_ts が無い便はそもそもこの関数の出番ではない(=base_quiet をそのまま返す)。
+    """
+    if not wip_ts:
+        return base_quiet
+    if to_dept in WIP_FOLD_NEVER_DEPTS:
+        return False
+    return base_quiet
+
+
 def send(to_dept, from_dept, body, dry_run, quiet_ok=False):
     """dispatch.py で1行返す。戻り値=(ok, 出力). ★--also-post は付けない(裏=キューだけ)。
 
@@ -569,8 +597,10 @@ def main():
             # ★手番ゼロの宣言は build_body と**同じ条件**で立てる(枝が1つしか無い形にする)。
             #   置き場を載せた / 返信そのものが届いている= 受け手に頼むことが無い便。
             #   どちらでもない便は「請けた部門へ問い直せ」と書いてある=手番が有るので付けない。
-            # ★WIPが立っている便は**手番ゼロにしない**= 受け手は「閉じるな」を読む必要がある。
-            quiet = quiet_ack_ok(spot, bool(text), landed, d.get("state")) and not wip_ts
+            # ★WIPが立っている便は、実データ由来の例外(to_dept=hq)以外は畳んでよい
+            #   (wip_fold_ok・2026-09-13 デブライネ指摘 msg=1548697831382978773)。
+            quiet = wip_fold_ok(
+                quiet_ack_ok(spot, bool(text), landed, d.get("state")), wip_ts, to_dept)
             ok, out = send(to_dept, d["dept"], body, a.dry_run, quiet)
             if ok:
                 sent += 1
