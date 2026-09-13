@@ -31,6 +31,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 
 try:
@@ -42,6 +43,7 @@ except Exception:
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, HERE)
+from tokenless_router import scripted_reply  # noqa: E402
 
 LOCAL = os.environ.get("GO5_LOCAL_DIR") or os.path.join(ROOT, "local")
 INBOX = os.path.join(LOCAL, "discord_inbox_codex.jsonl")           # 旧jsonl経路(残置・実質未使用)
@@ -71,8 +73,23 @@ REASON_RE = re.compile(r"生成失敗[:：].*?\[([^\]]+)\]")
 # 橋(Codex回線)が落ちている系の理由= Chamiの依頼が悪いのではなく橋の不通。codex_run.py L294の版数切れバケツと同義。
 BRIDGE_DOWN_REASONS = ("not supported", "invalid_request", "unauthorized",
                        "401", "429", "Error loading config")
-# codex_run.py の --timeout(既定600)より少し長く待つ(生成+worktree操作+投稿の余白)。
-RUN_TIMEOUT = 720
+
+
+def _env_int(name, default, minimum=1, maximum=86400):
+    try:
+        value = int(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        value = int(default)
+    return max(minimum, min(maximum, value))
+
+
+# 重い実装は実測600秒を越えた。内側の生成上限と外側の待機上限を分け、終了処理の余白を持つ。
+CODEX_EXEC_TIMEOUT = _env_int("CODEX_EXEC_TIMEOUT_SEC", 1800, minimum=60, maximum=7200)
+RUN_TIMEOUT = CODEX_EXEC_TIMEOUT + 180
+LEASE_EXTEND_INTERVAL = _env_int("CODEX_LEASE_HEARTBEAT_SEC", 240, minimum=10, maximum=600)
+LEASE_EXTEND_SEC = max(900, min(7200, CODEX_EXEC_TIMEOUT + 300))
+SEND_RETRY_SEC = _env_int("CODEX_SEND_RETRY_SEC", 60, minimum=10, maximum=3600)
+MAX_SEND_ATTEMPTS = _env_int("CODEX_SEND_MAX_ATTEMPTS", 3, minimum=1, maximum=10)
 
 
 def log(rec):
@@ -85,6 +102,36 @@ def append_line(path, line):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "a", encoding="utf-8") as f:
         f.write(line.rstrip("\n") + "\n")
+
+
+def origin_dept_for(rec):
+    """@ボス召喚元の部門を返す。
+
+    queueのdeptはCodex受付用に 'codex' へ付け替えるため、元部門は
+    codex_origin_dept に退避して読む。古い行はchannel台帳から復元する。
+    """
+    if not isinstance(rec, dict):
+        return ""
+    for key in ("codex_origin_dept", "origin_dept"):
+        v = str(rec.get(key) or "").strip()
+        if v and v != "codex":
+            return v
+    v = str(rec.get("dept") or "").strip()
+    if v and v != "codex":
+        return v
+    ch = str(rec.get("channel") or "").strip()
+    if not ch:
+        return ""
+    try:
+        chans = json.load(open(CHANNELS_FILE, encoding="utf-8"))
+        for c in chans:
+            if ch in (str(c.get("id", "")), str(c.get("name", ""))):
+                d = str(c.get("dept") or "").strip()
+                if d and d != "codex":
+                    return d
+    except Exception:
+        pass
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -112,6 +159,18 @@ def codex_active():
 # ---------------------------------------------------------------------------
 # 口(部屋への通知)= Codex bot本人として。codex_run の送信部を再利用(二重管理しない)。
 # ---------------------------------------------------------------------------
+def reply_target(rec):
+    """返信先は不変のchannel_idを優先し、旧レコードだけ表示名へフォールバックする。"""
+    channel_id = str(rec.get("channel_id") or "").strip()
+    if channel_id.isdigit():
+        return channel_id
+    return str(rec.get("channel") or "").strip()
+
+
+def channel_label(rec):
+    return str(rec.get("channel") or rec.get("channel_id") or "").strip()
+
+
 def notify_room(channel, text):
     """エスカレ受領などの短い通知を Codex bot本人として投稿する(codex_run.dc_sendを借りる)。
     失敗しても握りつぶす(通知は本筋を止めない)。"""
@@ -119,9 +178,11 @@ def notify_room(channel, text):
         sys.path.insert(0, os.path.join(ROOT, "scripts", "codex"))
         import codex_run
         token = open(TOKEN_FILE, encoding="utf-8").read().strip()
-        codex_run.dc_send(token, codex_run.resolve_channel(channel), text)
-    except Exception as e:
+        channel_id = str(channel) if str(channel).isdigit() else codex_run.resolve_channel(channel)
+        return bool(codex_run.dc_send(token, channel_id, text))
+    except (Exception, SystemExit) as e:
         print(f"  通知失敗(続行): {type(e).__name__}")
+        return False
 
 
 def mark(channel, msg_id, kind):
@@ -135,18 +196,220 @@ def mark(channel, msg_id, kind):
       着手 … codex_run.py で重い実装を始める直前(本格的な作業の開始)
       即答 … 司令塔へ回すなど その場の返信で完結した時(「読んだだけ」との曖昧さ解消)
     処理中の当の1通(msg_id/channel は rec が持つ)を狙って押すので react_mark の dept走査は要らない。
-    べき等(react.py の PUT /@me は同じ印の二度押しが no-op)・fail-open(印は本筋を絶対に止めない)。"""
+    べき等(react.py の PUT /@me は同じ印の二度押しが no-op)・fail-open(印は本筋を絶対に止めない)。
+
+    ★2026-09-06(イージス研究室)= 押し方を scripts/lib/mark_press.py へ一本化した。
+      ここと codex_run.mark_sent に同じ subprocess 呼び出しの**写しが2本**あり、
+      どちらも returncode を捨てていた(ORG-11+無言)。押し方も記録も正本は1本。"""
     if not (channel and msg_id):
         return
     try:
         # ★--codex= 受け手がCodex(@ネイキッド・スネーク)。react.py が §A.1 に従い
-        #   送信/既読/着手だけを uptsukiyomi/followok/🐍 へ差し替える(他印は共通)。
+        #   送信/既読/着手だけを uptsukiyomi/‼️/🐍 へ差し替える(他印は共通)。
         #   ここは Codex専用の responder なので常に --codex を渡す(Chami指示 2026-09-05)。
-        subprocess.run([sys.executable, REACT, "--channel", str(channel),
-                        "--msg", str(msg_id), "--emoji", kind, "--codex"],
-                       capture_output=True, timeout=30)
+        sys.path.insert(0, os.path.join(ROOT, "scripts", "lib"))
+        from mark_press import press
+        press(channel, msg_id, kind, codex=True, caller="codex_responder.mark")
     except Exception:
         pass
+
+
+def _extend_lease_once(qid, queue_db=QUEUE_DB, lease_sec=LEASE_EXTEND_SEC):
+    """別SQLite接続でリースを延長する。ワーカー本体の接続を別threadへ渡さない。"""
+    if not qid:
+        return False
+    try:
+        sys.path.insert(0, os.path.join(ROOT, "scripts", "queue"))
+        from leasequeue import LeaseQueue
+        queue = LeaseQueue(queue_db)
+        try:
+            return bool(queue.extend(qid, lease_sec=lease_sec))
+        finally:
+            queue.close()
+    except Exception as e:
+        print(f"  lease延長失敗(続行): {type(e).__name__}")
+        return False
+
+
+def _start_lease_extender(qid, stop_event, queue_db=QUEUE_DB):
+    """長いCodex処理中だけリースを定期延長する。"""
+    if not qid:
+        return None
+    _extend_lease_once(qid, queue_db=queue_db)
+
+    def loop():
+        while not stop_event.wait(LEASE_EXTEND_INTERVAL):
+            _extend_lease_once(qid, queue_db=queue_db)
+
+    thread = threading.Thread(target=loop, name=f"codex-lease-{qid}", daemon=True)
+    thread.start()
+    return thread
+
+
+def heavy_request(rec):
+    """実装・設計系か、ある程度長い依頼なら開始通知を文字でも返す。"""
+    content = str(rec.get("content") or "").strip()
+    if len(content) >= 40:
+        return True
+    return any(word in content for word in
+               ("設計", "修正", "実装", "作って", "直して", "調査", "回収", "テスト"))
+
+
+# ---------------------------------------------------------------------------
+# Codexの利用枠切れ(usage_limit)を覚えておく= HQ-0254(2026-09-10 aegis-gl)
+# ---------------------------------------------------------------------------
+# なぜ在るか: 枠が尽きている間も来た依頼を全部 codex_run.py へ渡すと、依頼のたびに
+#   (1) 専用worktreeを切って捨てる (2) 同じ理由の便を司令塔の受付箱へ積み増す
+#   が延々続く。実物= local/llm/codex_fail_raw.jsonl の 2026-09-10T02:40:33 / 02:41:40。
+#   Codexの原文が返した回復予定は 2026-09-16 05:23= 放っておくと1週間これが続く。
+# ★fail-open= 状態ファイルが読めない/壊れている/古い時は「保持しない」側へ倒す。
+#   最悪の事故は「枠は戻っているのに、この砂袋のせいでCodexが一切動かない」ことだ。
+# ★保持中でも一定間隔で1回だけ本物を試す= 枠が早く戻った時に自力で復帰する
+#   (Chamiが枠を買った直後に、こちらの都合で止まったままにしない)。
+# ★枠の追加購入そのものはChamiの領域(HQ-0254 ③)。ここは待つ・伝える・一度だけ上げる。
+USAGE_LIMIT_STATE = os.path.join(LOCAL, "llm", "codex_usage_limit.json")
+FAIL_RAW = os.path.join(LOCAL, "llm", "codex_fail_raw.jsonl")   # codex_run.py の書く生ログ(読むだけ)
+USAGE_LIMIT_PROBE_SEC = _env_int("CODEX_USAGE_LIMIT_PROBE_SEC", 1800, minimum=60, maximum=86400)
+# `… or try again at Sep 16th, 2026 5:23 AM.` から回復予定を拾う(取れなくても保持は成立する)。
+USAGE_LIMIT_RESET_RE = re.compile(
+    r"try again at\s+([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,\s*(\d{4})\s+"
+    r"(\d{1,2}):(\d{2})\s*([AP]M)", re.I)
+_MONTHS = {m: i + 1 for i, m in enumerate(
+    ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"))}
+
+
+def _parse_reset_at(text):
+    """Codexの原文から回復予定時刻を拾って epoch 秒で返す。読めなければ 0。
+
+    ★タイムゾーンは原文に書かれていない= ローカル時刻として読む。数時間ずれても
+      「保持を続けるか」の判定には使わない(そちらは下の再試行間隔が持つ)ので害はない。
+      使うのは (a) 部屋へ書く予定時刻の表示 (b) 予定を過ぎたら保持を捨てる の2つだけ。
+    """
+    m = USAGE_LIMIT_RESET_RE.search(str(text or ""))
+    if not m:
+        return 0
+    mon = _MONTHS.get(m.group(1)[:3].lower())
+    if not mon:
+        return 0
+    hour = int(m.group(4)) % 12
+    if m.group(6).upper() == "PM":
+        hour += 12
+    try:
+        return time.mktime((int(m.group(3)), mon, int(m.group(2)), hour, int(m.group(5)),
+                            0, 0, 1, -1))
+    except (ValueError, OverflowError):
+        return 0
+
+
+def _latest_usage_limit_raw():
+    """codex_run.py が残した直近の枠切れ原文を拾う(表示と回復予定のため。読めなければ空)。"""
+    try:
+        with open(FAIL_RAW, encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()[-50:]
+    except OSError:
+        return ""
+    for line in reversed(lines):
+        try:
+            rec = json.loads(line)
+        except Exception:
+            continue
+        if rec.get("reason") == "usage_limit":
+            return str(rec.get("session_error") or rec.get("stderr_tail") or "")
+    return ""
+
+
+def _read_usage_limit_state():
+    """保持状態を読む。無い/壊れている=保持なし(fail-open)。"""
+    try:
+        with open(USAGE_LIMIT_STATE, encoding="utf-8") as f:
+            state = json.load(f)
+        return state if isinstance(state, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def _write_usage_limit_state(state):
+    try:
+        os.makedirs(os.path.dirname(USAGE_LIMIT_STATE), exist_ok=True)
+        with open(USAGE_LIMIT_STATE, "w", encoding="utf-8") as f:
+            json.dump(state, f, ensure_ascii=False)
+        return True
+    except OSError:
+        return False
+
+
+def note_usage_limit():
+    """枠切れを踏んだ= 保持を立てる(既にあれば回数だけ増やす)。戻り値=状態。
+
+    ★『司令塔へ上げたか』(escalated)は初回だけ True にする= 受付箱へ同じ上申を積み増さない。
+    """
+    now = time.time()
+    raw = _latest_usage_limit_raw()
+    state = _read_usage_limit_state() or {}
+    if not state.get("since"):
+        state["since"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+        state["escalated"] = False
+        state["last_probe"] = now
+    state["hits"] = int(state.get("hits") or 0) + 1
+    state["source_ts"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+    if raw:
+        state["raw"] = raw[:400]
+        reset_at = _parse_reset_at(raw)
+        if reset_at:
+            state["until_epoch"] = reset_at
+            state["until"] = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(reset_at))
+    _write_usage_limit_state(state)
+    return state
+
+
+def clear_usage_limit(why=""):
+    """枠が戻った(またはChamiが手で外した)= 保持を捨てる。"""
+    if not os.path.exists(USAGE_LIMIT_STATE):
+        return False
+    try:
+        os.remove(USAGE_LIMIT_STATE)
+    except OSError:
+        return False
+    log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "usage_limit_cleared", "why": why})
+    print(f"  Codex利用枠の保持を解除 ({why})")
+    return True
+
+
+def usage_limit_hold():
+    """今この便でCodexを起動してよいか。戻り値 (hold, state)。
+
+    hold=True なら codex_run.py を起動しない= worktreeも作らない。
+    ★保持していても USAGE_LIMIT_PROBE_SEC ごとに1回は本物を試す(=Falseを返す)。
+      その1回が通れば handle() 側が clear_usage_limit() で保持を捨てる。
+    """
+    state = _read_usage_limit_state()
+    if not state:
+        return False, None
+    now = time.time()
+    until = state.get("until_epoch") or 0
+    if until and now >= float(until):
+        # 回復予定を過ぎた= 保持の根拠が切れた。素直に試す。
+        clear_usage_limit("回復予定時刻を過ぎた")
+        return False, None
+    last_probe = float(state.get("last_probe") or 0)
+    if now - last_probe >= USAGE_LIMIT_PROBE_SEC:
+        state["last_probe"] = now
+        _write_usage_limit_state(state)
+        return False, state
+    return True, state
+
+
+def usage_limit_text(state):
+    """部屋へ返す文面。★『依頼の中身が悪いのではない』を必ず先に言う。"""
+    until = (state or {}).get("until")
+    when = f"Codexが返した回復予定は {until} です。" if until else \
+        "回復予定はCodexの原文にしか無く、今回は読み取れませんでした。"
+    return ("Codex(Astra)側の**利用枠が上限**に達したままなので、実行していません。"
+            "依頼の中身の問題でも、私が読めていないのでもありません。"
+            f"{when}"
+            "枠が戻るまでは同じ依頼を投げても同じところで止まるので、"
+            "無駄な作業場所を作らずに止めました。依頼は司令塔の受付箱へ渡してあります。"
+            "枠の追加購入か回復待ちかの判断はChamiの領域なので、こちらでは決めません。")
 
 
 def escalate(channel, raw_line, note=""):
@@ -164,7 +427,7 @@ def escalate(channel, raw_line, note=""):
 # ---------------------------------------------------------------------------
 # 中核= Codexに投げる
 # ---------------------------------------------------------------------------
-def codex_answer(channel, content, msg_id=""):
+def codex_answer(channel, content, msg_id="", origin_dept=""):
     """codex_run.py へ委譲= 専用worktreeで生成/実装し、Codex bot本人として部屋へ投稿。
 
     戻り値 (ok, worktree_or_empty, reason)。
@@ -176,9 +439,11 @@ def codex_answer(channel, content, msg_id=""):
       送信(uptsukiyomi)を押させる(2026-09-05配線②=従来ここが空撃ちだった)。
     """
     argv = [sys.executable, CODEX_CLI, "--ask", content, "--to", channel,
-            "--tag", "room", "--timeout", "600"]
+            "--tag", "room", "--timeout", str(CODEX_EXEC_TIMEOUT)]
+    if origin_dept:
+        argv += ["--origin-dept", str(origin_dept)]
     if msg_id:
-        argv += ["--reply-to", str(msg_id)]
+        argv += ["--reply-to", str(msg_id), "--request-id", str(msg_id)]
     try:
         r = subprocess.run(
             argv,
@@ -191,65 +456,194 @@ def codex_answer(channel, content, msg_id=""):
     worktree = m.group(1).strip() if m else ""
     rm = REASON_RE.search(out)
     reason = rm.group(1).strip() if rm else ""
+    if r.returncode == 8 or "SEND_FAILED saved_result=" in out:
+        reason = "send_failed"
+    elif r.returncode == 9:
+        reason = "outbox_failed"
+    elif r.returncode == 5 and "応答しなかった" in out:
+        reason = "timeout"
     return r.returncode == 0, worktree, reason
 
 
-def handle(rec, raw_line):
-    content = rec.get("content", "")
-    channel = rec.get("channel", "")
-    msg_id = rec.get("msg_id", "")
-    mark(channel, msg_id, "既読")           # 掴んで読んだ=まず既読(Claudeの progress_mark read 相当)
-    if rec.get("dept") in SENSITIVE_DEPTS:
-        mark(channel, msg_id, "即答")       # 司令塔へ回して即返信=その場で完結
+def handle(rec, raw_line, lease_id=None, deliveries=1):
+    content = str(rec.get("content") or "")
+    channel = reply_target(rec)
+    label = channel_label(rec)
+    msg_id = str(rec.get("msg_id") or "")
+    try:
+        delivery_count = max(1, int(deliveries or 1))
+    except (TypeError, ValueError):
+        delivery_count = 1
+
+    origin_dept = origin_dept_for(rec)
+    mark(channel, msg_id, "既読")           # 掴んで読んだ=まず既読
+    if origin_dept in SENSITIVE_DEPTS:
+        mark(channel, msg_id, "即答")
         escalate(channel, raw_line)
         notify_room(channel, "受け取りました。ここは司令塔が直接読む部屋なので、そちらへ回しました。")
-        log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "sensitive_deferred", "channel": channel})
-        return
+        log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "sensitive_deferred",
+             "channel": label, "channel_id": channel})
+        return "sensitive_deferred"
     if not content.strip():
-        mark(channel, msg_id, "即答")       # 扱えない旨を即返信=その場で完結
+        mark(channel, msg_id, "即答")
         escalate(channel, raw_line)
         notify_room(channel, "テキスト以外(添付/音声)は扱えないので、司令塔の受付箱へ入れました。")
-        log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "escalated_no_text", "channel": channel})
-        return
+        log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "escalated_no_text",
+             "channel": label, "channel_id": channel})
+        return "escalated_no_text"
 
-    # ★Codexは仕事をする側= 作業語で弾かない。部屋の発言はそのまま Codex へ渡す。
-    mark(channel, msg_id, "着手")           # 重い実装を始める直前=着手(本格的な作業の開始)
-    ok, worktree, reason = codex_answer(channel, content, msg_id)
+    # 「元気?」「了解」「使い方」など、意味を考えなくてよい短い全文一致だけは
+    # Pythonの固定文で返す。少しでも依頼本文が足されていれば scripted_reply() は
+    # None を返し、従来どおり下のCodex実行へ流れる。
+    scripted = scripted_reply(content, "codex")
+    if scripted:
+        mark(channel, msg_id, "即答")
+        sent = notify_room(channel, scripted["text"])
+        if sent:
+            append_line(PROCESSED, raw_line)
+            mode = "tokenless_answered"
+        elif delivery_count < MAX_SEND_ATTEMPTS:
+            mode = "retry_tokenless"
+        else:
+            # AIへフォールバックすると、Discord送信障害のたびに無意味な生成費用が出る。
+            # 固定文の送信失敗は固定文のまま上限回数だけ再試行し、最後はログへ残す。
+            append_line(PROCESSED, raw_line)
+            mode = "tokenless_send_failed"
+        log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": mode,
+             "intent": scripted["intent"], "channel": label, "channel_id": channel,
+             "deliveries": delivery_count})
+        return mode
+
+    # ★HQ-0254= Codexの利用枠が尽きている間は codex_run.py を**起動しない**。
+    #   起動しない=専用worktreeも切られない。依頼そのものは消さず、1便につき1行だけ
+    #   司令塔の受付箱へ渡す(同じ上申の積み増しは escalated フラグで1回に抑える)。
+    hold, ul_state = usage_limit_hold()
+    if hold:
+        mark(channel, msg_id, "即答")
+        note = ""
+        if not (ul_state or {}).get("escalated"):
+            note = ("[codex] Codexの利用枠切れで保持中(枠を買うか待つかの判断はChami・HQ-0254)。"
+                    f"回復予定={(ul_state or {}).get('until') or '不明'}"
+                    f" / 初回検出={(ul_state or {}).get('since') or '不明'}")
+            ul_state["escalated"] = True
+            _write_usage_limit_state(ul_state)
+        escalate(channel, raw_line, note=note)
+        notify_room(channel, usage_limit_text(ul_state))
+        log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "held_usage_limit",
+             "channel": label, "channel_id": channel, "q": content[:200],
+             "until": (ul_state or {}).get("until", ""),
+             "hits": (ul_state or {}).get("hits", 0)})
+        print(f"  Codex枠切れ保持→起動せず [{label}] {content[:30]!r}")
+        return "held_usage_limit"
+
+    # Codexは仕事をする側。開始通知を先に返し、ブロッキング実行中は別接続でリースを延ばす。
+    mark(channel, msg_id, "着手")
+    stop_lease = threading.Event()
+    lease_thread = _start_lease_extender(lease_id, stop_lease)
+    try:
+        # ★中身の無い一次ackテキストは出さない(炎上/恒久 DEF-otacon-radio-df36094b69・C-040)。
+        #   Chami原文「このやり取りいらない」→「効いてません」。直上 :540 の mark(…,"着手") で
+        #   進捗印👀が既に付く=「今やってる」はChamiに伝わるので、定型テキストは重複だった。
+        #   再発防止の検査= scripts/llm/test_codex_no_ack.py(must-fail・C-053)。
+        ok, worktree, reason = codex_answer(channel, content, msg_id, origin_dept)
+    finally:
+        stop_lease.set()
+        if lease_thread:
+            lease_thread.join(timeout=2)
+
     if ok:
+        # 枠切れの保持中でも一定間隔で1回だけ本物を試している(usage_limit_hold)。
+        # その1回が通った=枠は戻っている。ここで保持を捨てないと自力で復帰できない。
+        clear_usage_limit("Codexが応答を返した")
         append_line(PROCESSED, raw_line)
         if worktree:
-            # 重い実装が worktree に着地= 司令塔へ「レビュー/取り込み待ち」として引き継ぐ。
-            note = (f"[codex] 部屋 {channel} の依頼で Codex が実装を worktree に残しました(要レビュー/取り込み)。"
-                    f" worktree= {worktree} / 依頼= {content[:120]}")
+            note = (f"[codex] 部屋 {label} の依頼で実装をworktreeに保存(要レビュー/取り込み)。"
+                    f" worktree={worktree} / 依頼={content[:120]}")
             append_line(FOR_CLAUDE, json.dumps(
-                {"content": note, "channel": channel, "dept": "codex",
+                {"content": note, "channel": label, "channel_id": channel, "dept": "codex",
                  "from": "codex_responder", "worktree": worktree,
                  "ts": time.strftime("%Y-%m-%dT%H:%M:%S")}, ensure_ascii=False))
-            print(f"  Codex実装→worktree保持 [{channel}] {worktree}")
+            print(f"  Codex実装→worktree保持 [{label}] {worktree}")
         else:
-            print(f"  Codex回答 [{channel}] {content[:30]!r}")
-        log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "answered", "channel": channel,
-             "q": content[:200], "worktree": worktree})
-    else:
-        # ★2026-09-05 ケヴィン/イージス研究室 発注(b): 失敗の"出所"で文面を変える。
-        #   橋(Codex回線)の不通= 版数切れ/認証断/config壊れ 等は、Chamiの依頼が悪いのではない。
-        #   従来の「うまく処理できなかったので受付箱へ回しました」は依頼側の不備と読めた(実際ちゃみが誤解)。
-        #   →橋の不通と分かる文面へ差し替える。判断材料= codex_answer が返す reason(codex_run L294のバケツ)。
-        bridge_down = (reason == "timeout") or any(k in reason for k in BRIDGE_DOWN_REASONS)
+            print(f"  Codex回答 [{label}] {content[:30]!r}")
+        log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "answered",
+             "channel": label, "channel_id": channel, "q": content[:200], "worktree": worktree})
+        return "answered"
+
+    if reason == "send_failed":
+        # 生成済み全文はcodex_outboxにある。同じ便を再生成せず、キュー再配達で送信だけ再試行する。
+        if delivery_count < MAX_SEND_ATTEMPTS:
+            if delivery_count == 1:
+                note = (f"[codex] 生成済み・Discord送信だけ失敗。request_id={msg_id} は"
+                        "local/llm/codex_outboxに保存済みで、再配達時は再生成しない。")
+                append_line(FOR_CLAUDE, json.dumps(
+                    {"content": note, "channel": label, "channel_id": channel, "dept": "codex",
+                     "from": "codex_responder", "ts": time.strftime("%Y-%m-%dT%H:%M:%S")},
+                    ensure_ascii=False))
+            log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "send_retry_saved",
+                 "channel": label, "channel_id": channel, "deliveries": delivery_count,
+                 "request_id": msg_id})
+            return "retry_saved"
         escalate(channel, raw_line,
-                 note=(f"[codex] {'橋(Codex回線)不通' if bridge_down else '生成失敗'}のため司令塔へ回送"
-                       f" [{reason or '不明'}]: {content[:120]}"))
-        if bridge_down:
-            notify_room(channel,
-                        "今『橋』(Codexへの回線)が落ちていて、応答を取り出せませんでした。"
-                        "依頼の中身の問題ではありません。司令塔へ復旧を上げたので、直り次第あらためて返します。")
-            mode = "escalated_bridge_down"
-        else:
-            notify_room(channel, "うまく処理できなかったので、司令塔の受付箱へ回しました。")
-            mode = "escalated_failed"
-        log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": mode, "channel": channel,
-             "reason": reason, "q": content[:200]})
-        print(f"  Codex失敗→Claude行き [{channel}] reason={reason!r} {content[:30]!r}")
+                 note=(f"[codex] 生成結果は保存済みだがDiscord送信が{delivery_count}回失敗。"
+                       f"request_id={msg_id} は --resend-outbox {msg_id} で再送可能。"))
+        log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "send_failed_saved",
+             "channel": label, "channel_id": channel, "request_id": msg_id})
+        return "send_failed_saved"
+
+    worktree_note = f" / worktree={worktree}" if worktree else ""
+    bridge_down = any(key in reason for key in BRIDGE_DOWN_REASONS)
+    if reason == "timeout":
+        mode = "escalated_timeout"
+        note_kind = "処理時間上限"
+        notify_text = (f"処理が{CODEX_EXEC_TIMEOUT // 60}分の上限に達しました。依頼は消していません。"
+                       + ("作業途中のworktreeを残し、司令塔へ回しました。" if worktree else
+                          "司令塔へ回しました。"))
+    elif reason == "usage_policy":
+        # ★2026-09-06 研究室HQ 仮当て= 実物(14:11の便)は橋が生きたまま、最終メッセージだけが
+        #   OpenAI側の方針フィルタに弾かれていた。ここを「橋不通」に混ぜるとChamiへ誤報になる。
+        mode = "escalated_usage_policy"
+        note_kind = "方針フィルタで最終応答が止まった"
+        notify_text = ("橋は繋がっていますが、返す最終メッセージがOpenAI側の方針フィルタで止められました。"
+                       "作業自体は進んでいることがあります。作業場所を残して司令塔へ回しました。")
+    elif reason == "usage_limit":
+        # ★2026-09-10 研究室HQ 止血= Codexアカウントの利用枠切れ(codex_run.classify_failure と対)。
+        #   橋は生きている・依頼の中身も悪くない。枠が尽きているだけなので、
+        #   「うまく処理できなかった」の一般文に混ぜず、**何が起きたかと次の一手**まで書く。
+        mode = "escalated_usage_limit"
+        note_kind = "Codexの利用枠切れ"
+        # ★HQ-0254(aegis-gl 2026-09-10)= ここで保持を立てる。次の便からは上の事前ゲートが
+        #   codex_run.py の起動そのものを止める(worktreeを切らない)。
+        ul_state = note_usage_limit()
+        notify_text = ("Codex(Astra)側の**利用枠が上限**に達していて、実行できませんでした。"
+                       "依頼の中身の問題でも、私が読めていないのでもありません。"
+                       + (f"Codexが返した回復予定は {ul_state.get('until')} です。"
+                          if ul_state.get("until") else
+                          "回復予定はCodexの返した原文に入っています。")
+                       + "枠が戻るまでは同じ依頼を投げても同じところで止まるので、"
+                       "以後の依頼は実行せずに司令塔の受付箱へ渡します。"
+                       "枠の追加購入か回復待ちかの判断はChamiの領域なので、こちらでは決めません。")
+    elif bridge_down:
+        mode = "escalated_bridge_down"
+        note_kind = "橋(Codex回線)不通"
+        notify_text = ("今『橋』(Codexへの回線)が落ちていて、応答を取り出せませんでした。"
+                       "依頼の中身の問題ではありません。司令塔へ復旧を上げました。")
+    elif reason == "outbox_failed":
+        mode = "escalated_outbox_failed"
+        note_kind = "生成結果の保存失敗"
+        notify_text = "生成は完了しましたが、結果を安全に保存できなかったため投稿を止め、司令塔へ回しました。"
+    else:
+        mode = "escalated_failed"
+        note_kind = "生成失敗"
+        notify_text = "うまく処理できなかったので、依頼と作業場所を司令塔の受付箱へ回しました。"
+    escalate(channel, raw_line,
+             note=f"[codex] {note_kind} [{reason or '不明'}]{worktree_note}: {content[:120]}")
+    notify_room(channel, notify_text)
+    log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": mode,
+         "channel": label, "channel_id": channel, "reason": reason,
+         "q": content[:200], "worktree": worktree})
+    print(f"  Codex失敗→Claude行き [{label}] reason={reason!r} {content[:30]!r}")
+    return mode
 
 
 # ---------------------------------------------------------------------------
@@ -308,9 +702,12 @@ def drain_queue():
                 continue
             raw_line = json.dumps(rec, ensure_ascii=False)
             try:
-                handle(rec, raw_line)
-                q.ack(c["id"], result="処理済")
-            except Exception as e:
+                result = handle(rec, raw_line, lease_id=c["id"], deliveries=c.get("deliveries", 1))
+                if result in ("retry_saved", "retry_tokenless"):
+                    q.nack(c["id"], retry_after=time.time() + SEND_RETRY_SEC)
+                else:
+                    q.ack(c["id"], result=result or "処理済")
+            except (Exception, SystemExit) as e:
                 print(f"  queue処理失敗: {type(e).__name__}")
                 append_line(FOR_CLAUDE, raw_line)  # =main箱。喪失させない
                 q.ack(c["id"], result=f"failed:{type(e).__name__}")
@@ -340,7 +737,7 @@ def main():
         for line in take_inbox():
             try:
                 handle(json.loads(line), line)
-            except Exception as e:
+            except (Exception, SystemExit) as e:
                 print(f"  処理失敗: {type(e).__name__}")
                 append_line(FOR_CLAUDE, line)
         try:
