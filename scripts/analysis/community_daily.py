@@ -45,6 +45,30 @@ SRC = os.path.join(ROOT, "local", "consult_intel", "competitor_community.jsonl")
 OUT_DIR = os.path.join(ROOT, "local", "consult_intel")
 BASE_MODEL = "gemini-flash-latest"   # comp_frames と同じ基準 (無料枠が広くバッチ向き)
 
+# ── 凍結/落とし対象は毎朝のブリーフから除外する ────────────────────────
+# 背景= Chami 2026-09-12「5秒動画は凍結=その分析は不要」(msg 1548116830244175893)。
+#   同人系(凍結5秒動画側の偵察)と きらきら1番劇場 は朝の共有から落とす、と裁定済
+#   (docs/departments/shorts-analyst/STATUS.md の振替行)。だが本スクリプトは収集した全chを
+#   票順に並べて上位を出すだけで除外が無く、2026-09-13の朝便に「今宵のバズ同人」が混入し
+#   Chami「これ凍結せえいうたがな」(msg 1548831183713083535)。→ 報告側で除外する。
+#   ★収集(community_scrape.py/seeds)自体は止めない=STATUS「収集継続・報告だけ絞る」。
+#     収集停止は事業中身の改修=5chシステム改修部門αの領域(Chami未指示なので回さない)。
+DROP_CHANNEL_IDS = {
+    "UCHNVvzUatXbtEVP6csVX9Hg",  # 今宵のバズ同人
+    "UC_upg7O4JOd81TafJpX7a6Q",  # アニメ同人祭り
+    "UCYU3uiLk9GBCsHwxaK4ZHcg",  # オカズ系(doujin-somurie・okazu_booksと同Bsky)
+}
+# ハンドル運用 chは収集時にUCへ解決されるので、名前(channel_name)側でも落とす二重の網。
+DROP_NAME_KEYWORDS = ("同人", "オカズ", "きらきら")
+
+
+def is_dropped(post):
+    """凍結/落とし対象(同人系・きらきら)なら True。channel_id と channel_name の両方で判定。"""
+    if post.get("channel_id", "") in DROP_CHANNEL_IDS:
+        return True
+    name = post.get("channel_name", "") or ""
+    return any(k in name for k in DROP_NAME_KEYWORDS)
+
 VISION_PROMPT = (
     "この画像はYouTubeショート系チャンネルのコミュニティ投稿に使われた1枚 (多くは1コマ漫画) です。"
     "次を日本語で答え、JSONだけを返してください。\n"
@@ -73,15 +97,22 @@ def vote_num(s):
 
 def load_posts():
     posts = []
+    dropped = 0
     with open(SRC, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
                 continue
             try:
-                posts.append(json.loads(line))
+                p = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if is_dropped(p):   # 凍結/落とし対象は読み込み時点で除外(以後の集計・ランキング・emit全てに効く)
+                dropped += 1
+                continue
+            posts.append(p)
+    if dropped:
+        print("凍結/落とし対象を%d件 除外した(同人系・きらきら=朝の共有から落とす裁定)" % dropped)
     return posts
 
 
