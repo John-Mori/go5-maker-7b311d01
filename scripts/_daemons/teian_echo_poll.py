@@ -102,6 +102,23 @@ COLUMNS = ["決定日時", "候補日", "候補ID", "作品cid", "プラット�
 # 連続何回失敗したら1回だけ鳴らすか(毎周期は鳴らさない=fail-open)
 ALERT_AT = 3
 
+# ★★2026-09-15 イージス研究室= **連続回数だけでは鳴らさない。経過時間も一緒に見る。**
+#   事故= 09-15 01:02 に「3回連続で読めない(http-404)・水位=2のまま約15分」が部屋へ鳴ったが、
+#   その直後に同じURLを叩くと 200 / ok:true / lastRow=2 / rows=[] が返った=**口は生きていた**。
+#   実測(teian_decide_poll.log 92件・08-23〜09-15)= 失敗の理由は http-404 が83件で、
+#   そのうち79件が「1回連続」= **Google側の瞬断は1周期で自然に戻る**。連続で伸びた実績は
+#   08-25 の1回だけ(n=7まで・実時間で約25〜35分)。つまり閾値3回(=15分)は**観測された瞬断より
+#   短い**=常に誤発火する側に置かれていた(規律§3=誤発火する安全網は無視される)。
+#   → 鳴らす条件を「連続n回 **かつ** 最後に読めてから60分以上」にする。60分= 実測の最悪の瞬断
+#     (約35分)の約2倍。この経路は2026-08-23の初期化以降**1行も配達対象が無い**(lastRow=2で不動)
+#     ので、検知が最大1時間遅れることによる実害は無い。
+ALERT_AFTER_MIN = 60
+
+# ★連続回数は経過時間の代理にならない= このPCはスリープする。
+#   実測(同ログ)= 巡回の間隔は5分どおりの時もあれば 09-14 14:32→15:07 の35分空きもある。
+#   だから「n×5分」で滞留時間を語る _age_text は**静かに壊れる推定**(規律§3)。
+#   最後に読めた時刻を1本持ち、警報は**その実時間**を喋る。
+
 # ★返す物4= 未初期化のまま「時間で」滞留した時に部屋へ escalate する周期。
 #   タスクは5分間隔=連続失敗数nが経過時間の代理。288回=約24時間ごとに部屋へ1回だけ。
 #   増分でなく経過(滞留時間)で検知しないと「静かな死」を見逃す(HQ KPI・実例=Chami便が13日間無警報)。
@@ -157,6 +174,36 @@ def _age_text(n, minutes_per=POLL_INTERVAL_MIN):
     """
     m = int(n) * int(minutes_per)
     return f"約{m // 60}時間" if m >= 60 else f"約{m}分"
+
+
+def _dur_text(sec):
+    """秒を経過時間の言葉にする。★None= 計測できていない(推定で埋めない=規律§1)。"""
+    if sec is None:
+        return "不明(最後に読めた時刻の記録が無い)"
+    m = int(sec) // 60
+    if m >= 1440:
+        return f"約{m // 1440}日{(m % 1440) // 60}時間"
+    return f"約{m // 60}時間{m % 60}分" if m >= 60 else f"約{m}分"
+
+
+def _read_ts(path):
+    """最後に「きれいに1周できた」時刻(unix秒)。無ければ None=計測開始前。"""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return float(f.read().strip())
+    except Exception:                        # noqa: BLE001
+        return None
+
+
+def _write_ts(path, ts=None):
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(f"{float(ts if ts is not None else time.time()):.0f}")
+        os.replace(tmp, path)
+    except OSError:
+        pass
 
 
 def _log(line, log_path=POLL_LOG):
@@ -393,7 +440,8 @@ def build_body(fields, rownum):
 # ---- 本体の判定と分岐(テストは本物を回す) ----------------------------------
 
 def run_once(fetch, deliver, alert=None, note=None, wm_path=WATERMARK, fail_path=FAIL_COUNT,
-             alert_at=ALERT_AT, wait_alert_every=WAIT_ALERT_EVERY, log_path=None):
+             alert_at=ALERT_AT, wait_alert_every=WAIT_ALERT_EVERY, log_path=None,
+             alert_after_min=ALERT_AFTER_MIN, now=None):
     """1周分の水位ロジック。fetch/deliver/alert/note は継ぎ目(テストで偽物を注入)。
 
     ★log_path は既定で wm_path と同じディレクトリへ導出する=検査は一時ディレクトリの
@@ -413,14 +461,21 @@ def run_once(fetch, deliver, alert=None, note=None, wm_path=WATERMARK, fail_path
         log_path = os.path.join(os.path.dirname(wm_path) or STATE_DIR, "teian_decide_poll.log")
     logf = lambda line: _log(line, log_path)
 
+    if now is None:
+        now = time.time()
+    ok_path = fail_path + ".oklast"          # 最後に「きれいに1周できた」時刻
+    rung_path = fail_path + ".rung"          # 部屋で実際に鳴らしたか(推定せず事実を持つ)
+
     initialized = os.path.exists(wm_path)
     since = 0 if not initialized else (_read_int(wm_path) or 0)
 
     # ★復旧の一報の判定材料= この周に入る前の連続失敗数と、その時「部屋で実際に鳴っていたか」。
     #   鳴っていない失敗(未初期化の既知の待ち・閾値未満)に復旧を出すと、警報より復旧の方が多くなる。
+    # ★★2026-09-15 イージス研究室= 「鳴っていたか」を **prev_fails >= alert_at という推定から、
+    #   鳴らした時に置く印(.rung)へ** 変えた。時間ゲートが入って「回数は超えたが鳴っていない」周が
+    #   普通に出るようになった=推定のままだと鳴っていない警報に復旧を返す(規律§3=静かに壊れる推定)。
     prev_fails = _read_int(fail_path) or 0
-    alarm_had_rung = (prev_fails >= alert_at) if initialized else \
-                     bool(wait_alert_every) and prev_fails >= wait_alert_every
+    alarm_had_rung = os.path.exists(rung_path)
     # ★★2026-08-25 イージス研究室= **復旧の一報も理由を持ち回る。**
     #   8/25 01:17 に届いた復旧便は「原因は不明のまま自然復旧した」と書いてあったが、
     #   同じ時刻の運用ログは理由(http-TimeoutError / http-404)を**知っていた**=
@@ -433,9 +488,17 @@ def run_once(fetch, deliver, alert=None, note=None, wm_path=WATERMARK, fail_path
     except OSError:
         pass
 
+    prev_ok = _read_ts(ok_path)
+    down_sec = None if prev_ok is None else max(0.0, now - prev_ok)
+
+    def ring_alert(body):
+        """部屋へ鳴らして、鳴らした事実を印として残す(復旧の一報がこれを読む)。"""
+        alert(body)
+        _write_ts(rung_path, now)
+
     def ring_recovery(what):
         if alarm_had_rung:
-            alert(f"{what}(連続{prev_fails}回・{_age_text(prev_fails)}ぶり)。"
+            alert(f"{what}(連続{prev_fails}回・読めなくなってから{_dur_text(down_sec)})。"
                   f"読み取り口も配達も戻っている。直前の失敗理由="
                   f"{prev_why or '不明(理由を持たない継ぎ目)'}。同じ形で再発したら追う。",
                   recovered=True)
@@ -446,7 +509,22 @@ def run_once(fetch, deliver, alert=None, note=None, wm_path=WATERMARK, fail_path
         n = (_read_int(fail_path) or 0) + 1
         _write_int(fail_path, n)
         _write_why(why_path, last_fetch_fail())   # 復旧の一報が理由を言えるように残す
-        at_threshold = (n == alert_at)
+
+        # ★★時間ゲート(2026-09-15)= 連続回数が閾値に達しても、**最後に読めてから
+        #   alert_after_min 分**経つまでは部屋で鳴らさない。瞬断(実測=83件中79件が1周期で復帰)を
+        #   部屋へ流さないため。回数の条件(C-041=一度の観測を状態の代理にしない)は残す=両方要る。
+        # ★記録が無い時は「この周を起点」として1回だけ種を置き、**そう書いてログに残す**
+        #   (推定で埋めない=規律§1。検知が最大 alert_after_min 分だけ遅れることも明記する)。
+        if prev_ok is None and initialized:
+            _write_ts(ok_path, now)
+            logf(f"[計測開始] 最後に読めた時刻の記録が無いので、この周を起点に数え直す"
+                 f"(部屋への警報は最短で{alert_after_min}分後)。")
+            down_sec = 0.0
+        long_enough = down_sec is not None and down_sec >= alert_after_min * 60
+        at_threshold = (n >= alert_at) and long_enough and not alarm_had_rung
+        # ★未初期化(口がまだ無い)側は部屋で鳴らさない枝= 時間の記録そのものが無い(1度も読めていない)。
+        #   ここは今までどおり回数ちょうどでログとdurable面へ1回だけ残す。
+        at_threshold_count = (n == alert_at)
         # n は5分刻み=経過時間の代理。周期ちょうど(約24h,48h…)を「時間で滞留」の合図に使う。
         at_period = bool(wait_alert_every) and (n % wait_alert_every == 0)
         if initialized:
@@ -461,13 +539,16 @@ def run_once(fetch, deliver, alert=None, note=None, wm_path=WATERMARK, fail_path
             logf(f"[fail-open] 提案決定エコー: 読み取り口が読めない({n}回連続・理由={why}・"
                  f"水位={since}据え置き)。")
             if at_threshold or at_period:
-                alert(f"GASの読み取り口が{n}回連続で読めない(理由={why})。"
-                      f"水位={since}のまま{_age_text(n)}待機している。")
+                ring_alert(f"GASの読み取り口が{n}回連続で読めない(理由={why})。"
+                           f"水位={since}のまま{_dur_text(down_sec)}読めていない"
+                           f"(部屋へ出す線={alert_after_min}分)。")
                 note("read-fail", f"GASの読み取り口が{n}回連続で読めない(理由={why})。"
                                   f"水位={since}のまま。")
         else:
             # 口がまだ無い=既知の待ち。閾値では部屋で鳴らさない(狼少年回避)=ログ+受け手が読む面に1回。
-            if at_threshold:
+            # ★ここは時間ゲートを掛けない= そもそも1度も読めていないので「最後に読めた時刻」が存在しない。
+            #   時間で測れない側を時間で塞ぐと、跡が1行も残らなくなる(静かな死)。回数ちょうどで1回だけ残す。
+            if at_threshold_count:
                 logf(f"[fail-open] 提案決定エコー: 読み取り口がまだ無い(既知・{n}回連続)。"
                      f"水位ファイルは作らずに待機。")
                 note("bootstrap-wait",
@@ -476,9 +557,9 @@ def run_once(fetch, deliver, alert=None, note=None, wm_path=WATERMARK, fail_path
             # ★返す物4= 未初期化のまま「時間で」滞留したら周期ちょうどで部屋へ1回escalate。
             #   n==alert_at の1回きりだと、口が生えないまま忘れられても跡は最初の1行だけ=静かな死。
             if at_period:
-                alert(f"提案決定→軍議エコー(経路B)は{dept_ja(SE_DEPT)}の読み取り口(?action=teian_decisions)が"
-                      f"無いまま{_age_text(n)}(連続{n}回)待ち続けている。決定は提案決定シートに溜まるのに"
-                      f"誰も『まだ届いていない』と気づけない=読み取り口の実装が忘れられていないか確認してほしい。")
+                ring_alert(f"提案決定→軍議エコー(経路B)は{dept_ja(SE_DEPT)}の読み取り口(?action=teian_decisions)が"
+                           f"無いまま{_age_text(n)}(連続{n}回)待ち続けている。決定は提案決定シートに溜まるのに"
+                           f"誰も『まだ届いていない』と気づけない=読み取り口の実装が忘れられていないか確認してほしい。")
         return {"status": "fail-open", "watermark": since, "delivered": 0, "fails": n}
 
     if not initialized:
@@ -486,9 +567,11 @@ def run_once(fetch, deliver, alert=None, note=None, wm_path=WATERMARK, fail_path
         last = int(data["lastRow"])
         _write_int(wm_path, last)
         _reset(fail_path)
+        _write_ts(ok_path, now)     # ★きれいに1周できた時刻=時間ゲートの起点。ここを書かないとゲートが永久に種のまま
         logf(f"[初期化] 提案決定エコーの水位を lastRow={last} に置いた(既存の決定は配達しない)。")
         note("bootstrap-wait", f"{dept_ja(SE_DEPT)}の読み取り口が生えて水位を lastRow={last} に初期化した。", resolve=True)
         ring_recovery(f"{dept_ja(SE_DEPT)}の読み取り口が生えて水位を lastRow={last} に初期化した")
+        _reset(rung_path)           # 鳴らした印は復旧を返した後に畳む
         return {"status": "init", "watermark": last, "delivered": 0, "fails": 0}
 
     headers = data.get("headers") if isinstance(data.get("headers"), list) else None
@@ -509,9 +592,12 @@ def run_once(fetch, deliver, alert=None, note=None, wm_path=WATERMARK, fail_path
             logf(f"[据え置き] row={rownum} の配達に失敗。水位={since} のまま次周期へ(連続{n}回)。")
             # ★閾値ちょうど **または** 周期(約24h)ごとに部屋へ1回。配達不能が続いても
             #   n==alert_at の一発だけだと2度と鳴らない=静かな死(デブライネさん指摘 2026-08-23 / C-041)。
+            # ★配達不能には時間ゲートを掛けない= 読み取りの瞬断(実測83件中79件が1周期)と違い、
+            #   dispatch が落ちる側は瞬断の実績が無い。観測していない物を理由に鈍らせない(規律§1)。
             if n == alert_at or (wait_alert_every and n % wait_alert_every == 0):
-                alert(f"決定は記録されているのに軍議へ配達できない状態が{n}回続いている(row={rownum}・{_age_text(n)})。"
-                      f"dispatch側を確認してほしい。水位={since}のまま。")
+                ring_alert(f"決定は記録されているのに軍議へ配達できない状態が{n}回続いている"
+                           f"(row={rownum}・最後にきれいに1周できてから{_dur_text(down_sec)})。"
+                           f"dispatch側を確認してほしい。水位={since}のまま。")
                 note("deliver-blocked",
                      f"決定は記録されているのに軍議へ配達できない状態が{n}回(row={rownum})。水位={since}のまま。")
             return {"status": "blocked", "watermark": since, "delivered": delivered, "fails": n}
@@ -521,11 +607,13 @@ def run_once(fetch, deliver, alert=None, note=None, wm_path=WATERMARK, fail_path
 
     _reset(fail_path)               # きれいに1周できた=連続失敗カウンタを畳む
     _reset(why_path)                # ★理由は復旧の一報を出した「後」に消す(下の ring_recovery は prev_why を持っている)
+    _write_ts(ok_path, now)         # ★「最後に読めた時刻」を進める=次の障害の経過時間はここから測る
     # 開いていた警報を受け手が読む面で閉じる(復旧時に各種1回だけ✅)。
     for k in ("read-fail", "deliver-blocked", "bootstrap-wait"):
         note(k, "1周を正常に完了(連続失敗カウンタを畳んだ)。", resolve=True)
     # ★部屋で鳴らした警報にだけ、部屋で「戻った」を返す(durable面のRESOLVEDだけだと部屋には壊れたままに見える)。
     ring_recovery(f"1周を正常に完了した(水位={since}・この周で{delivered}行配達)")
+    _reset(rung_path)               # 鳴らした印は復旧を返した後に畳む(次の障害でまた1回だけ鳴る)
     return {"status": "ok", "watermark": since, "delivered": delivered, "fails": 0}
 
 

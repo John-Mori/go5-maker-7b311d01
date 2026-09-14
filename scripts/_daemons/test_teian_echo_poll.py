@@ -66,6 +66,24 @@ def _note_recorder():
     return got, n
 
 
+def _clock(step_min=None, start=1_800_000_000.0):
+    """5分刻みで進む偽の時計。★2026-09-15 イージス研究室。
+
+    時間ゲート(最後に読めてから ALERT_AFTER_MIN 分)が入ったので、検査は「何回失敗したか」
+    ではなく「何分読めていないか」で回さないと本物と同じ判定を通らない。
+    now を固定して回すと全周が同じ秒=経過0分=永久に鳴らない、という嘘の緑になる。
+    """
+    step = (step_min or T.POLL_INTERVAL_MIN) * 60
+    box = {"t": float(start)}
+
+    def tick():
+        t = box["t"]
+        box["t"] += step
+        return t
+
+    return box, tick
+
+
 def run(name, fn):
     try:
         fn()
@@ -172,19 +190,82 @@ def t_fail_open_bootstrap_no_room_alert():
 # ---- 6. fail-open・初期化後(口が生えていたのに落ちた)= 部屋へ1回 --------------
 
 def t_fail_open_after_init_alerts_room():
+    # ★2026-09-15= 「回数だけ」から「回数 かつ 最後に読めてから60分」へ変わった。
+    #   15周(=70分)回して、部屋へ出るのは1回だけ。
     with tempfile.TemporaryDirectory() as d:
         p = Paths(d)
         T._write_int(p.wm, 7)         # 既に初期化済み(口は生えていた)
         alerts, alert = _alert_recorder()
         notes, note = _note_recorder()
         _, deliver = _recorder()
-        for _ in range(4):
+        _, tick = _clock()
+        for _ in range(15):
             res = T.run_once(lambda s: None, deliver, alert=alert, note=note,
-                             wm_path=p.wm, fail_path=p.fail, alert_at=3)
+                             wm_path=p.wm, fail_path=p.fail, alert_at=3, now=tick())
             assert res["status"] == "fail-open", res
         assert T._read_int(p.wm) == 7, "fail-openで水位が動いた"
         assert len(alerts) == 1, f"初期化後のfetch異常で部屋へ1回鳴らせていない: {len(alerts)}"
+        assert "約1時間" in alerts[0], f"警報が実測の経過時間を語っていない: {alerts[0]}"
         assert notes == [("read-fail", "open")], f"初期化後のfetch異常がdurable面に1回残っていない: {notes}"
+
+
+# ---- 6b. ★★must-fail 2026-09-15 の誤発火: 瞬断(15分)は部屋へ出さない ----------
+#   事故= 09-15 01:02 に「3回連続で読めない(http-404)・水位=2のまま約15分」が部屋へ鳴ったが、
+#   直後に同じURLを叩くと 200 / ok:true / lastRow=2 が返った=**口は生きていた**。
+#   実測(運用ログ92件)= 失敗92回のうち83回が http-404、79回が**1周期で復帰する瞬断**。
+#   3回連続(=15分)は観測された雑音の底より下=常に誤発火する安全網(規律§3)。
+#   この検査は、時間ゲートを外すと必ず赤くなる。
+
+def t_short_blip_does_not_alert_room():
+    with tempfile.TemporaryDirectory() as d:
+        p = Paths(d)
+        T._write_int(p.wm, 2)
+        alerts, alert = _alert_recorder()
+        notes, note = _note_recorder()
+        _, deliver = _recorder()
+        _, tick = _clock()
+        for _ in range(4):            # 4周=15分(00:52 / 00:57 / 01:02 / 01:07 と同じ形)
+            T.run_once(lambda s: None, deliver, alert=alert, note=note,
+                       wm_path=p.wm, fail_path=p.fail, alert_at=3, now=tick())
+        assert alerts == [], f"15分の瞬断を部屋へ流した(09-15 01:02の誤発火が再発): {alerts}"
+        assert notes == [], f"15分の瞬断でdurable面を開いた: {notes}"
+        # ★鳴らないだけで、失敗した周は必ずログに残る(00:52の穴の対策は生きている)
+        logtxt = open(os.path.join(d, "teian_decide_poll.log"), encoding="utf-8").read()
+        assert logtxt.count("[fail-open]") == 4, logtxt
+        # 瞬断が明けたら、鳴っていないので復旧も出さない(警報より復旧が多くなる形を禁じる)
+        fetch = _fetch_from(lambda s: [], last_row=2)
+        res = T.run_once(fetch, deliver, alert=alert, note=note,
+                         wm_path=p.wm, fail_path=p.fail, alert_at=3, now=tick())
+        assert res["status"] == "ok", res
+        assert alert.recovered == [], f"鳴っていない瞬断に復旧を出した: {alert.recovered}"
+        assert not os.path.exists(p.fail + ".rung"), "鳴っていないのに鳴らした印が残っている"
+        assert os.path.exists(p.fail + ".oklast"), "きれいに1周したのに『最後に読めた時刻』を書いていない"
+
+
+# ---- 6c. ★本物の停止(60分以上)は1回だけ鳴り、復旧も1回だけ返る ----------------
+#   実測で唯一の多周期連続= 2026-08-25 01:02〜01:22(n=7・約25〜35分)。それでも自然復旧した。
+#   線は実測の最悪値の約2倍=60分に置く。
+
+def t_long_outage_alerts_once_and_recovers_once():
+    with tempfile.TemporaryDirectory() as d:
+        p = Paths(d)
+        T._write_int(p.wm, 2)
+        alerts, alert = _alert_recorder()
+        notes, note = _note_recorder()
+        _, deliver = _recorder()
+        _, tick = _clock()
+        for _ in range(24):           # 24周=115分
+            T.run_once(lambda s: None, deliver, alert=alert, note=note,
+                       wm_path=p.wm, fail_path=p.fail, alert_at=3, now=tick())
+        assert len(alerts) == 1, f"60分超の停止で部屋へ1回鳴っていない(または毎周期鳴った): {len(alerts)}"
+        assert notes == [("read-fail", "open")], notes
+        assert os.path.exists(p.fail + ".rung"), "鳴らしたのに印が残っていない(復旧が返らなくなる)"
+        fetch = _fetch_from(lambda s: [], last_row=2)
+        T.run_once(fetch, deliver, alert=alert, note=note,
+                   wm_path=p.wm, fail_path=p.fail, alert_at=3, now=tick())
+        assert len(alert.recovered) == 1, f"鳴らした警報に復旧が1回返っていない: {alert.recovered}"
+        assert "約2時間" in alert.recovered[0], f"復旧が実測の停止時間を語っていない: {alert.recovered[0]}"
+        assert not os.path.exists(p.fail + ".rung"), "復旧を返した後も鳴らした印が残っている(次で復旧が二重に出る)"
 
 
 # ---- 7. きれいに1周できたら連続失敗カウンタを畳む ----------------------------
@@ -354,37 +435,48 @@ def t_initialized_blocked_daily_escalation_on_period():
 #   イージス研究室が「まだ壊れているのか」を人手で測り直す羽目になった。
 #   must-fail= 閾値未満(=部屋で鳴っていない失敗)で復旧を出したら赤。
 
-def _run_recover_after(seed, initialized=True, every=288):
-    """seed回の失敗が積まれた状態から「きれいに1周」して、部屋への復旧が何回出るかを測る。"""
+def _run_recover_after(cycles, initialized=True, every=288):
+    """failを cycles 周ぶん**本物の run_once で**積んでから「きれいに1周」し、部屋への復旧数を測る。
+
+    ★2026-09-15= 旧版は fail カウンタを直に seed していたが、時間ゲートが入って
+      「回数は超えたが部屋では鳴っていない」周が普通に出るようになった=
+      カウンタを置いただけでは「鳴ったか」を再現できない。失敗の周も本物で回す。
+    """
     with tempfile.TemporaryDirectory() as d:
         p = Paths(d)
         if initialized:
             T._write_int(p.wm, 5)
-        T._write_int(p.fail, seed)
         _, deliver = _recorder()
         alerts, alert = _alert_recorder()
         _, note = _note_recorder()
+        _, tick = _clock()
+        for _ in range(cycles):
+            T.run_once(lambda s: None, deliver, alert=alert, note=note, wm_path=p.wm,
+                       fail_path=p.fail, alert_at=3, wait_alert_every=every, now=tick())
+        rang = len(alerts)
+        alerts.clear()
         fetch = _fetch_from(lambda s: [], last_row=5)
         res = T.run_once(fetch, deliver, alert=alert, note=note, wm_path=p.wm,
-                         fail_path=p.fail, alert_at=3, wait_alert_every=every)
+                         fail_path=p.fail, alert_at=3, wait_alert_every=every, now=tick())
         assert res["status"] == ("ok" if initialized else "init"), res
         assert not os.path.exists(p.fail), "きれいに1周したのに失敗カウンタが残っている"
         assert alerts == [], f"復旧の周で警報を鳴らした: {alerts}"
-        return alert.recovered
+        return rang, alert.recovered
 
 
 def t_recovery_notice_only_when_alarm_rang():
-    # 閾値以上(部屋で鳴っていた)→ 復旧を1回だけ出す。滞留量も語る。
-    rec = _run_recover_after(3)
-    assert len(rec) == 1, f"鳴らした警報の復旧が部屋へ1回出ていない: {rec}"
-    assert "連続3回" in rec[0] and "約15分" in rec[0], f"復旧が滞留量を語っていない: {rec[0]}"
-    assert len(_run_recover_after(12)) == 1, "12回連続の後の復旧が出ていない"
-    # ★must-fail: 閾値未満(部屋では鳴っていない)→ 復旧も出さない=警報より復旧が多くなる形を禁じる
-    assert _run_recover_after(2) == [], "部屋で鳴っていない失敗に復旧を出した(通知の水増し)"
-    assert _run_recover_after(0) == [], "失敗0回なのに復旧を出した"
+    # 60分を跨いで部屋で鳴っていた → 復旧を1回だけ出す。停止時間も語る。
+    rang, rec = _run_recover_after(13)
+    assert rang == 1 and len(rec) == 1, f"鳴らした警報の復旧が部屋へ1回出ていない: {rang} / {rec}"
+    assert "連続13回" in rec[0] and "約1時間5分" in rec[0], f"復旧が停止時間を語っていない: {rec[0]}"
+    assert len(_run_recover_after(30)[1]) == 1, "30回連続の後の復旧が出ていない"
+    # ★must-fail: 部屋で鳴っていない(瞬断・閾値未満)→ 復旧も出さない=警報より復旧が多くなる形を禁じる
+    assert _run_recover_after(4) == (0, []), "15分の瞬断に復旧を出した(通知の水増し)"
+    assert _run_recover_after(2) == (0, []), "部屋で鳴っていない失敗に復旧を出した(通知の水増し)"
+    assert _run_recover_after(0) == (0, []), "失敗0回なのに復旧を出した"
     # 未初期化(口がまだ無い既知の待ち)は閾値では鳴らさない=復旧も周期に達するまで出さない
-    assert _run_recover_after(3, initialized=False) == [], "既知の待ちに復旧を出した(狼少年の裏返し)"
-    assert len(_run_recover_after(288, initialized=False)) == 1, "周期escalate後の初期化で復旧が出ていない"
+    assert _run_recover_after(3, initialized=False) == (0, []), "既知の待ちに復旧を出した(狼少年の裏返し)"
+    assert len(_run_recover_after(288, initialized=False)[1]) == 1, "周期escalate後の初期化で復旧が出ていない"
 
 
 # ---- 16. ★1時間未満の滞留を「約0時間」と言わない(実際にそう届いた便がある) -------
@@ -457,14 +549,18 @@ def t_read_fail_always_writes_a_log_line():
         _, note = _note_recorder()
         _, deliver = _recorder()
         log = os.path.join(d, "teian_decide_poll.log")
-        for _ in range(4):
+        _, tick = _clock()
+        for _ in range(13):
             T.run_once(lambda s: None, deliver, alert=alert, note=note,
-                       wm_path=p.wm, fail_path=p.fail, alert_at=3)
+                       wm_path=p.wm, fail_path=p.fail, alert_at=3, now=tick())
         assert len(alerts) == 1, alerts
         lines = [x for x in open(log, encoding="utf-8").read().splitlines() if x.strip()]
-        assert len(lines) == 4, f"失敗4回に対しログが{len(lines)}行(鳴らない周が消えている)"
-        assert "水位=7据え置き" in lines[0], lines[0]
-        assert "4回連続" in lines[3], lines[3]
+        # 1行目= [計測開始](最後に読めた時刻の記録が無い=起点を置いた・推定で埋めない)
+        assert lines[0].count("[計測開始]") == 1, lines[0]
+        fails = [x for x in lines if "[fail-open]" in x]
+        assert len(fails) == 13, f"失敗13回に対しログが{len(fails)}行(鳴らない周が消えている)"
+        assert "水位=7据え置き" in fails[0], fails[0]
+        assert "13回連続" in fails[12], fails[12]
 
 
 def t_alert_text_carries_the_reason():
@@ -477,10 +573,11 @@ def t_alert_text_carries_the_reason():
         _, deliver = _recorder()
         keep = T.last_fetch_fail
         T.last_fetch_fail = lambda: "http-TimeoutError"
+        _, tick = _clock()
         try:
-            for _ in range(3):
+            for _ in range(13):
                 T.run_once(lambda s: None, deliver, alert=alert, note=note,
-                           wm_path=p.wm, fail_path=p.fail, alert_at=3)
+                           wm_path=p.wm, fail_path=p.fail, alert_at=3, now=tick())
         finally:
             T.last_fetch_fail = keep
         assert len(alerts) == 1, alerts
@@ -542,13 +639,16 @@ def t_recovery_carries_last_reason():
     with tempfile.TemporaryDirectory() as d:
         p = Paths(d)
         T._write_int(p.wm, 5)
-        T._write_int(p.fail, 4)
+        T._write_int(p.fail, 20)
         T._write_why(p.fail + ".why", "http-TimeoutError")
+        now = 1_800_000_000.0
+        T._write_ts(p.fail + ".rung", now - 3000)        # 既に部屋で鳴っている(印が事実)
+        T._write_ts(p.fail + ".oklast", now - 6000)      # 最後に読めたのは100分前
         _, deliver = _recorder()
         alerts, alert = _alert_recorder()
         _, note = _note_recorder()
         res = T.run_once(_fetch_from(lambda s: [], last_row=5), deliver, alert=alert, note=note,
-                         wm_path=p.wm, fail_path=p.fail, alert_at=3, wait_alert_every=288)
+                         wm_path=p.wm, fail_path=p.fail, alert_at=3, wait_alert_every=288, now=now)
         assert res["status"] == "ok", res
         rec = alert.recovered
         assert len(rec) == 1, f"復旧が部屋へ1回出ていない: {rec}"
@@ -565,6 +665,9 @@ def main():
         ("blocked=据え置き+カウンタ+閾値で部屋へ1回", t_blocked_holds_counts_and_alerts_once),
         ("fail-open未初期化は部屋へ鳴らさない(既知の待ち)", t_fail_open_bootstrap_no_room_alert),
         ("fail-open初期化後は部屋へ1回", t_fail_open_after_init_alerts_room),
+        ("★★must-fail 15分の瞬断は部屋へ出さない(09-15 01:02の誤発火)",
+         t_short_blip_does_not_alert_room),
+        ("★★60分超の停止は1回鳴り復旧も1回返る", t_long_outage_alerts_once_and_recovers_once),
         ("きれいに1周で失敗カウンタを畳む", t_clean_cycle_resets_counter),
         ("★返す物1 本番ログを触らない", t_never_touches_production_log),
         ("本文に必須項目が入る", t_body_contains_required_fields),
