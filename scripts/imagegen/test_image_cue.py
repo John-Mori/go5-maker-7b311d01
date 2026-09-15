@@ -186,6 +186,50 @@ class TestRoomV2(TestRoomV0):
         self.assertEqual(rooms.ROOMS[self.DEPT]["persona"], "中野五月")
 
 
+class TestLoraLookup(unittest.TestCase):
+    """★LoRAはフォルダ名で分けてよい(2026-09-16 Chami質問への答えを実物で固定する)。"""
+
+    def setUp(self):
+        import tempfile
+        self._orig = rooms.LORA_DIR
+        self.tmp = tempfile.mkdtemp(prefix="loras_")
+        rooms.LORA_DIR = self.tmp
+
+    def tearDown(self):
+        import shutil
+        rooms.LORA_DIR = self._orig
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _put(self, *parts):
+        path = os.path.join(self.tmp, *parts)
+        d = os.path.dirname(path)
+        if not os.path.isdir(d):
+            os.makedirs(d)
+        io_open = open(path, "wb")
+        io_open.write(b"x")
+        io_open.close()
+        return path
+
+    def test_folder_name_is_enough(self):
+        """置き場/fusoh_v0/なんでもいい名前.safetensors → 拾う。"""
+        self._put("fusoh_v0", "model.safetensors")
+        name, why = rooms.find_lora("imagegen-fusoh-v0")
+        self.assertEqual(name, "fusoh_v0/model.safetensors", why)
+
+    def test_file_name_still_works(self):
+        """直置きのファイル名で入っている従来の形も変わらず拾う。"""
+        self._put("fusoh_v2_style.safetensors")
+        name, _ = rooms.find_lora("imagegen-fusoh-v2")
+        self.assertEqual(name, "fusoh_v2_style.safetensors")
+
+    def test_the_other_rooms_lora_is_not_picked_up(self):
+        """★隣の部屋のLoRAを間違って着せない(v0のフォルダしか無い時にv2は拾わない)。"""
+        self._put("fusoh_v0", "model.safetensors")
+        name, why = rooms.find_lora("imagegen-fusoh-v2")
+        self.assertIsNone(name, why)
+        self.assertIn("フォルダ", why)
+
+
 class TestNoNarration(unittest.TestCase):
     """★優依は画像室で実況を喋らない(2026-09-16 Chami直=「デーモンが話す配線は恒久的にいらん」)。
 

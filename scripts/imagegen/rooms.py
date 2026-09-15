@@ -178,13 +178,27 @@ def find_lora(dept):
         return None, "この部屋はLoRA無し(素のモデル)"
     if not os.path.isdir(LORA_DIR):
         return None, "LoRAの置き場そのものが無い: " + LORA_DIR
-    cands = sorted(f for f in os.listdir(LORA_DIR)
-                   if f.lower().endswith(".safetensors") and hint.lower() in f.lower())
+    # ★**フォルダ名で分けてよい**(2026-09-16 Chami質問・原文「LoRAがふたつあって、LoRAの名前が
+    #   ここの部屋名みたいに fusoh_v0 と fusoh_v2 があるから .safetensors 置くためのフォルダ名に
+    #   できない?」)。答え= できる。置き場の**下を全部**歩き、hint が**ファイル名でも途中の
+    #   フォルダ名でも**当たれば拾う= `loras/fusoh_v0/なんとか.safetensors` でそのまま効く。
+    #   ComfyUIは loras からの相対パスを受けるので、区切りは "/" で返す。
+    cands = []
+    for root, _dirs, files in os.walk(LORA_DIR):
+        for f in files:
+            if not f.lower().endswith(".safetensors"):
+                continue
+            rel = os.path.relpath(os.path.join(root, f), LORA_DIR).replace(os.sep, "/")
+            if hint.lower() in rel.lower():
+                cands.append(rel)
     if not cands:
-        return None, ("『" + hint + "』を含む .safetensors が置き場に無い。置き場= " + LORA_DIR)
+        return None, ("『" + hint + "』を含む .safetensors が置き場に無い(下のフォルダも見た)。"
+                      "置き場= " + LORA_DIR + " ★ファイル名に入れても、"
+                      "『" + hint + "』という名前のフォルダに入れてもいい。")
     # 同じhintで複数あるなら、更新が一番新しいものを使う(学習し直した最新を拾う)
-    cands.sort(key=lambda f: os.path.getmtime(os.path.join(LORA_DIR, f)), reverse=True)
-    return cands[0], "実在を確認: " + os.path.join(LORA_DIR, cands[0])
+    cands.sort(key=lambda r: os.path.getmtime(os.path.join(LORA_DIR, r.replace("/", os.sep))),
+               reverse=True)
+    return cands[0], "実在を確認: " + os.path.join(LORA_DIR, cands[0].replace("/", os.sep))
 
 
 def describe():
