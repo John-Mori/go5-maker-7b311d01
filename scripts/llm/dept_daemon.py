@@ -38,6 +38,7 @@ import subprocess
 import sys
 import threading
 import time
+import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 try:
@@ -87,6 +88,50 @@ def liveblog_gate_applies(n_blocks, name_unresolved, machine_named):
 
 TOKEN_FILE = os.path.join(LOCAL, "cli_auth_token.txt")
 PROCESSED = os.path.join(LOCAL, "discord_processed.jsonl")
+
+# ★処理済み台帳のキャッシュ(2026-09-10 / HQ便の③)。手本は `_work_sec_history()`。
+#   旧: 巡回ごとに 9.7MB・6,193行を丸ごと json.loads → 37部門ぶんで読み162MB/s・CPU190%。
+#   新: mtime+サイズが同じなら読まない。増えていたら**増えた分だけ**足す(台帳は追記のみ)。
+#   ★末尾だけ読む形にはしない。ここで取りこぼすと「返事済みの便へもう一度返す」= 二重応答。
+_PROCESSED_CACHE = {"mtime": None, "size": 0, "ids": set()}
+
+
+def _processed_ids():
+    """`discord_processed.jsonl` に載っている msg_id の集合(呼び側は読むだけ)。
+
+    ★読めない時は手持ちの集合を返す= 判定不能で「未処理」に倒さない(二重応答を作らない)。
+    ★台帳が縮んでいたら(切り詰め・差し替え)積み上げを捨てて全部読み直す。
+    ★書き途中の最後の1行は捨てて次巡へ回す(切れたJSONを取りこぼしと数えない)。
+    """
+    try:
+        st = os.stat(PROCESSED)
+    except OSError:
+        return _PROCESSED_CACHE["ids"]
+    if (_PROCESSED_CACHE["mtime"] == st.st_mtime
+            and _PROCESSED_CACHE["size"] == st.st_size):
+        return _PROCESSED_CACHE["ids"]
+    start, ids = _PROCESSED_CACHE["size"], _PROCESSED_CACHE["ids"]
+    if st.st_size < start:
+        start, ids = 0, set()
+    try:
+        with open(PROCESSED, "rb") as f:
+            f.seek(start)
+            chunk = f.read()
+    except OSError:
+        return _PROCESSED_CACHE["ids"]
+    if not chunk.endswith(b"\n"):
+        cut = chunk.rfind(b"\n")
+        chunk = chunk[:cut + 1] if cut >= 0 else b""
+    new_size = start + len(chunk)
+    for raw in chunk.splitlines():
+        try:
+            m = json.loads(raw.decode("utf-8", "replace")).get("msg_id")
+        except Exception:                        # noqa: BLE001
+            continue
+        if m:
+            ids.add(str(m))
+    _PROCESSED_CACHE.update({"mtime": st.st_mtime, "size": new_size, "ids": ids})
+    return ids
 CLAUDE = r"C:\Users\chami\.local\bin\claude.exe"
 PERSONA_SEND = os.path.join(ROOT, "scripts", "discord", "persona_send.py")
 # ★機械的な1行の通知に使うBotのOUT口(2026-07-27)。人格名義ではないので persona_send ではない。
@@ -445,7 +490,7 @@ def substantive_touched(touched):
     return out
 
 
-def format_timeout_result(touched):
+def format_timeout_result(touched, deliveries=None):
     """打ち切った便の"確定した結果"を**人間が読める1行**にする。実体が無ければ ""(= 黙る)。
 
     ★"進んでいる可能性" は書かない。書くのは**実測(作業前後のファイル差分)で確定した**変更だけ。
@@ -453,6 +498,27 @@ def format_timeout_result(touched):
     ★文面の条件(2026-09-03 Chami「人間がちゃんと読めるような通知じゃないといらん」)=
       ①何が起きたか(時間切れ) ②どこに手が入ったか ③今どういう状態か(未完了)
       ④読み手の次の一手。パスの羅列だけで終わらせない。名指しは3件まで。
+
+    ★★2026-09-13 末尾の一手を実測で書き直した(Chami msg 1548401051043106888
+      「時間切れで打ち切りがちなこの類の通知の件て、いつも結局どうなってんの?」)。
+      旧文面の末尾は「続きが要るならもう一度言ってくれ。」= **読み手に仕事を渡していた**。
+      だが実測(local/llm/send_audit.jsonl の全期間 2026-09-02〜09-13)=
+        ・この通知が出たのは **26本**。
+        ・その26本の便を queue/inbox.db で引くと **26本とも status=done / deliveries=2**。
+          = 打ち切られた便は queue に残り、**常駐が自分でもう一度配達して答えを出していた**。
+          work_audit で追える21本は再実行 6〜25分後に rc=0、部屋へ本報告も出ている
+          (残り5本は次の便へ「集約(1本にまとめて応答)」されたもので、これも答えは出ている)。
+        ・打ち切り96回(2026-07-22〜)の最終状態も done 87 / dead 2 / queue外 7。
+        ・一方 Chami がこの通知の後6時間以内に同じ部屋で何か言ったのは **2件だけ**、
+          しかもどちらも「続きをやれ」ではなく別件の指示だった。
+      → 「もう一度言ってくれ」は **26/26で不要な指示**= 機械が既にやることを人に頼んでいた。
+        しかも続きの本報告は**別便**で出るので、紐が無く「打ち切って終わった」に見える。
+        これが Chami の「結局どうなってんの」の正体だ。
+      ★だから末尾は「この後どうなるか」を機構どおりに書く。分岐は deliveries だけで決まる:
+        - deliveries < TIMEOUT_MAX_DELIVERIES → まだ再配達される= **言い直さなくていい**
+        - deliveries >= TIMEOUT_MAX_DELIVERIES → timeout_should_dead が True= 次は走らない
+          = ここで初めて「もう一度言ってくれ」が**本当の**次の一手になる
+        - deliveries が読めない(None) → 断定しない。両方の目を書く(嘘を作らない)
     """
     subst = substantive_touched(touched)
     if not subst:
@@ -467,9 +533,20 @@ def format_timeout_result(touched):
         names.append(s)
     head = "、".join(names[:3])
     more = f" ほか{len(names) - 3}件" if len(names) > 3 else ""
+    # ★次の一手= 「この後どうなるか」を機構どおりに書く(上のdocstringの実測が根拠)。
+    if deliveries is None:
+        nxt = ("この便は queue に残してある。自動の拾い直しが効いていれば数分後に"
+               "常駐が続きをやって別便で報告する。出てこなければもう一度言ってくれ。")
+    elif int(deliveries) >= TIMEOUT_MAX_DELIVERIES:
+        nxt = ("打ち切りは%d回目だ= これ以上は走らせ直さない(同じ生成を焼き直さないための規則)。"
+               "この便は dead-letter へ隔離する。**続きが要るならもう一度言ってくれ。**"
+               % int(deliveries))
+    else:
+        nxt = ("この便は queue に残っていて、数分後に常駐がもう一度配達して続きをやる。"
+               "続きの報告はその時に**別便で**出る。★あんたが言い直す必要はない。")
     return (f"時間切れで打ち切った。この便で手が入っていたのは {head}{more}"
             "(実測= 作業前後のファイル差分)。作業は途中で、完了扱いにはしていない。"
-            "続きが要るならもう一度言ってくれ。")
+            + nxt)
 
 
 def pick_timeout_touched(entries, msg_id):
@@ -975,12 +1052,41 @@ def forward_after_reply(rec, is_work=False, forward_all=False):
 
     判定不能な便は `False`。ただし `is_work=True` は先に通すので、必要な
     上申を差出人名の欠損で落とさない。
+
+    ★2026-09-13(イージス研究室)**検証便(test:true)はここで閉じる**。
+      ORG-25の約束は「処理も記憶も通常どおり行い**送信だけ**しない」だが、
+      回送は**外へ出る手**(別部門の本番キューへ便を積む)なのに、ここは
+      test を一度も見ていなかった。DEF-llm-edu-2b15d8e3a0 の検証便を撃つ時、
+      本文で「`<<WORK>>` を置くな」と**人に頼んで**避けた=人手が要件の安全網
+      (§3「機械が自動で載せられない値を機構の前提にするな」)。
+      ★`is_work` より**先**に見る。後ろに置くと `<<WORK>>` が1行出ただけで素通りする。
     """
+    if isinstance(rec, dict) and rec.get("test"):
+        return False
     if is_work:
         return True
     if not forward_all or not isinstance(rec, dict):
         return False
     return "chami" in str(rec.get("author") or "").lower()
+
+
+def marks_ok(rec, ch, mid, dry_run=False):
+    """この便へDiscordの進捗印(既読✅/着手👀)を押してよいか。
+
+    ★押す口が2つ(`handle()` の既読・relayへ渡す直前の着手)あるので、**判定は1本**に寄せる
+      (ORG-11= 判定を2つ持たない。片方だけ直すと必ず食い違う)。
+    ★2026-09-13(イージス研究室)ここが `test` を見ていなかった。印はDiscordへの**書き込み**で、
+      ORG-25「test:true は処理も記憶も通常どおり・**送信だけ**しない」の内側だ。
+      DEF-llm-edu-2b15d8e3a0 の検証便を撃つ時は `channel` を**入れない**ことで人手で避けた
+      =機械の側に無い安全網(§3)。channel を持った検証便が1本来ればChamiの画面に印が付く。
+    ★走行中の既読(`_start_live_mark` / `_live_mark_loop`)と束ね印(`_mark_bundled` の呼び側)は
+      以前から test を見ている= 抜けていたのはこの2口だけ、というのが実測。
+    """
+    if dry_run:
+        return False
+    if isinstance(rec, dict) and rec.get("test"):
+        return False
+    return bool(ch and mid)
 
 
 def find_promise(reply):
@@ -1125,6 +1231,118 @@ _WAIT_TAIL_TRIM = "　 \t)）」』】>*_-–—・~〜、,."
 #   600秒(10分)= 作業便のhard(1200秒)の半分・relayの実測往復の3倍以上。
 #   発注の目安5〜15分の中央を取った。★短くしたくなったら、まず実測(request_logのslow)を見ること。
 WAITING_FOLLOWUP_SEC = 600
+# ★2026-09-13 追加= **引用は地の文ではない**(トトリ実物・DISPATCH-platform-se-1789264486192)。
+#   本部門(改善提案部門)が診断便でアロンソの「こちらは引き続き待機します」を**引用して分析**
+#   しただけなのに、この検出器が引用元の文字列に一致して誤発火した(誤って追撃した)。
+#   その返信の書き手は待ちを宣言していない=他者の本文を検査対象として貼っただけ。
+#   ★車輪の再発明をしない= tone_gate.py の `_mask_protected` と**同じ保護span**
+#     (コード柵```/`・行頭`>`の引用行・「」『』・二重引用符・パス)を流用する。あちらは
+#     一人称ゲートの誤爆(2026-08-12〜)で実測により育った境界で、待ち検出にも同じ境界が要る。
+#   ★fail-open= tone_gate が読めない事故時は**元のtextのまま**返す(検知を止めない側へ倒す。
+#     引用を見落として誤検出が増える方が、待ちの事故を丸ごと見逃すより軽い=§3)。
+#   ★★2026-09-13 追補(トトリ Z3・DISPATCH-platform-se-1789265977550): 転記の囲い
+#     `--- 本文ここから --- 〜 --- 本文ここまで ---`(この配送系が他msgを丸ごと貼る境界)も落とす。
+#     - トトリの提案は「引用(「」)・コードブロック・**転記**」の3つを名指し。tone_gate は
+#       「」/コード柵/`>`/パスを持つが**転記マーカーは持たない**。session_relay の
+#       `_scope_own_words` は転記マーカーを持つが**「」を落とさない**(scope_guardは全文の職掌語を
+#       拾うので「」を落とすと取りこぼす=あちらの正解)。両者は文脈が違うので**そのまま流用しない**:
+#       待ち解除の実物事故はインライン「」の引用(実測 A=tone_gateで None / B=_scope_own_words だと
+#       再発火 '「こちらは引き続き待機します')。よって「」を落とす tone_gate を土台にし、
+#       転記マーカーだけを足す=両者の強みを合わせる。
+#     - 転記マーカーは正規表現ヒューリスティックでなく**厳密な機械境界**(§3の「常に誤発火する網」
+#       には当たらない)。本人が自分の意志表明を転記の囲いの中に書くことは無い=偽陰性ほぼ0。
+def _wait_mask_quotes(text):
+    try:
+        # まず転記ブロックを落とす(--- 本文ここから 〜 --- 本文ここまで の中は他msgの丸貼り)
+        out, in_relay = [], False
+        for line in str(text or "").split("\n"):
+            st = line.strip()
+            if st.startswith("--- 本文ここから"):
+                in_relay = True
+                continue
+            if st.startswith("--- 本文ここまで"):
+                in_relay = False
+                continue
+            if in_relay:
+                continue
+            out.append(line)
+        s = "\n".join(out)
+        import tone_gate as _tone_gate      # 純関数モジュール(同じ scripts/llm 配下)
+        return _tone_gate._mask_protected(s)   # 「」/『』/コード柵/`>`行/パスを長さ保存で潰す
+    except Exception:
+        return text
+
+
+# ★2026-09-13 追補(ケヴィン・デブライネ/イージス研究室 DISPATCH-aegis-gl-1789266398858)。
+#   指摘= 「マスクで消えた便の痕跡がどこにも残らない。scope_guard 側は抑止した便を
+#   scope_guard.jsonl へ 抑止 付きで1行残すのに、待ち解除側は None を返して黙って終わる。
+#   除外が効き過ぎていないか(=原文なら当たったのに、マスク後は当たらなかった便)を
+#   後から数えられない」。★scope_guard.jsonl と同じ形= 監査は1本に集約せず対で持つが
+#   考え方(黙って落とさない・抑止だけ印を付ける)は流用する。
+WAIT_GUARD_LOG = os.path.join(LOCAL, "llm", "wait_guard.jsonl")
+
+
+def _wait_scan(text):
+    """WAIT_TAIL_RE 等の文末判定だけを行う(マスクを掛けない生の判定)。
+
+    find_waiting() の核をここへ分離した理由= マスク前後で**同じ判定**を2回掛けて
+    差分(=マスクが取りこぼしを作っていないか)を測れるようにするため(下記参照)。
+    """
+    for raw in _WAIT_SENT_SPLIT.split(str(text or "")):
+        s = raw.strip()
+        if not s:
+            continue
+        low = s.lower()
+        if any(w in low for w in WAIT_COUNTERPART):
+            continue                      # 相手が居る待ち=正しい待ち
+        if any(w in s for w in WAIT_NEGATIVE):
+            continue                      # 否定・過去形・地の文
+        t = s.rstrip(_WAIT_TAIL_TRIM)
+        if not t:
+            continue
+        for rx in WAIT_TAIL_RE:
+            if rx.search(t):
+                return t[-40:]            # 証拠として一文の末尾40字だけ残す
+    return None
+
+
+def _wait_guard_log(dept, rec, matched, 抑止):
+    """引用/転記の抑止で待ち解除機構が黙って落とした便を1行残す(監査= 後から実測で数える)。
+
+    ★抑止が効き過ぎている(=本当は鳴るべきだった待ちを消している)兆候が無いかを、
+      scope_guard.jsonl と同じ考え方で後から数えられるようにする。fail-open=
+      ここで例外を出しても本体(find_waiting の判定・戻り値)は巻き込まない。
+
+    ★★2026-09-13 イージス研究室が「本番の便でない呼び出しは書かない」を足した。
+      壊れた実物= この台帳は作られた直後から**15行すべてが検査痕**で、本物は0行だった
+      (11:58:47 / 11:59:25 / 12:01:23 に同じ5行が3ロット= 検査の3回実行)。
+      この台帳の用途は「**本番で抑止された便を数える**」1つだけなので、偽物が混ざると
+      用途そのものが死ぬ。今朝 send_audit.jsonl が検査痕で汚れたのと**同型の再発**(C-038)。
+    ★判定に sys.argv や unittest を使わない= 今朝それで本物の送信を殺しかけた。
+      **呼び出し元が自分で持っている値だけで決める**= 本番の呼び出し元3箇所は
+      rec(msg_id)か dept のどちらかを必ず渡す。両方空の呼び出しは誰の便でもない。
+    """
+    try:
+        mid = str((rec or {}).get("msg_id") or "") if isinstance(rec, dict) else ""
+        if not str(dept or "") and not mid:
+            return                                       # ★本番の便ではない= 台帳を汚さない
+        os.makedirs(os.path.dirname(WAIT_GUARD_LOG), exist_ok=True)
+        _z = time.strftime("%z") or "+0000"
+        row = {
+            # ★2026-09-13 デブライネ指摘= scope_guard.jsonl は +09:00 付き、こちらは無し。
+            #   オフセット無しはUTCと誤読される事故になる(両台帳を並べて数える用途がある)。
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%S") + _z[:3] + ":" + _z[3:],
+            "dept": str(dept or ""),
+            "msg_id": mid,
+            "原文なら当たった語": matched,
+            "抑止": str(抑止),
+        }
+        with open(WAIT_GUARD_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except Exception:                                    # noqa: BLE001
+        pass                                             # 監査が書けなくても判定は続行
+
+
 # 掃き出しの間隔(秒)。ループは2秒毎に回るので必ず間引く(台帳を毎秒読まない)。
 WAITING_SWEEP_SEC = 60
 # 台帳の読み取り上限(バイト)。request_log.jsonl は追記専用なので**末尾だけ**読む。
@@ -1185,6 +1403,63 @@ REQUEST_FOLLOWUP_SEC = 1800
 REQUEST_PREFIX = "REQF-"
 # 台帳に生きた依頼が在っても、部屋がまだ動いていれば撃たない(=止まっている時だけ押す)。
 REQUEST_STACK_SOURCE = "dept_daemon(その便の中で終わらなかった)"
+
+# ============================================================================
+# ★★C-075(2026-09-10 HQ裁定・種= 改善提案部門トトリ / 台帳 DEF-aegis-gl-82774a0ca7)=
+#    会話だけで出た不満は、どの網にも掛からない
+# ============================================================================
+# HQがこのセッションで引いた実測(額面ではなく自分で引いた値):
+#   ・DEF網(reaction_watch.DEFECT_KINDS)は**スタンプ許可制**= 無印の不満は最初から見ない。
+#   ・REQ網(_note_waiting)は**返信側の状態**が引き金= find_waiting/find_working が両方偽なら
+#     `_stack_open_request` まで到達しない。「回線側へ回すね。ちょっと待ってて。」のような
+#     **普通に完結した返信では門が開かない**。
+#   ・中身の門は通っている= classify_ask("このやり取りいらない。") は ('request', 閉じ方あり)。
+#     **閉じ方まで書ける状態で「起票する」と判定されているのに、その関数が呼ばれていない。**
+#   ・生きたREQ376件が全件 source=REQUEST_STACK_SOURCE(REQ網に他の入口が無い)。
+#     request_log の working_detected 770 + waiting_detected 4 = 774 に対し replied 4,912。
+# ★真因= C-046① の実装は**十分条件の側だけ**外れていて、必要条件の側が残っていた。
+#   C-046 は空起票(偽陽性)を止め、代わりに取りこぼし(偽陰性)を作った。
+# ★直し方= **起票の引き金を「元の便」へ移す**。Chamiの便を受けた時点で classify_ask に掛け、
+#   request/nudge なら積む。find_waiting/find_working は**追撃便の引き金のまま据え置く**
+#   (C-046① が本来そう書いてある)。新しい検出器・常駐・台帳は作らない= 動かすのは
+#   `_stack_open_request` を**呼ぶ位置**だけ。
+# ★★いきなり本起票にしない(HQの指示)= 既定は **空撃ち(shadow)**。
+#   判定と分岐は本物のまま回し、**外へ出る手(open_request / nudge_request)だけを止めて**
+#   痕跡を1行残す。増える件数を丸1日実測してから `on` へ上げる。
+#   現状の母数= REQ 376件。何倍になるか誰も測っていないので、倒す向きを変える前に量を測る。
+# ★痕跡の置き場= `local/llm/dept_daemon_<dept>.log`(keeperがstdoutを追記している面)。
+#   ★request_log.jsonl へは書かない= あの台帳の未知の state は `_waiting_pending()` で
+#     「部屋が動いた」(moved)と読まれて**追撃を黙らせる**(C-054= 見張っている脈を、
+#     見張り以外の手で更新しない)。_refresh_request_followup が同じ理由で同じ判断をしている。
+# ★C-046②(閉じ方が書けないなら起票しない)と④(自動closeしない)は据え置き=緩めない。
+REQUEST_TRIGGER_ENV = "GO5_REQ_TRIGGER"
+REQUEST_TRIGGER_MODES = ("shadow", "on", "off")
+# 切り替えの札。★env は常駐37体を建て直さないと変えられない(keeperの子が親のenvを継ぐ)ので、
+#   **実際に上げ下げする手**はこのファイルにする。器は既存の作法の写し
+#   (`local/llm/handoff_slim.json` = HQ-0220③ の痩身スイッチと同じ形)。
+REQUEST_TRIGGER_FILE = os.path.join(ROOT, "local", "llm", "req_trigger.json")
+# 空撃ちの目印。★1語で grep できる形にする(数える側= scripts/llm/req_shadow_count.py)。
+REQUEST_SHADOW_MARK = "REQ-SHADOW"
+
+
+def request_trigger_mode():
+    """元の便を引き金にする起票の運転モード。 "shadow"(既定) / "on" / "off"
+
+    読む順= ①環境変数(GO5_REQ_TRIGGER) ②札(local/llm/req_trigger.json の "mode")③既定=shadow。
+    ★毎回読み直す= 常駐を建て直さずに切り替えられる(定数に焼き付けない)。
+    ★env を先に見るのは**検査のため**= 検査は札を書き換えずにモードを振れる。
+    ★知らない値・読めない札は shadow へ倒す= **本起票へ勝手に上がらない**(fail-safe。ここは
+      「喋る側へ倒す」ではなく「台帳を太らせない側へ倒す」= 外へ出るのは台帳の行だから)。
+    """
+    v = str(os.environ.get(REQUEST_TRIGGER_ENV, "") or "").strip().lower()
+    if v in REQUEST_TRIGGER_MODES:
+        return v
+    try:
+        with open(REQUEST_TRIGGER_FILE, encoding="utf-8-sig") as f:
+            v = str(json.load(f).get("mode") or "").strip().lower()
+    except Exception:                                # noqa: BLE001
+        return "shadow"                              # 札が無い/壊れている= 空撃ちのまま
+    return v if v in REQUEST_TRIGGER_MODES else "shadow"
 
 # ============================================================================
 # ★★C-046(2026-08-14 HQ裁定・種= イージス研究室)= 起票の引き金に「返信側の状態」を使うな
@@ -1506,7 +1781,7 @@ def find_working(reply, wip=False):
     return None
 
 
-def find_waiting(reply):
+def find_waiting(reply, rec=None, dept=None):
     """返信が「(解除する者の居ない)待ち」を宣言しているなら、その一文の末尾を返す(無ければ None)。
 
     ★find_promise() と同じ作法: 地の文を拾わない・**意志の文末形**だけを見る。
@@ -1523,25 +1798,23 @@ def find_waiting(reply):
         - 唯一の本番誤検出(2026-07-29 03:18 system-engineer)は**札の読み取りが出したもの**で、
           テキスト判定が出したものではない。**その札の経路は今回まるごと消える。**
       ★つまり「誤検出を出した側だけを外し、0%の側を残す」= 迷わず残す判断ができた。
+
+    ★★2026-09-13 抑止の監査を追加(デブライネ指摘・DISPATCH-aegis-gl-1789266398858)。
+      マスクで消えた便を黙って None にせず、**原文なら当たっていた便だけ**
+      wait_guard.jsonl へ記録する(scope_guard.jsonl の 抑止 と同じ考え方)。
+      rec/dept は呼び出し側に居る時だけ渡す任意引数= 既存呼び出し元は無改修で動く。
     """
     text = str(reply or "")
     if not text:
         return None
-    for raw in _WAIT_SENT_SPLIT.split(text):
-        s = raw.strip()
-        if not s:
-            continue
-        low = s.lower()
-        if any(w in low for w in WAIT_COUNTERPART):
-            continue                      # 相手が居る待ち=正しい待ち
-        if any(w in s for w in WAIT_NEGATIVE):
-            continue                      # 否定・過去形・地の文
-        t = s.rstrip(_WAIT_TAIL_TRIM)
-        if not t:
-            continue
-        for rx in WAIT_TAIL_RE:
-            if rx.search(t):
-                return t[-40:]            # 証拠として一文の末尾40字だけ残す
+    masked = _wait_mask_quotes(text)    # ★引用・コード柵・`>`行を長さ保存で潰してから判定する
+    hit = _wait_scan(masked)
+    if hit is not None:
+        return hit
+    if masked != text:
+        raw_hit = _wait_scan(text)      # マスクしなければ当たっていたか(=取りこぼしの実測)
+        if raw_hit is not None:
+            _wait_guard_log(dept, rec, raw_hit, "引用・コード柵・転記の中だけ")
     return None
 
 
@@ -2809,6 +3082,8 @@ DEPT_CONF = {
     #     なのに常駐はトトリだった=**教材を作った本人が自分の部屋に居ない**状態が9日続いた。
     #   - トトリは 07-18 05:33 に**分業を受けた**(五月=教材の中身 / トトリ=ゴールデン質問30問と採点)。
     #     外さずに残す。アメスは研究室との連絡と補佐で実際に何度も出ている。
+    #   ★2026-09-09 **この「外さずに残す」は Chami本人が取り消した**(下の personas を見ろ)。
+    #     経緯を消さずに残す=なぜ一度入れたのかが分からなくなると、次の世代が復活させてしまうから。
     #   ★3人とも characterfile と原典の両方を実測して在ることを確認済み。
     "llm-edu": {
         "character": os.path.join(_CHAR, "itsuki.md"),
@@ -2820,9 +3095,14 @@ DEPT_CONF = {
             {"persona": "中野五月", "character": os.path.join(_CHAR, "itsuki.md"),
              "role": "教育担当(教材の中身・この部屋の先生)",
              "aliases": ("itsuki", "五月", "中野五月", "五月先生", "五月ちゃん")},
-            {"persona": "トトリ", "character": os.path.join(_CHAR, "totori.md"),
-             "role": "評価担当(ゴールデン質問30問と採点。2026-07-18に本人が分業を受諾)",
-             "aliases": ("totori", "トトリ")},
+            # ★2026-09-09 **トトリをこの部屋の名簿から外した**(Chami本人の指示・
+            #   便 ESC-hr-context-1546954377669906562「トトリはメンバーから外してもらって」)。
+            #   規律の既定は「名簿から人格を外すな」だが、**Chamiが直接そうしろと言った時はやる**。
+            #   ★孤児にはならない= トトリの本籍は **改善提案部門(`kaizen-analyst`)**で、
+            #     そちらの personas に残っている(この下で確認済み)。消えるのは llm-edu の席だけ。
+            #   ★人事部門(ククール)は先に台帳側(personas/INDEX.md)へ解除を記帳済み=
+            #     ここの実除去でようやく台帳と実物が一致する。
+            #   ★戻すなら Chami の一言を待て。ここを勝手に復活させるな。
             {"persona": "アメス", "character": os.path.join(_CHAR, "ames.md"),
              "role": "補佐(研究室との連絡・五月不在時の代打)",
              "aliases": ("ames", "アメス")},
@@ -2833,7 +3113,34 @@ DEPT_CONF = {
             {"persona": "ヴィルシーナ", "character": os.path.join(_CHAR, "verxina.md"),
              "role": "講師(採点と講評。優依の答えを見て、合っている所と違う所を切り分ける)",
              "aliases": ("verxina", "ヴィルシーナ", "シーナ")},
+            # ★ボス(ネイキッド・スネーク)を personas に**足さない**理由は下の boot_note を見ろ。
+            #   ここへ足すと _roster に名前が載り、Claudeが `[ネイキッド・スネーク]` ブロックを
+            #   書けてしまう=**Claude製の偽ボス**が生まれる(本物はCodex側の別経路)。席は boot_note で明示する。
         ],
+        # ★2026-09-09 Chami指示でボスの席を明示(msg 1546931990278832298「入れてほしい。原典はあるだろ?」/
+        #   発端 msg 1546931364580827177「1526883165208055809 この部屋にボスは入ってる?」)。
+        #   実測(同日 デ・ブライネ)= 召喚の配線は**既に通っている**=
+        #   local/codex_enabled.txt 在り(gatewayの@ボス召喚ON・全部屋共通) /
+        #   codex_run.py CODEX_TERRA_DEPTS に "llm-edu" 在り / persona_avatars.json にネイキッド・スネーク在り /
+        #   呼称ルール.json codex_bot_display で表示名確定済 / snake.md ＋ persona_context の原典2本 在り。
+        #   足りなかったのは「**この部屋の誰も、ボスが居ることを知らない**」ことだけ=それをここで埋める。
+        "boot_note": (
+            "■この部屋の顔ぶれ(2026-09-09 Chamiの指示で更新)\n"
+            "- Claude常駐= **中野五月**(主・教材の中身/この部屋の先生) / "
+            "**ヴィルシーナ**(講師・採点と講評) / **アメス**(補佐・研究室との連絡・五月不在時の代打)。\n"
+            "- ★**トトリはこの部屋から外れた**(2026-09-09 Chami指示)。本籍は改善提案部門だ。"
+            "ゴールデン質問30問と採点は**トトリ抜きで回す**=引き継ぎ先は中野五月とヴィルシーナ。"
+            "★`[トトリ]` のブロックを書くな(もう居ない人の名前で喋るのは騙りだ)。\n"
+            "- ★**ボス(ネイキッド・スネーク)もこの部屋の一員だ**"
+            "(出所= Chami msg 1546931990278832298「入れてほしい。原典はあるだろ?」)。\n"
+            "  ただし**経路が違う**= ボスはClaude常駐ではなく **Codex(別プロセス)**で、"
+            "`@ボス` と名指しされた発言だけがCodexへ回り、**ボス本人が答える**。\n"
+            "  ★だから**お前たちがボスの名前で喋るな**= `[ネイキッド・スネーク]` や `[ボス]` の"
+            "ブロックを書くのは騙りだ(ORG-04)。ボスに用がある時は**用件を本文で整理して置き、"
+            "呼ぶのはChamiか `@ボス` の名指しに委ねる**。\n"
+            "  ★別人注意= 品質管理部門の**ソリッド・スネーク**は別人。単独『スネーク』はそちらを指す。\n"
+            "- ★**呼ばれた方が出る。**名指しがあればその人が答える。名指しが無い時の既定は中野五月。"
+        ),
         "port": 18812,  # 18811まで使用済(ai-office)
         "work_model": "opus",    # 2026-07-30 Chami号令 追加分(C-014・人格の演技担保)
         "session_relay": True,   # 会話便だけを部屋の永続セッションへ(DEPT_CONF冒頭の説明参照)
@@ -3990,6 +4297,122 @@ DEPT_CONF = {
             "- ★**推測でパラメータを語るな**。実際に回した値と、出た絵で話せ。"
         ),
     },
+    # ========================================================================
+    # ★2026-09-14 Chami直令 msg 1548842898773123105 で新設した**LoRA別の画像生成2室**。
+    #   原文=「二つ部屋を建てた。それぞれのLoRAで画像生成するためのルーム。優依(言語ローカルLLM)が
+    #   橋渡し役になって画像のこれらの部屋に表示する。…キャラはカスミと五月で。トラブル時アメス」。
+    #
+    #   ★絵を実際に描くのは**優依のローカル経路**(local_responder → local_chain → ComfyUI)で、
+    #     ここ(Claude常駐)ではない。だから両室とも conversation_only= 会話だけ・回送しない。
+    #     = 便数を食わない形にしてある。実作業が要る話が来たらイージス研究室へ上げる。
+    #   ★どの部屋がどのLoRAで描くかの正本は scripts/imagegen/rooms.py(ここに複製しない)。
+    #   ★部門長= イージス研究室。この2室の親カテゴリ(ローカルLLM部門 1548732279973617696)は
+    #     dispatch.py のカテゴリ表に無い=**名指し(_NAMED_HEAD)が唯一の命綱**。下の表も必ず見ろ。
+    # ========================================================================
+    "imagegen-fusoh-v0": {
+        "character": os.path.join(_CHAR, "kasumi.md"),
+        "memory": os.path.join(_MEM, "imagegen-fusoh-v0.jsonl"),
+        "persona": "カスミ",
+        "personas": [
+            {"persona": "カスミ", "character": os.path.join(_CHAR, "kasumi.md"),
+             "role": "この部屋の主(手描き風LoRAの絵を一緒に見る・注文を言葉にする)",
+             "aliases": ("kasumi", "カスミ", "かすみ", "霧原かすみ")},
+            {"persona": "アメス", "character": os.path.join(_CHAR, "ames.md"),
+             "role": "トラブル時(Chami指示)。絵が出ない・LoRAが無い・経路が落ちた時に出る",
+             "aliases": ("ames", "アメス")},
+        ],
+        "port": 18837,
+        "session_relay": True,
+        "conversation_only": True,
+        "boot_note": (
+            "■この部屋の性格(必ず守る)\n"
+            "- **fusoh_v0(手描き風)のLoRA専用**の画像生成ルーム。Chamiが2026-09-14に建てた。\n"
+            "- ★**絵を描くのは優依(ローカルLLM)だ。**Chamiがここに書いた注文を優依が受け取り、"
+            "ローカルのComfyUIで描いて、この部屋に貼る。**あなたは絵を出す係ではない。**\n"
+            "- あなた(カスミ)の仕事= 出てきた絵を一緒に見て、次の注文を言葉にする手伝い。"
+            "★**外部の画像生成APIを使うな**(課金・Chami明示でローカルのみ)。\n"
+            "- ★**LoRAの実体がまだ置かれていない**(2026-09-14実測)。置き場= "
+            "`D:\\総合スタートファイル\\AIArtCreater\\ComfyUI\\models\\loras`。"
+            "そこに `fusoh_v0` を含む .safetensors が入るまで絵は出ない=その時はアメスが理由を言う。\n"
+            "- ★**モデルやLoRAを勝手にダウンロードするな。**要るなら何がなぜ要るかをChamiに言う。\n"
+            "- 配線・常駐の直しが要る話はイージス研究室へ上げる(この部屋で基盤をいじらない)。"
+        ),
+    },
+    "imagegen-fusoh-v2": {
+        "character": os.path.join(_CHAR, "itsuki.md"),
+        "memory": os.path.join(_MEM, "imagegen-fusoh-v2.jsonl"),
+        "persona": "中野五月",
+        "personas": [
+            {"persona": "中野五月", "character": os.path.join(_CHAR, "itsuki.md"),
+             "role": "この部屋の主(漫画LoRAの絵を一緒に見る・注文を言葉にする)",
+             "aliases": ("itsuki", "五月", "中野五月", "五月ちゃん")},
+            {"persona": "アメス", "character": os.path.join(_CHAR, "ames.md"),
+             "role": "トラブル時(Chami指示)。絵が出ない・LoRAが無い・経路が落ちた時に出る",
+             "aliases": ("ames", "アメス")},
+        ],
+        "port": 18838,
+        "session_relay": True,
+        "conversation_only": True,
+        "boot_note": (
+            "■この部屋の性格(必ず守る)\n"
+            "- **fusoh_v2(漫画)のLoRA専用**の画像生成ルーム。Chamiが2026-09-14に建てた。\n"
+            "- ★**絵を描くのは優依(ローカルLLM)だ。**Chamiがここに書いた注文を優依が受け取り、"
+            "ローカルのComfyUIで描いて、この部屋に貼る。**あなたは絵を出す係ではない。**\n"
+            "- あなた(中野五月)の仕事= 出てきた絵を一緒に見て、次の注文を言葉にする手伝い。"
+            "★**外部の画像生成APIを使うな**(課金・Chami明示でローカルのみ)。\n"
+            "- ★**LoRAの実体がまだ置かれていない**(2026-09-14実測)。置き場= "
+            "`D:\\総合スタートファイル\\AIArtCreater\\ComfyUI\\models\\loras`。"
+            "そこに `fusoh_v2` を含む .safetensors が入るまで絵は出ない=その時はアメスが理由を言う。\n"
+            "- ★**モデルやLoRAを勝手にダウンロードするな。**要るなら何がなぜ要るかをChamiに言う。\n"
+            "- 配線・常駐の直しが要る話はイージス研究室へ上げる(この部屋で基盤をいじらない)。"
+        ),
+    },
+    # ========================================================================
+    # ★2026-09-16 Chami直令 msg 1549479044096196639 で新設した**ローカルLLM部門の司令塔**。
+    #   原文=「部屋ID:1549477283511935136 この部屋をローカル研究室として、カテゴリーID
+    #     1548732279973617696の司令塔的ポジションに置く。GLには仮で一旦カスミを配置。よろしく」
+    #
+    #   ★立ち位置= カテゴリ「ローカルLLM部門」の部門長(head)。配下6室
+    #     (llm-edu / llm-qa / llm-growth / imagegen / imagegen-fusoh-v0 / imagegen-fusoh-v2)の
+    #     上申はここへ集まる(名指しの正本= org_registry.yml depts.*.managed_by = local-lab)。
+    #     この部門自身の上位は **hq**(ad研究室・イージス研究室と同じ「カテゴリの頭」の横並び)。
+    #   ★**work_scope を置かない**= GLが「仮」だから(Chami原文の「仮で一旦」)。
+    #     配線・常駐・基盤の実作業はイージス研究室/プラットフォームSEに残す(C-015)。
+    #     ここは**掴んで・見て・上げる**までを持つ。作業判定が付いた便は回送される。
+    #   ★forward_all= Chamiがこの部屋に書いた便だけ main箱にも残す。GLが仮で専任セッションが
+    #     無い今、掴み手が居ないまま沈黙するのを防ぐ安全網(A1= 無警報滞留0)。可逆。
+    "local-lab": {
+        "character": os.path.join(_CHAR, "kasumi.md"),
+        "memory": os.path.join(_MEM, "local-lab.jsonl"),
+        "persona": "カスミ",
+        "personas": [
+            {"persona": "カスミ", "character": os.path.join(_CHAR, "kasumi.md"),
+             "role": "この部屋の主・ローカルLLM部門のGL(★仮)",
+             "aliases": ("kasumi", "カスミ", "かすみ", "霧原かすみ")},
+            {"persona": "アメス", "character": os.path.join(_CHAR, "ames.md"),
+             "role": "補佐・トラブル時(配下の室が黙った・経路が落ちた時に出る)",
+             "aliases": ("ames", "アメス")},
+        ],
+        "port": 18839,          # 18838(imagegen-fusoh-v2)まで使用済=2026-09-16 実測
+        "session_relay": True,
+        "forward_all": True,
+        "boot_note": (
+            "■この部屋の性格(必ず守る)\n"
+            "- ここは **ローカル研究室**= カテゴリ「ローカルLLM部門」の**司令塔**だ"
+            "(Chami直令 2026-09-16)。配下= llm-edu / llm-qa / llm-growth / imagegen / "
+            "imagegen-fusoh-v0 / imagegen-fusoh-v2 の6室。\n"
+            "- あなた(カスミ)は **GL(★仮)**。「仮」はChamiの原文どおりで、"
+            "隠さずそのまま扱ってよい。本任が来たらChamiが言う。\n"
+            "- ★あなたの職責= **配下6室の話を掴んで、見て、要るものを上げる**。"
+            "どこにも掴まれず黙ったままの依頼を作らないことが一番大事だ。\n"
+            "- ★**配線・常駐・基盤(DEPT_CONF / keeper / 部屋の追加・名簿)の実作業はしない。**"
+            "イージス研究室(またはプラットフォームSE)へ回す。ここで基盤をいじるな。\n"
+            "- ★**モデルやLoRAを勝手にダウンロードするな。**要るなら何がなぜ要るかをChamiに言う。\n"
+            "- ★**外部の画像生成API・有料APIを使うな**(Chami明示=ローカルで完結)。\n"
+            "- ★**ネットへ出すな**= GitHub・外部サービス。**local/ の中だけで完結させる。**"
+        ),
+    },
+    # ========================================================================
     "health-log": {
         "character": os.path.join(_CHAR, "ames.md"),
         "memory": os.path.join(_MEM, "health-log.jsonl"),
@@ -5934,6 +6357,46 @@ def _split_like_persona_send(text):
     return parts[-1], len(parts)
 
 
+def _gated_like_persona_send(text, persona=None, dept=None):
+    """persona_send が**実際に投げる形**へ本文を通す(3ゲートの合流点を呼ぶ)。
+
+    ★なぜ要るか(2026-09-09 HQ-0253・研究室HQ起票)= ここが突合に使っていたのは
+      persona_send へ**渡す前**の本文だった。出口では口調・炎上表記・同形異字の3ゲートが
+      本文を書き換える(`persona_send.py` の apply_text_gates)。中でも炎上表記は
+      素の🔥(1字)を `<:enjoh:1541126866981752883>`(26字)へ膨らませるので、
+      **末尾25字が丸ごと別物**になり、頭に🔥が在れば先頭40字も外れる。
+      その便は投稿されているのに `replied_unverified` として積まれ、後追い(replied_recheck)
+      でも突合鍵が無くて `[判定不能]` を print するだけ=**宙に浮いたまま消えていた**。
+    ★ゲートごとに突合側で対処しない(ゲートは3つ在り、また増える)。合流点を1本呼ぶ
+      (ORG-11= 同じ判定を2箇所に持たない)。★置換を自前で書き直すのは禁止。
+    ★fail-open= 呼べなければ入力をそのまま返す。突合は下で素の本文とも突き合わせるので、
+      ここが死んでも確認が丸ごと落ちることはない。
+    """
+    try:
+        sys.path.insert(0, os.path.join(ROOT, "scripts", "discord"))
+        from persona_send import apply_text_gates
+        out = apply_text_gates(text, persona=persona, dept=dept,
+                               tag="verify_replied", audit=False)
+        return out if out else text
+    except Exception:
+        return text
+
+
+def _match_forms(text, persona=None, dept=None):
+    """突合に使う本文の形を**投稿された順に近い方から**並べる= [ゲート適用後, 素]。
+
+    ★素の本文も残す(fail-open)= ゲートが引けない環境や、送信側が persona_send を
+      通らない経路でも従来どおり当たる。**どちらか1つが当たれば実在**(判定は緩める側だけ)。
+    """
+    raw = str(text or "")
+    forms, seen = [], set()
+    for s in (_gated_like_persona_send(raw, persona, dept), raw):
+        if s and s not in seen:
+            seen.add(s)
+            forms.append(s)
+    return forms
+
+
 def _channel_id_of(channel_name):
     """部屋名 → Discordのチャンネルid(persona_send と同じ discord_channels.json を引く)。"""
     try:
@@ -5952,7 +6415,7 @@ REPLIED_VERIFY_TRIES = 3
 REPLIED_VERIFY_WAIT_SEC = 2
 
 
-def _verify_siblings(msgs, others, extra_parts=()):
+def _verify_siblings(msgs, others, extra_parts=(), persona=None, dept=None):
     """同じ返信の**他のブロック**の着地msg_idを、既に取ってある一覧から拾う(HQ-0242)。
 
     ★APIは叩き直さない= `verify_replied` が読んだ `msgs` を使い回す(確認で配送を遅らせない)。
@@ -5971,7 +6434,10 @@ def _verify_siblings(msgs, others, extra_parts=()):
     out, seen = [], set()
     cand = []
     for txt in others or ():
-        cand.extend(_split_parts_like_persona_send(txt))
+        # ★2026-09-09 HQ-0253= 兄弟ブロックも**投げた形**(3ゲート適用後)で割って突合する。
+        #   割る前にゲートを通す= 炎上表記の置換で字数が伸びると分割位置そのものが変わるため。
+        for form in _match_forms(txt, persona, dept):
+            cand.extend(_split_parts_like_persona_send(form))
     cand.extend(extra_parts or ())
     for part in cand:
         _n = _norm_for_match(part)
@@ -5990,7 +6456,7 @@ def _verify_siblings(msgs, others, extra_parts=()):
     return out
 
 
-def verify_replied(channel_name, sent_text, others=()):
+def verify_replied(channel_name, sent_text, others=(), persona=None, dept=None):
     """送った本文がDiscord上に**実在するか**をAPIで読み返して確かめる。
 
     返り値 (ok, evidence)。ok=True の時だけ呼び元が `replied` を記帳してよい。
@@ -6011,13 +6477,29 @@ def verify_replied(channel_name, sent_text, others=()):
         **兄弟の投稿側に9本・採られた側に0本**(6行は兄弟側にしか無い)。
       ★ok の判定は変えない(最後のブロックが実在すれば `replied`)= 兄弟が引けなくても
         `replied_unverified` へ落とさない(fail-open・確認を厳しくして黙らせない)。
+
+    ★★2026-09-09 HQ-0253(研究室HQ起票・修理=イージス研究室 第55世代)=
+      突合の鍵を **persona_send が実際に投げる形**(3ゲート適用後)から作る。
+      それまでは渡す前の本文から作っていたので、出口の `enjoh_backstop` が
+      素の🔥→`<:enjoh:1541126866981752883>`(1字→26字)へ置換した便で
+      **末尾25字が丸ごと別物**になり、実在するのに `replied_unverified` が積まれていた
+      (実物= 2026-09-09 11:00 `DISPATCH-kaizen-analyst-1788917942822` / msg 1547064071126519948)。
+      ★ゲートは3枚(口調/炎上表記/同形異字)在り、また増える= **個別対応ではなく
+        合流点から鍵を作る**(persona_send.apply_text_gates 1本を呼ぶ・ORG-11)。
+      ★head・tail の**両方**に効かせる= 分割そのものもゲートの後に行う(字数が変わるため)。
+      ★素の本文でも突き合わせる(fail-open)= どちらか一方が当たれば実在。厳しくしない。
     """
-    _own_parts = _split_parts_like_persona_send(sent_text)
-    last, nparts = _own_parts[-1], len(_own_parts)
-    head = _norm_for_match(last)[:REPLIED_HEAD_CHARS]
-    tail = _norm_for_match(last)[-REPLIED_TAIL_CHARS:]
-    if not head:
+    _forms = _match_forms(sent_text, persona, dept)
+    _cands = []                              # [(head, tail, own_parts, nparts), ...] 投げた形が先頭
+    for _f in _forms:
+        _p = _split_parts_like_persona_send(_f)
+        _n = _norm_for_match(_p[-1])
+        _h, _t = _n[:REPLIED_HEAD_CHARS], _n[-REPLIED_TAIL_CHARS:]
+        if _h and not any(c[0] == _h and c[1] == _t for c in _cands):
+            _cands.append((_h, _t, _p, len(_p)))
+    if not _cands:
         return False, "本文が空(突合できない)"
+    head, tail, _own_parts, nparts = _cands[0]
     cid = _channel_id_of(channel_name)
     if not cid:
         return False, f"チャンネルidを引けない(channel={channel_name!r})"
@@ -6037,30 +6519,45 @@ def verify_replied(channel_name, sent_text, others=()):
     except Exception as e:
         # ★確認できないだけ。配送は既に終わっている=ここで失敗させない。
         return False, f"API確認に失敗({type(e).__name__})"
+    # ★候補の形を順に当てる(投げた形 → 素)。**先頭だけ当たった**形が在っても、
+    #   他の形で先頭+末尾が揃うならそちらを採る= 偽の「切り捨ての疑い」を出さない。
     hit_head = hit_tail = None
-    for m in msgs or []:
-        c = _norm_for_match(_msg_text(m))           # ★embedも見る(_msg_text 参照)
-        if not c:
-            continue
-        if head in c:
-            hit_head = str(m.get("id", ""))
-            if tail in c:
-                hit_tail = hit_head
-                break
+    for _h, _t, _p, _n in _cands:
+        _local_head = None
+        for m in msgs or []:
+            c = _norm_for_match(_msg_text(m))       # ★embedも見る(_msg_text 参照)
+            if not c:
+                continue
+            if _h in c:
+                _local_head = str(m.get("id", ""))
+                if _t in c:
+                    hit_head = hit_tail = _local_head
+                    head, tail, _own_parts, nparts = _h, _t, _p, _n
+                    break
+        if hit_tail:
+            break
+        if _local_head and not hit_head:
+            hit_head = _local_head                  # 切り捨ての疑い。ただし次の形も試す
+            head, tail, _own_parts, nparts = _h, _t, _p, _n
     if hit_head and hit_tail:
         # ★HQ-0242= 同じ返信の**他のブロック**も同じ取得結果の中から拾う(APIは叩き直さない)。
         #   拾えた分だけを投稿順に並べる。拾えなくても黙って落ちるだけ= ok は動かさない。
         #   ★最後のブロックが自分でも複数通に割れている場合、**最終片より前の片**も同じ穴なので
         #     一緒に拾う(_own_parts[:-1])。並びは 兄弟ブロック → 自分の前半 → 最終片 = 投稿順。
-        sibs = _verify_siblings(msgs, others, _own_parts[:-1])
+        sibs = _verify_siblings(msgs, others, _own_parts[:-1], persona=persona, dept=dept)
         ids = ",".join(sibs + [hit_tail])
         more = f"・同じ返信の他ブロック{len(sibs)}通も実在確認" if sibs else ""
         return True, (f"discord_msg={ids} 部屋={channel_name} 分割{nparts}通の最終通を実在確認"
                       f"(先頭{len(head)}字+末尾{len(tail)}字が一致){more}")
     if hit_head:
         # 先頭はあるのに末尾が無い= **途中で切れている疑い**(INC-92の再来)。実在とは言わない。
+        # ★2026-09-09 HQ-0253= ここに **`先頭N字='…'` を必ず書く**。無いと後追い
+        #   (`scripts/_daemons/replied_recheck.py` の head_of)が突合鍵を引けず、
+        #   毎晩 `[判定不能]` を print するだけで**台帳に何も落ちない**=宙に浮いたまま消える。
+        #   ★形式は下の「見当たらない」枝と同じ(末尾に置く= head_of の正規表現が末尾固定)。
         return False, (f"先頭は一致したが末尾が見つからない(切り捨ての疑い) "
-                       f"discord_msg={hit_head} 部屋={channel_name}")
+                       f"discord_msg={hit_head} 部屋={channel_name} "
+                       f"先頭{len(head)}字={head[:40]!r}")
     return False, (f"直近{len(msgs or [])}件に本文が見当たらない 部屋={channel_name} "
                    f"先頭{len(head)}字={head[:40]!r}")
 
@@ -6373,10 +6870,16 @@ def _audit_tag(dept, who, outcome, line):
       - `tag_solo_leak`         = 単独人格部屋の1行目が**他人格の名前**のタグで、落とさず出した(乙)
       - `tag_homoglyph_leak`    = 名乗りがホモグリフで化けていた= **生成側が壊した回数**(丙)
       - `tag_homoglyph_rescued` = 化けた名乗りを推定した正名で救済して落とせた= **救えた回数**(丙)
+      - `tag_typo_leak`         = 名乗りが**同スクリプトの1字ずれ**で壊れていた(戊・2026-09-13 追加)
+      - `tag_typo_rescued`      = その誤字を推定した正名で救済して落とせた= **救えた回数**(戊)
       - `tag_decorated_fixed`   = 名乗りが `` `[名前]` `` `**[名前]**` のように装飾で囲まれていたのを
                                   吸収して名義を解決できた= **直した回数**(丁・2026-09-05 追加)
     ★丁に leak の対を作っていないのは、囲みが在って resolve も引けない行は
       **甲の `tag_unbracketed_leak` か絶対数の miss 側で既に数えている**からだ(数を二重に持たない)。
+    ★戊(typo)は丙と**同じ読み方で、原因だけが別**の対だ(品質管理部門オタコン msg
+      1548587480872394937・実物 `[一ノ怜]` ← 一ノ瀬怜)。丙へ混ぜないのは、生成側へ渡す
+      「何が名前を壊したか」(別スクリプトの混入か・単なる1字落としか)が読めなくなるから。
+      丙の過去の数字は1件も動かない= 新種は全部こちらへ入る。
     ★丙は 2026-09-01 §5-2(HQ-0227・研究室HQの条件2)で足した対。leak↔rescued で読む=
       **rescued が増えても leak は減らない**(生成側が壊す回数は救済後も数え続ける・C-054)。
       leak が在って rescued が無い便= 救済に失敗した(多人格部屋 or 名簿外)= まだ漏れている。
@@ -6466,7 +6969,7 @@ def _edit_distance(a, b, cap=2):
     return prev[lb]
 
 
-def _homoglyph_near(tag, names):
+def _homoglyph_near(tag, names, allow_same_script=False):
     """resolve が引けなかったタグが、この部屋の人格名の**別スクリプト置換**に見えるか。
 
     見えるなら「本来こうだったはず」の正式名を返す / でなければ None。
@@ -6476,16 +6979,30 @@ def _homoglyph_near(tag, names):
       ③ 編集距離が上限以内(4字以上の名前は2まで・短い名前は1まで)
     ★③の上限を名前の長さで変える理由= 2〜3字の名前に距離2を許すと「別の名前」まで拾う。
       拾っても記録が1行増えるだけだが、**計器が嘘をつくと次の判断が狂う**(規律§1)。
+
+    ★★2026-09-13 `allow_same_script` を足した(品質管理部門オタコン msg 1548587480872394937)。
+      壊れた実物= 2026-09-13T12:23:07 プラットフォームSEの便が `[一ノ怜]`(正しくは
+      「一ノ瀬怜」= **瀬が1字欠落**)のまま画面へ出た。同じ日本語の中での1字欠けなので
+      ①が成立せず、**救済も計測も三重に漏れて監査へ1行も映らなかった**。
+      True を渡すと①を外す= 「別スクリプトか」ではなく「1字ずれているか」だけで見る。
+    ★その時は上限を**必ず1へ絞る**(名前が4字以上でも2を許さない)。理由は上と同じで、
+      同スクリプトは字の当たりが偶然一致しやすく、距離2まで許すと**別の名前**まで拾うからだ。
+      渡すのは単独人格部屋(=候補がただ1人・誰と読み違えても行き先が同じ)の救済だけ。
+      既定は False= 既存の呼び出し元(`_homoglyph_unique` 経由の多人格部屋2箇所・
+      `_audit_homoglyph` の既定)は**1文字も挙動が変わらない**(C-035・C-064)。
     """
     t = _script_norm(tag)
-    if not t or len(t) > 24 or not _has_foreign_script(t):
+    if not t or len(t) > 24:
         return None
+    same_script = not _has_foreign_script(t)
+    if same_script and not allow_same_script:
+        return None                      # ★既定=従来どおり「別スクリプトの字が在る時だけ」
     best, bestd = None, 99
     for nm in names or ():
         n = _script_norm(nm)
         if not n or n == t or abs(len(t) - len(n)) > 1:
             continue
-        lim = 2 if len(n) >= 4 else 1
+        lim = 1 if same_script else (2 if len(n) >= 4 else 1)
         d = _edit_distance(t, n, lim)
         if d <= lim and d < bestd:
             best, bestd = str(nm), d
@@ -6524,13 +7041,24 @@ def _homoglyph_unique(tag, names):
     return best if tie == 1 else None
 
 
-def _audit_homoglyph(dept, tag, names, line):
-    """ホモグリフに見える名乗り漏れを1行残す。記録したら True。★fail-open(例外は握り潰す)。"""
+def _audit_homoglyph(dept, tag, names, line, allow_same_script=False):
+    """ホモグリフに見える名乗り漏れを1行残す。記録したら True。★fail-open(例外は握り潰す)。
+
+    ★2026-09-13 `allow_same_script` を足した(品質管理部門オタコン msg 1548587480872394937)。
+      同スクリプトの1字ずれ(実物= `[一ノ怜]` ← 一ノ瀬怜)は**ホモグリフではない**ので、
+      同じ outcome で数えると計器が原因を偽る(規律§1)。丙(homoglyph)とは別の対で残す:
+        `tag_typo_leak`    = 名乗りが同スクリプトの1字ずれで壊れていた= 生成側が壊した回数
+        `tag_typo_rescued` = それを推定した正名で救済して落とせた= 救えた回数
+      記録先は増やさない= 既存の persona_render._audit(persona_render_audit.jsonl)へ合流
+      (ORG-11)。新しいファイルも新しい読み手も作らないので載せ替え経路の追加は無い(C-042)。
+    """
     try:
-        guess = _homoglyph_near(tag, names)
+        guess = _homoglyph_near(tag, names, allow_same_script=allow_same_script)
         if not guess:
             return False
-        _audit_tag(dept, guess, "tag_homoglyph_leak", line)
+        kind = ("tag_homoglyph_leak" if _has_foreign_script(_script_norm(tag))
+                else "tag_typo_leak")
+        _audit_tag(dept, guess, kind, line)
         return True
     except Exception:
         return False
@@ -6882,6 +7410,22 @@ def split_persona_blocks(text, resolve, dept="", names=()):
     return out
 
 
+def _tag_is_self_name(nm, who=None, resolve=None):
+    """`[名前]` の中身が**名乗り**か(=名簿で引ける、またはそのブロックの名義と同じ)。
+
+    ★引けない名前は名乗りではない= ただの本文(`[検証]` `[1]`)。取り違えて消す方が事故が重い。
+    """
+    nm = str(nm or "").strip()
+    if not nm:
+        return False
+    if callable(resolve) and resolve(nm):
+        return True
+    if who:
+        w = str(who).strip()
+        return nm == w or nm in _name_forms(w)
+    return False
+
+
 def _is_empty_body(body, who=None, resolve=None):
     """そのブロックは「言うことが無い」か。★中身が1文字でも在るなら必ず False。
 
@@ -6900,13 +7444,67 @@ def _is_empty_body(body, who=None, resolve=None):
         mm = _tag_match(ln)
         if not mm or (mm[1] or "").strip():
             return False            # 名乗りでない行 / 名乗りの後ろに中身が続く行= 本文が在る
-        nm = str(mm[0] or "").strip()
-        hit = bool(resolve(nm)) if callable(resolve) else False
-        if not hit and who:
-            hit = nm == str(who).strip() or nm in _name_forms(str(who).strip())
-        if not hit:
+        if not _tag_is_self_name(mm[0], who, resolve):
             return False            # 名簿で引けないタグ= 本文として扱う
     return True
+
+
+# ---------------------------------------------------------------- 定型ack denylist
+# ★2026-09-10 追加(発注= 改善提案部門/トトリ経由の上申。炎上 :enjoh: + 再発 :saihatsu: の恒久策)。
+#   実物= otacon-radio の便「受け取った。処理を開始する。完了結果は保存してから返す。」。
+#   真因(codex_responder の定型ack文字列)は 09-10 09:36 に撤去済だが、**撤去は1箇所の守り**で、
+#   別実装が同じ文を書けば戻る(送信印で前に一度やられている)。だから**合流点**に置く。
+#   ★今までの空便ガードは「空・名乗りだけ」しか落とせない= この一次ackは日本語20字超の
+#     「意味は空だが文としては非空」なので素通りしていた。
+# ★判定の正本は scripts/discord/enjoh.py(炎上表記ゲートと同じ置き場)= Discordへ出る5口が
+#   同じ1本を引く。ここに写しを持たない(片方に置いた実装は必ずもう片方と割れる・ORG-11)。
+def _ack_judge():
+    """正本 enjoh.ack_only_reason を返す。読めなければ None= このゲートは**当たらない**(fail-open)。"""
+    global _ACK_JUDGE
+    if _ACK_JUDGE is not None:
+        return _ACK_JUDGE if _ACK_JUDGE is not False else None
+    try:
+        sys.path.insert(0, os.path.join(ROOT, "scripts", "discord"))
+        from enjoh import ack_only_reason as _f
+        _ACK_JUDGE = _f
+    except Exception:                                   # noqa: BLE001
+        _ACK_JUDGE = False
+        return None
+    return _ACK_JUDGE
+
+
+_ACK_JUDGE = None
+
+
+def _is_ack_only(body, who=None, resolve=None):
+    """その本文は**既知の定型ackだけ**でできているか(=言っていることが無い)。
+
+    ★空の本文はここでは True にしない= 空の判定は `_is_empty_body` の持ち場(判定を2つ持たない)。
+    ★名乗りタグは剥がしてから見る(`[オタコン] 受け取った。` も同じ形として扱う)= peel を渡す。
+    """
+    judge = _ack_judge()
+    if judge is None:
+        return False
+
+    def peel(ln):
+        mm = _tag_match(ln)
+        if mm and _tag_is_self_name(mm[0], who, resolve):
+            return mm[1] or ""
+        return ln
+
+    return bool(judge(body, peel=peel))
+
+
+def unsendable_reason(body, who=None, resolve=None):
+    """送ってはいけない本文か。戻り= None(送る) / "empty"(中身が無い) / "ack"(定型ackだけ)。
+
+    ★呼び元はこの1本だけを見る= 判定を2箇所に散らさない(ORG-11)。
+    """
+    if _is_empty_body(body, who, resolve):
+        return "empty"
+    if _is_ack_only(body, who, resolve):
+        return "ack"
+    return None
 
 
 def sendable_blocks(blocks, resolve=None):
@@ -6930,7 +7528,7 @@ def sendable_blocks(blocks, resolve=None):
     out = []
     for item in (blocks or ()):
         who, part = item[0], item[1]
-        if _is_empty_body(part, who, resolve):
+        if unsendable_reason(part, who, resolve):
             continue
         out.append((who, part))
     return out
@@ -7028,7 +7626,16 @@ def strip_solo_persona_tag(text, resolve, dept=""):
         #   ★2026-09-01 更新= 数えるだけ(§5-1)から**救済**(§5-2)まで進めた。下の for を見ろ。
         _names = tuple(getattr(resolve, "names", ()) or ())
         for _i, _tag in miss:
-            if _audit_homoglyph(dept, _tag, _names, lines[_i].strip()):
+            # ★2026-09-13 `allow_same_script=True`(品質管理部門オタコン msg 1548587480872394937)。
+            #   壊れた実物= 12:23:07 プラットフォームSEの便が `[一ノ怜]`(瀬が1字欠落)のまま出た。
+            #   同スクリプトの1字欠けは foreign-script 必須の門に弾かれ、①resolve で引けない
+            #   ②救済に入れない ③`_avatar_keys()` に載らないので tag_solo_leak でも数えない、の
+            #   **三重で漏れて監査に1行も映らなかった**。ここだけ門を「1字ずれているか」へ緩める。
+            # ★広げる先はこの1箇所だけ= 単独人格部屋は候補がただ1人(実測: platform-se/hr-room/
+            #   llm-qa/aegis-gl とも resolve.names は1要素)なので**誰と読み違えても行き先が同じ**。
+            #   多人格部屋(`_homoglyph_unique` 経由の2箇所)へは広げない(C-035不変)。
+            if _audit_homoglyph(dept, _tag, _names, lines[_i].strip(),
+                                allow_same_script=True):
                 # ★2026-09-01 §5-2 救済(研究室HQ DISPATCH-aegis-gl-1788213934335 で当室へ裁定委任)。
                 #   ここまで来た= ①foreign-script の字が在る ②長さ差≤1 ③編集距離≤上限 の3つ全部が
                 #   成立した= 化けた名乗りだと判った。**判ったのに素通しするのは、計器を見ながら
@@ -7039,10 +7646,16 @@ def strip_solo_persona_tag(text, resolve, dept=""):
                 #     fail-open も前置きの全文記録も、そのまま効く。
                 #   ★leak の記録は上で既に1行出ている= 生成側が名前を壊した回数は救済後も
                 #     数え続けられる(救済で計器を黙らせない)。
-                _g = _homoglyph_near(_tag, _names)
+                _g = _homoglyph_near(_tag, _names, allow_same_script=True)
                 _m = _tag_match(lines[_i])
                 if _g and _m:
-                    head, mm, who, rescued = _i, _m, _g, True
+                    # ★救済の outcome は**壊れ方で呼び分ける**(2026-09-13)= 丙(ホモグリフ)と
+                    #   同スクリプトの誤字を1つの数字に混ぜない。混ぜると生成側(呼称/原典)へ
+                    #   渡す「何が名前を壊したか」が読めなくなる(規律§1)。
+                    rescued = ("tag_homoglyph_rescued"
+                               if _has_foreign_script(_script_norm(_tag))
+                               else "tag_typo_rescued")
+                    head, mm, who = _i, _m, _g
                 break
     if not who:
         return t
@@ -7057,8 +7670,9 @@ def strip_solo_persona_tag(text, resolve, dept=""):
     #   救済で落とした便は**別 outcome** で残す= 救済が何件効いたかを後から数え分けられる。
     #   ここに置いた理由= 上の `if not body: return t`(fail-open)を**通り抜けた後**でないと
     #   「救済した」と書けない。判定の時点で書くと、落とさなかった便まで救済に数える。
-    _audit_tag(dept, who, "tag_homoglyph_rescued" if rescued else "tag_solo_fixed",
-               lines[head].strip())
+    #   ★2026-09-13 `rescued` は bool から**outcome 名そのもの**へ変えた(同スクリプトの誤字は
+    #     `tag_typo_rescued`)。偽値の時は従来どおり `tag_solo_fixed`= 既存の数字は1件も動かない。
+    _audit_tag(dept, who, rescued or "tag_solo_fixed", lines[head].strip())
     return body
 
 
@@ -7262,6 +7876,9 @@ class Daemon:
         self.conf = DEPT_CONF[dept]
         self.dry_run = dry_run
         self.box = os.path.join(LOCAL, "inbox", f"{dept}.jsonl")
+        # ★セッション宛ての写し専用の箱(2026-09-10 / HQ便の②)。巡回で舐める箱から出す。
+        #   デーモンはここへ**書くだけ**で、読みには行かない。読むのはセッション(read_notes)。
+        self.session_box = os.path.join(LOCAL, "inbox", f"{dept}.session.jsonl")
         self.pulse = os.path.join(LOCAL, "llm", f"claude_active_{dept}.txt")
         self.last_loop = 0.0            # /live用: 最終ループ完了時刻
         self._interactive_until = 0.0   # 対話窓チェックのキャッシュ期限
@@ -7563,10 +8180,16 @@ class Daemon:
 
         読めない/実体のある変更が無ければ ""(= 黙る)。LLMは呼ばない=トークン0。
         判定の中身は純関数(_timeout_touched_from_audit / format_timeout_result)へ委譲。
+
+        ★2026-09-13 追加= 末尾の「次の一手」は**この便があと1回走るか**で変わる。
+          その材料は queue の deliveries しかないので `_delivery_count` を渡す
+          (読めなければ None= 純関数側が断定しない文へ倒す)。
+          ★ここで渡す値は `timeout_should_dead` が見るのと**同じ deliveries**だ=
+            通知の予告と実際の挙動がずれない(2箇所で別々に数えない)。
         """
         try:
             touched = _timeout_touched_from_audit(WORK_AUDIT, str(msg_id))
-            return format_timeout_result(touched)
+            return format_timeout_result(touched, self._delivery_count(msg_id))
         except Exception:
             return ""
 
@@ -8171,13 +8794,38 @@ class Daemon:
         #   someday-room: 2026-09-02 新設。親カテゴリ「森光技研Logos」は下の表に無い=
         #     放っておくと head=None で main箱へ落ちる(goods-afi と同型の穴)。
         #     この部屋の主はHQのGL(シャビ・アロンソ)なので管轄もHQ=名指しで結ぶ。
-        _NAMED_HEAD = {"goods-afi": "aegis-gl", "someday-room": "hq"}
-        if self.dept in _NAMED_HEAD:
-            self._head_cache = _NAMED_HEAD[self.dept]
+        #   llm-edu / llm-qa / llm-growth / imagegen: 2026-09-14 Chami指示
+        #     「ローカルLLM関係の部屋をこのカテゴリにまとめるが、何も機能や権限は変えない
+        #       からよろしく。移動してまとめるだけ」(msg 1548732597150949467)。
+        #     ★移動前の実測= 4室とも親カテゴリ「イージス AegisConciel」
+        #       (1528674269285060731)で aegis-gl に解決していた。移動先が下のカテゴリ表に
+        #       無いと head=None へ落ち、上申が部門長を飛ばしてHQへ直行する(goods-afi と同型)。
+        #       「機能も権限も変えない」を守るため、カテゴリに依らない名指しへ移して固定する。
+        #   ★★2026-09-14 イージス研究室= **この表を手で写すのをやめた**。相方(dispatch.py)と
+        #     二重管理していた結果、goods-afi/someday-room が12日間そちらだけ欠けていた。
+        #     読む口を1本化= `head_resolve.named_head()`(正本= org_registry.yml managed_by)。
+        #     下の _NAMED_HEAD は **import が失敗した時だけ**の最後の砦(平時は読まれない)。
+        #   ★2026-09-16 Chami直令 msg 1549479044096196639=「部屋ID 1549477283511935136 を
+        #     ローカル研究室として、カテゴリーID 1548732279973617696 の司令塔的ポジションに置く」。
+        #     → 同カテゴリ6室(llm-edu/llm-qa/llm-growth/imagegen/fusoh-v0/fusoh-v2)の部門長は
+        #       aegis-gl → **local-lab**。fusoh2室は下のカテゴリ表にも無いので名指しが命綱。
+        _NAMED_HEAD = {"goods-afi": "aegis-gl", "someday-room": "hq",
+                       "llm-edu": "local-lab", "llm-qa": "local-lab",
+                       "llm-growth": "local-lab", "imagegen": "local-lab"}
+        try:
+            from head_resolve import named_head as _named_head
+            _nh = _named_head(self.dept)
+        except Exception:
+            _nh = _NAMED_HEAD.get(self.dept)
+        if _nh:
+            self._head_cache = _nh
             return self._head_cache
         head = None
         try:
-            if self.dept not in ("hq", "research-room", "aegis-gl", "keiei-kikaku"):
+            # ★2026-09-16 local-lab を追加(dispatch.head_of と対で直す)。
+            #   自分がカテゴリの部門長なので、下の表で自分自身に解決させない。
+            if self.dept not in ("hq", "research-room", "aegis-gl",
+                                 "keiei-kikaku", "local-lab"):
                 import urllib.request
                 tok = open(os.path.join(LOCAL, "discord_bot_token.txt"),
                            encoding="utf-8").read().strip()
@@ -8193,7 +8841,9 @@ class Daemon:
                         headers={"Authorization": f"Bot {tok}", "User-Agent": "go5/1.0"})
                     parent = str(json.load(urllib.request.urlopen(req, timeout=15)).get("parent_id"))
                     head = {"1525644847346880713": "research-room",   # 事業層 ADAFI事業部
-                            "1528674269285060731": "aegis-gl"}.get(parent)  # 組織層 イージス
+                            "1528674269285060731": "aegis-gl",        # 組織層 イージス
+                            # ★2026-09-16 ローカルLLM部門(司令塔=ローカル研究室 local-lab)
+                            "1548732279973617696": "local-lab"}.get(parent)
         except Exception:
             head = None          # 引けない=止めない(fail-open)
         self._head_cache = head
@@ -8238,7 +8888,7 @@ class Daemon:
     def _is_ai_letter(rec):
         return str((rec or {}).get("audience") or "").strip().lower() == "ai"
 
-    def _stack_open_request(self, rec, ch, word):
+    def _stack_open_request(self, rec, ch, word, shadow=False, old_net=None):
         """**その便の中で終わらなかったChamiの依頼**を、生きている台帳へ1件積む(2026-07-29)。
 
         ★積むきっかけは**既に在る検出**だ= find_waiting()/find_working() が
@@ -8253,6 +8903,13 @@ class Daemon:
           呼ばれるきっかけは今までどおり `working_detected`/`waiting_detected` だが、
           **それだけでは積まない**= 元の便に依頼が含まれる時だけ積む。
           催促は既存REQへ寄せ、相槌・完了報告は積まない。
+
+        ★★2026-09-10 C-075= 引数を2つ足した。**判定の中身は1文字も変えていない。**
+          shadow=True  … 空撃ち。判定と分岐は本物のまま回し、**外へ出る手**
+                         (open_request / nudge_request)だけ止めて痕跡を1行残す。
+          old_net      … 既存の網(find_waiting/find_working)でも掛かる便か。
+                         空撃ちの記録にだけ載せる= **本当の増分**(既存網では拾えない分)を
+                         後から数えられるようにするため。判定には一切使わない。
         """
         try:
             if not self._is_from_chami(rec):
@@ -8262,6 +8919,10 @@ class Daemon:
             if not ask:
                 return None                  # 本文が無い便(画像だけ等)は依頼として積まない
             kind, close_when = classify_ask(ask)
+            if shadow:
+                # ★ここで折り返す= この下の行(open_request / _nudge_open_request)が
+                #   **台帳へ書く唯一の手**だから、そこへ届かせなければ台帳は1行も増えない。
+                return self._shadow_note(mid, ch, ask, kind, close_when, old_net)
             if kind == "ack":                # ★「直った」「出た。OK!」で台帳が太らない(C-046①)
                 log(self.dept, f"起票しない(依頼を含まない便) msg={mid} 中身={ask[:40]!r}")
                 return None
@@ -8286,6 +8947,62 @@ class Daemon:
             return rid
         except Exception as e:                  # noqa: BLE001
             log(self.dept, f"未完了の依頼を積めなかった({type(e).__name__})=本体は続行")
+            return None
+
+    def _shadow_note(self, mid, ch, ask, kind, close_when, old_net):
+        """空撃ちの痕跡を1行残す(C-075・2026-09-10)。戻り値は常に None(台帳へは書かない)。
+
+        ★載せるのは「**本起票に上げたら台帳へ増える便**」だけ= 相槌(ack)と
+          「閉じ方が書けない」で落ちる便は数えない。増分の見積もりを盛らないため。
+        ★`oldnet=0` が**本当の増分**= 今の網(返信側の状態)では拾えなかった便。
+          `oldnet=1` は今も拾えている便なので、有効化しても台帳は太らない。
+        ★`kind` はそのまま載せる= `nudge` は本番なら既存REQへ寄る(件数は増えない)ので、
+          数える側で `request` と分けて見る。ここで先に間引くと、寄せ先が無い催促が
+          起票へ落ちる分(C-046③の逃げ道)まで見えなくなる。
+        ★置き場は .log だけ(request_log.jsonl へは書かない= C-054。冒頭のC-075の節を読め)。
+        """
+        would = (kind != "ack") and bool(str(close_when or "").strip())
+        if not would:
+            return None
+        flag = "?" if old_net is None else ("1" if old_net else "0")
+        log(self.dept,
+            f"{REQUEST_SHADOW_MARK} ts={time.strftime('%Y-%m-%dT%H:%M:%S')} dept={self.dept} "
+            f"msg={mid} kind={kind} oldnet={flag} 部屋={ch} ask={ask[:40]!r}")
+        return None
+
+    def _stack_from_letter(self, rec, reply, ch):
+        """★C-075(2026-09-10)= **元の便**を引き金に、未完了の依頼を積む。
+
+        ここが C-046① の「必要条件の側」だ= 中身の門(classify_ask)は前から在ったのに、
+        呼ばれるきっかけが返信側の状態(find_waiting/find_working)に縛られていたので、
+        **普通に完結した返信で受けたChamiの不満は台帳に何も立たなかった**
+        (実物= 2026-09-08 17:22 msg 1546933643501506661「このやり取りいらない。」が約24時間放置)。
+
+        ★`_note_waiting` は**1行も変えていない**= 返信側の状態は今までどおり
+          「追撃便の引き金」として据え置く(C-046①が本来そう書いてある)。
+        ★既定は空撃ち= 台帳へは1行も書かない。上げるのは実測の後(冒頭のC-075の節)。
+          `_note_waiting` 側の本起票は**そのまま残す**= 空撃ちの間に今拾えている分を落とさない。
+          `on` へ上げた後は、この関数が同じ便を先に積むので向こうは冪等で空振りする
+          (open_defect は id が同じなら積まない)。
+        ★何が失敗しても本体(応答)を巻き添えにしない(fail-open)。
+        """
+        try:
+            mode = request_trigger_mode()
+            if mode == "off":
+                return None
+            if not (self.conf.get("session_relay") and session_relay is not None):
+                return None      # relay室だけ= _note_waiting と同じ適用範囲に揃える
+            mid = str(rec.get("msg_id", ""))
+            if not mid or self._is_followup(rec):
+                return None      # ★機構の追撃便を引き金にしない(無限ループ禁止)
+            # ★既存の網でも掛かる便かを、同じ入力で1回だけ測る(記録に載せるためだけ)。
+            #   `_wip` は `<<WIP>>` を落とす前に立てたフラグ= 本文からは分からない。
+            old_net = bool(find_waiting(reply, rec=rec, dept=self.dept)
+                           or find_working(reply, getattr(self, "_wip", False)))
+            return self._stack_open_request(rec, ch, "元の便(C-075)",
+                                            shadow=(mode != "on"), old_net=old_net)
+        except Exception as e:                      # noqa: BLE001
+            log(self.dept, f"元の便からの起票で例外({type(e).__name__})=本体は続行")
             return None
 
     def _nudge_open_request(self, rec, ch, ask):
@@ -8326,7 +9043,7 @@ class Daemon:
             mid = str(rec.get("msg_id", ""))
             if not mid or self._is_followup(rec):
                 return None      # ★追撃便には追撃しない(無限ループ禁止)
-            kind, w = "waiting", find_waiting(reply)
+            kind, w = "waiting", find_waiting(reply, rec=rec, dept=self.dept)
             if not w:
                 # ★フラグで渡す= この reply は既に `<<WIP>>` を落とした後の本文だから
                 #   (落とす場所は handle() の合流点1箇所。split_wip_marker を参照)。
@@ -8418,7 +9135,7 @@ class Daemon:
             #   (=直しが遡って効く)。台帳を書き換えて辻褄を合わせる必要が無い。
             #   ★再判定は「狭める」方向にしか効かない= 一度検出された語を判定に通すだけなので、
             #     ここで新しく拾い始めることは無い(誤検出を増やさない)。
-            if not (find_waiting(w) if kind == "waiting" else find_working(w)):
+            if not (find_waiting(w, dept=self.dept) if kind == "waiting" else find_working(w)):
                 # ★ログは(種別,便)につき1回だけ。掃き出しは60秒毎に回るので、
                 #   書き続けると同じ1行がログを埋める(この行は消えるまで毎回通る)。
                 seen = self.__dict__.setdefault("_stall_dropped", set())
@@ -8767,7 +9484,8 @@ class Daemon:
         self._relay_retry_after = None  # 同上(前の便の上限エラーで次の便を寝かせない)
         self._relay_answered = False    # 同上(前の便の成功で(精霊)が消えたままにならないように)
         self._wip = False               # 同上(前の便の <<WIP>> を次の便へ持ち越さない)
-        if not self.dry_run and ch and mid:
+        # ★2026-09-13(イージス研究室)押してよいかの判定は `marks_ok` 1本(着手も同じ関数を引く)。
+        if marks_ok(rec, ch, mid, self.dry_run):
             subprocess.run([sys.executable, REACT, "--channel", ch, "--msg", mid,
                             "--emoji", "既読"], capture_output=True, timeout=60)
         # ★所有者の確認(入口)。run() は窓が所有者の間 handle() を呼ばないが、**二重の守り**として置く。
@@ -8823,7 +9541,8 @@ class Daemon:
                 #   ★印は3段階(送信📮/既読✅/着手👀)が2026-07-17から実装済みだったのに、
                 #     **着手を打つ場所が1箇所も無かった**(実測 count=0)。道具はあったが使われていなかった。
                 #   ★失敗しても配送を巻き込まない(印はあくまで表示)。
-                if not self.dry_run and ch and mid:
+                #   ★2026-09-13 押してよいかは `marks_ok` 1本で決める(既読と同じ判定を引く)。
+                if marks_ok(rec, ch, mid, self.dry_run):
                     try:
                         subprocess.run([sys.executable, REACT, "--channel", ch, "--msg", mid,
                                         "--emoji", "着手"], capture_output=True, timeout=30)
@@ -9455,6 +10174,7 @@ class Daemon:
             # ★ブロックごとに送る(既存19部屋は必ず1ブロック=ループが1周するだけ)。
             #   body ファイルは使い回してよい(subprocess.run は同期=前の便を送り終えてから上書きする)。
             _last_sent = ""     # ★実在確認は「最後に送った1通」を見る(下の verify_replied)
+            _last_who = ""      # ★その1通を出した人格名(口調ゲートの再現に要る・HQ-0253)
             # ★★HQ-0242(2026-09-05)= 送った**全ブロック**を控える。1件の返信が人格ごとに
             #   割れて2通出る部屋(hq= アロンソ+アメス)で、台帳に最後の1通しか残らず、
             #   本文を読み返す側が短い相槌しか読めなかった。着地msg_idは全部記帳する。
@@ -9488,17 +10208,27 @@ class Daemon:
                 #   内容の無い一次ackは沈黙より悪い(共通規律§2)。
                 #   ★ここが最後の砦= 上の trim/印剥がしを**通した後**の本文を見る
                 #     (`[表は要点]` だけの便のように、削った結果 空になる形もここで捕まる)。
-                #   ★判定は1本(_is_empty_body)= 中身が1文字でも在れば必ず送る。
+                #   ★判定は1本(unsendable_reason)= 中身が1文字でも在れば必ず送る。
                 #     名簿で引けないタグ(`[検証]`)は本文として扱う=言葉は消さない。
+                #   ★2026-09-10 追加= "empty" に加えて "ack"(既知の定型ack句だけの本文)も落とす。
+                #     otacon-radio の「受け取った。処理を開始する。完了結果は保存してから返す。」型。
+                #     全部の文が denylist の句の時だけ落ちる=1文でも中身が在れば通る(_is_ack_only)。
                 #   ★黙って落とさない= ログと persona_render_audit へ必ず残す。
-                if _is_empty_body(_part, _who, _tag_resolve):
+                _blk = unsendable_reason(_part, _who, _tag_resolve)
+                if _blk:
+                    _why = "中身が無い" if _blk == "empty" else "定型ackだけで中身が無い"
                     log(self.dept,
-                        f"★空便ガード= 中身が無いので送らない msg={mid} "
+                        f"★空便ガード({_blk})= {_why}ので送らない msg={mid} "
                         f"persona={_who or ''} raw={(_part or '')[:40]!r}")
                     _audit_tag(self.dept, _who or self.effective_persona(),
-                               "empty_body_blocked", (_part or "").strip()[:200])
+                               "empty_body_blocked" if _blk == "empty" else "ack_only_blocked",
+                               (_part or "").strip()[:200])
                     continue
                 _last_sent = _part
+                # ★2026-09-09 HQ-0253= 最後に送ったブロックの**人格名**も控える。
+                #   実在確認は「投げた形」を再現するために口調ゲートを通すが、あれは人格名で
+                #   ルールを引く= 渡さないと口調の直しだけ再現できず鍵がずれる余地が残る。
+                _last_who = _who or self.effective_persona()
                 _sent_parts.append(_part)
                 with open(body, "w", encoding="utf-8") as f:
                     f.write(_part)
@@ -9609,7 +10339,10 @@ class Daemon:
                             time.sleep(REPLIED_VERIFY_WAIT_SEC)
                         # ★HQ-0242= 最後の1通で ok を決めるのは従来どおり。
                         #   他のブロックは evidence の着地msg_idへ足すだけ(判定は変えない)。
-                        _ok, _ev = verify_replied(ch, _last_sent, _sent_parts[:-1])
+                        # ★HQ-0253= persona/dept を渡す= 突合鍵を「実際に投げた形」
+                        #   (persona_send の3ゲート適用後)から作るため。
+                        _ok, _ev = verify_replied(ch, _last_sent, _sent_parts[:-1],
+                                                  persona=_last_who, dept=self.dept)
                         if _ok:
                             if _try:
                                 _ev += f"(★{_try + 1}回目で確認・{REPLIED_VERIFY_WAIT_SEC}秒待ち)"
@@ -9654,6 +10387,11 @@ class Daemon:
                 _why = "名指し便(本人が答えた)" if self._member else "会話専用の部屋"
                 log(self.dept, f"回送しない= {_why} msg={mid} "
                                "★範囲外の申告が出た便なら、この部屋の外へは誰にも渡っていない")
+            elif is_work and rec.get("test"):
+                # ★検証便の申告は本番のキューへ渡さない(forward_after_reply が閉じている)。
+                #   黙って落とすと「回送されたはず」と読めるので、閉じた事実は必ず1行残す。
+                log(self.dept, f"回送しない= 検証便(test:true) msg={mid} "
+                               "★範囲外の申告は出たが、本番のキューへは1件も積んでいない")
             # ★総括本部4室は「自分の箱」にも写す(2026-07-24 ORG-24)。
             #   実害= Chamiの承認「デプロイしていい」をhqデーモンが処理し、回送先(main箱)へは
             #   入っていたのに、**セッションのwaiterが見る箱と回送先が別物**だったため届かなかった。
@@ -9669,8 +10407,8 @@ class Daemon:
                                 note=f"{self.conf.get('persona','デーモン')}が代わりに応答済み。"
                                      "内容を把握し、必要なら本人として引き取ること。",
                                 daemon_reply=(reply or "")[:800])
-                    os.makedirs(os.path.dirname(self.box), exist_ok=True)
-                    with open(self.box, "a", encoding="utf-8") as f:
+                    os.makedirs(os.path.dirname(self.session_box), exist_ok=True)
+                    with open(self.session_box, "a", encoding="utf-8") as f:
                         f.write(json.dumps(note, ensure_ascii=False) + "\n")
                 except OSError:
                     pass        # 写しの失敗で本体(応答)を巻き添えにしない
@@ -9697,9 +10435,38 @@ class Daemon:
         #   ここは**送信が終わって記憶に積んだ後**= 返信が本当に部屋へ出た便だけを見る地点。
         #   検証便(test)/dry-runでは見ない(ORG-25= 検証でChamiの部屋を汚さない)。
         if not self.dry_run and not rec.get("test"):
+            # ★C-075(2026-09-10)= **元の便**を引き金に積む(既定は空撃ち=台帳へ書かない)。
+            #   下の _note_waiting は「返信側の状態」を引き金にした**追撃便用**として据え置く。
+            #   同じ便を二度積んでも台帳は増えない(open_defect が id で冪等)。
+            self._stack_from_letter(rec, reply, ch)
             self._note_waiting(rec, reply, ch)
         log(self.dept, f"応答完了 msg={mid} work={is_work}")
         return True
+
+    SESSION_ONLY_TYPES = ("session-note", "followup")
+
+    @staticmethod
+    def _is_daemon_work(line):
+        """デーモンが処理すべき行か。セッション宛て(session-note/followup)は違う。
+
+        ★安い文字列で刈ってから確定判定する(毎巡・全行を json.loads しないため)。
+        ★判定不能(壊れた行)は「仕事」へ倒す= fail-open。掴まないより掴んで落とす方が沈黙しない。
+        """
+        if '"session-note"' not in line and '"followup"' not in line:
+            return True
+        try:
+            return json.loads(line).get("type") not in Daemon.SESSION_ONLY_TYPES
+        except Exception:
+            return True
+
+    @staticmethod
+    def _rewrite_inflight(path, lines):
+        """inflightを丸ごと書き直す(kill耐性の1点)。★呼ぶのはhandle()の着地時だけ。"""
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("".join(l.rstrip("\n") + "\n" for l in lines))
+        except OSError:
+            pass
 
     # --- 箱ドレイン(INC-100対策: inflight退避→1件着地毎に書き戻し) ---
     def drain(self):
@@ -9707,6 +10474,18 @@ class Daemon:
             return 0        # ★配送失敗直後は寝かせる(RELAY_HOLD_SEC。他17部屋は常に0=素通り)
         if not os.path.exists(self.box) or os.path.getsize(self.box) == 0:
             return 0
+        # ★据え置きの箱は読みもしない(2026-09-10 / HQ便の①)。
+        #   平常はこの手前の getsize==0 で返る。ここが効くのは
+        #   「写しを専用の箱へ移せなかった(=元の箱へ戻した)」時だけで、
+        #   その1件を2秒おきに読み直して書き直す熱いループを止めるための歯止め。
+        try:
+            st = os.stat(self.box)
+            sig = (st.st_mtime_ns, st.st_size)
+        except OSError:
+            sig = None                      # 見えない時は従来どおり進む(fail-open)
+        if sig is not None and getattr(self, "_box_idle_sig", None) == sig:
+            return 0
+        self._box_idle_sig = None
         inflight = self.box + ".inflight"
         try:
             os.replace(self.box, inflight)  # 原子的退避
@@ -9715,7 +10494,12 @@ class Daemon:
         lines = [l for l in open(inflight, encoding="utf-8", errors="replace").read().splitlines() if l.strip()]
         done = 0
         keep_for_session = []   # セッション宛て(session-note/followup)=処理せず箱へ戻す
-        for i, line in enumerate(lines):
+        work = []               # デーモンが handle() する行だけ
+        # ★仕分けはメモリの中だけでやる(2026-09-10)。
+        #   旧実装はセッション宛て1件ごとに inflight を丸ごと書き直していたので、
+        #   Sバイト・N行の箱で S×N/2 バイト= 156行813KBなら1巡63MBを2秒おきに書いていた。
+        #   session-note は handle() を1度も通らない=1バイトも書く必要が無い。
+        for line in lines:
             try:
                 rec = json.loads(line)
             except Exception:
@@ -9726,13 +10510,32 @@ class Daemon:
             #   届けるために書いたものが届かなくなっていた(実測: msg=...-dn を自分で応答処理)。
             #   放置すると写しに写しを重ねる自己ループの芽にもなる。
             #   → 残す。セッションが読むまで箱に置いておく(claude_responderと同じ扱い)。
-            if rec.get("type") in ("session-note", "followup"):
+            if rec.get("type") in self.SESSION_ONLY_TYPES:
                 keep_for_session.append(line)
-                rest = lines[i + 1:]          # inflightからは確実に外す(recoverでの二重復元を防ぐ)
-                with open(inflight, "w", encoding="utf-8") as f:
-                    for l in rest:
-                        f.write(l + "\n")
-                continue
+            else:
+                work.append((line, rec))
+        # ★セッション宛てを先に置き直し、そのあとで inflight から外す。
+        #   逆順にすると「戻す前に落ちた」時にどこにも無くなる= 沈黙。万一の重複の方がまだ良い。
+        # ★戻す先は巡回対象の箱ではなく写し専用の箱(2026-09-10 / HQ便の②)。
+        #   これで**古い箱に残っていた写しも1度だけ引っ越す**(消さない・退避でもない・移すだけ)。
+        #   見張り(inbox_waiter)は両方数えるので、引っ越しの前後どちらでもチャイムは鳴る。
+        if keep_for_session:
+            try:
+                os.makedirs(os.path.dirname(self.session_box), exist_ok=True)
+                with open(self.session_box, "a", encoding="utf-8") as f:
+                    f.write("".join(l.rstrip("\n") + "\n" for l in keep_for_session))
+            except OSError:
+                # ★写し専用の箱へ置けなかった時は元の箱へ戻す(どこにも無い、を作らない)。
+                #   戻した箱を次巡でまた読み直さないよう、その姿を据え置きとして覚える。
+                try:
+                    with open(self.box, "a", encoding="utf-8") as f:
+                        f.write("".join(l.rstrip("\n") + "\n" for l in keep_for_session))
+                    st2 = os.stat(self.box)
+                    self._box_idle_sig = (st2.st_mtime_ns, st2.st_size)
+                except OSError:
+                    pass
+        self._rewrite_inflight(inflight, [l for l, _ in work])
+        for i, (line, rec) in enumerate(work):
             ok = self.handle(rec, line)
             if not ok:
                 # ★失敗を黙って落とさない(2026-07-18実障害: 「ククール、反映して。」が
@@ -9753,23 +10556,14 @@ class Daemon:
                         f.write(line.rstrip("\n") + "\n")
                     log(self.dept, f"処理失敗→failed記録+main箱へ回送 msg={rec.get('msg_id')}")
             done += 1
-            rest = lines[i + 1:]  # 残りだけをinflightへ書き戻す(kill耐性)
-            with open(inflight, "w", encoding="utf-8") as f:
-                for l in rest:
-                    f.write(l + "\n")
+            # ★1件着地するごとに残りを書き戻す(kill耐性)。ここは意図なので残す。
+            #   ただし書くのは「まだ handle() していない仕事」だけ= セッション宛ては入らない。
+            self._rewrite_inflight(inflight, [l for l, _ in work[i + 1:]])
         try:
-            if os.path.getsize(inflight) == 0:
+            if os.path.exists(inflight) and os.path.getsize(inflight) == 0:
                 os.remove(inflight)
         except OSError:
             pass
-        # ★セッション宛ての記録を箱へ戻す。これが無いと「届けるために書いたもの」が消える。
-        if keep_for_session:
-            try:
-                with open(self.box, "a", encoding="utf-8") as f:
-                    for l in keep_for_session:
-                        f.write(l.rstrip("\n") + "\n")
-            except OSError:
-                pass
         return done
 
     # --- 集約窓(coalesce・2026-08-08 / 発注= 研究室HQ 8/4 07:29) ---
@@ -10096,17 +10890,7 @@ class Daemon:
             return 0
         done = 0
         try:
-            processed = set()
-            try:
-                for pl in open(PROCESSED, encoding="utf-8", errors="replace"):
-                    try:
-                        m = json.loads(pl).get("msg_id")
-                        if m:
-                            processed.add(str(m))
-                    except Exception:
-                        continue
-            except OSError:
-                pass
+            processed = _processed_ids()   # ★毎巡の全読みをやめた(2026-09-10)。読むだけ。
             # ★★集約窓= 連投中なら**1件も掴まずに**この巡回を終える(coalesce・2026-08-08)。
             #   掴まないので便はqueueに残る=待っている間に落ちても喪失しない。
             if self._coalesce_hold(q):
@@ -10360,6 +11144,10 @@ class Daemon:
                        f"{'・dry-run' if self.dry_run else ''})")
         self.start_probe_server()
         self.recover_inflight()
+        # ★巡回の位相をばらす(2026-09-10 / HQ便の④)。37部門が同じ番人に一斉起動されるので、
+        #   実測では全部の巡回が03:52で揃い、2秒ごとに37本の読み書きが同じ瞬間に重なっていた。
+        #   部門名から決まる固定のずれ= 再起動しても同じ順に散る(乱数だと毎回並びが変わる)。
+        time.sleep((zlib.crc32(self.dept.encode("utf-8")) % 2000) / 1000.0)
         while True:
             try:
                 if self.owner_room:

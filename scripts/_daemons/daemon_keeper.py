@@ -76,7 +76,12 @@ DAEMON = os.path.join(ROOT, "scripts", "llm", "dept_daemon.py")
 # ★2026-07-27 report-notify を追加(26→27体)。Chamiが**3回**頼んで8日間実装されなかった件。
 #   「報告について改善していきたいから話せるようにして欲しい」= 一方通行の部屋を双方向にする。
 #   自動通知の出力経路には触っていない(bot/webhookはgatewayが弾くので反応しない)。
-DEPTS = ["hq", "research-room", "aegis-gl", "keiei-kikaku", "hr-room", "hr-context", "qa-reviewer", "system-engineer", "product-scout", "shorts-analyst", "copy-director", "learning-coach", "learning-coach-2", "data-org", "frontend", "ai-office", "llm-edu", "llm-qa", "platform-se", "consult-intel", "past-room", "future-room", "kaizen-analyst", "incident", "system-engineer-b", "dream-care", "health-log", "report-notify", "imagegen", "manga-shorts", "kukuru-nakama", "gunji", "soudan-room", "goods-afi", "someday-room", "web-research", "otacon-radio"]
+# ★2026-09-14 imagegen-fusoh-v0 / imagegen-fusoh-v2 を追加(Chami直令 1548842898773123105)。
+#   ★この行は**1行のまま**にしろ= maybe_adopt が `^DEPTS = (\[[^\]]*\])$` で自分の源を読み直す。
+#     改行を入れるか行内に `]` を足すと、この名簿が丸ごと読めなくなる(全員が養子に取られない)。
+# ★2026-09-16 local-lab(ローカル研究室=ローカルLLM部門の司令塔)を追加(Chami直令 1549479044096196639)。
+#   ここへ足さないと部屋は在るのに常駐が1体も立たない=配下6室の上申を掴む者が居なくなる。
+DEPTS = ["hq", "research-room", "aegis-gl", "keiei-kikaku", "hr-room", "hr-context", "qa-reviewer", "system-engineer", "product-scout", "shorts-analyst", "copy-director", "learning-coach", "learning-coach-2", "data-org", "frontend", "ai-office", "llm-edu", "llm-qa", "platform-se", "consult-intel", "past-room", "future-room", "kaizen-analyst", "incident", "system-engineer-b", "dream-care", "health-log", "report-notify", "imagegen", "manga-shorts", "kukuru-nakama", "gunji", "soudan-room", "goods-afi", "someday-room", "web-research", "otacon-radio", "imagegen-fusoh-v0", "imagegen-fusoh-v2", "local-lab"]
 BACKOFF_START = 10
 BACKOFF_CAP = 300
 HEALTHY_SEC = 60               # これ以上生きたら健康=バックオフリセット

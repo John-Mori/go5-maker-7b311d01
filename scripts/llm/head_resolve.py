@@ -23,13 +23,16 @@ ORG_REGISTRY = r"D:\SougouStartFolder\00_AI-HQ\org_registry.yml"
 # ★正本(org_registry.yml)にまだ項が無い部門の補欠。
 #   ここに在って yml に無い= 正本の取りこぼし。`--check` が名指しで鳴らす。
 #   llm-growth: 2026-09-14 現在 depts に項が無い(HQ実測)。項が出来たらこの行を消す。
+#   ★2026-09-16 ローカルLLM部門カテゴリに司令塔(local-lab=ローカル研究室)が建った
+#     (Chami直令 msg 1549479044096196639)。同カテゴリの部門長は aegis-gl → local-lab。
+#     llm-growth だけは org_registry.depts に項が無いので、ここの補欠が唯一の名指しになる。
 FALLBACK_HEAD = {
     "goods-afi": "aegis-gl",
     "someday-room": "hq",
-    "llm-edu": "aegis-gl",
-    "llm-qa": "aegis-gl",
-    "llm-growth": "aegis-gl",
-    "imagegen": "aegis-gl",
+    "llm-edu": "local-lab",
+    "llm-qa": "local-lab",
+    "llm-growth": "local-lab",
+    "imagegen": "local-lab",
 }
 
 _cache = None

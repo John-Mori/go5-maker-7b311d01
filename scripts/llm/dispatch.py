@@ -71,12 +71,53 @@ CATEGORY_HEAD = {
     # 配下dept → その部門長(② カテゴリの研究室)
     "ADAFI事業部": "research-room",
     "イージス AegisConciel": "aegis-gl",
+    # ★2026-09-16 Chami直令 msg 1549479044096196639=「この部屋をローカル研究室として、
+    #   カテゴリーID1548732279973617696の司令塔的ポジションに置く。GLには仮で一旦カスミを配置」。
+    "ローカルLLM部門": "local-lab",
 }
 # Discordの実カテゴリを正とする(registryのcategoryは15室で未設定のため使えない)。
 LAYER_OF = {
     "1528674269285060731": "イージス AegisConciel",
     "1525644847346880713": "ADAFI事業部",
+    # ★2026-09-16 追加。09-14に「表に無い」ことを名指しで凌いでいたカテゴリ(ローカルLLM部門)は、
+    #   司令塔が出来たので**カテゴリで引ける**ようになった=新しい部屋が増えても素通しにならない。
+    "1548732279973617696": "ローカルLLM部門",
 }
+
+# ★dept名の名指し= Discordのカテゴリからは引けない管轄。**カテゴリ表より先に見る**。
+#   相方= scripts/llm/dept_daemon.py _head_dept() の _NAMED_HEAD(**両方に書かないと片肺**)。
+#   ★正本= 00_AI-HQ/org_registry.yml の depts.<dept>.managed_by。
+#   goods-afi   : 2026-09-01 Chami指示(親カテゴリ「アフィリエイト事業」は LAYER_OF に無い)。
+#   someday-room: 2026-09-02 新設(親カテゴリ「森光技研Logos」は LAYER_OF に無い)。
+#     ↑この2室は dept_daemon 側にしか名指しが無く、こちら(投函ガード)側は
+#       head=None=素通しだった。同じ形でこちらにも入れる(2026-09-14 HQ実測)。
+#   llm-edu / llm-qa / llm-growth / imagegen:
+#     2026-09-14 Chami「ローカルLLM関係の部屋をこのカテゴリにまとめるが、何も機能や権限は
+#     変えないからよろしく。移動してまとめるだけ」(msg 1548732597150949467)。
+#     ★4室とも移動前は親カテゴリ「イージス AegisConciel」で aegis-gl に解決していた(実測)。
+#       移動先カテゴリが LAYER_OF に無いと head が None へ落ち、**3階梯のガードが黙って外れる**
+#       (=goods-afi で実際に起きた穴と同型)。カテゴリに依らない名指しへ移して固定する。
+#   ★★2026-09-14 イージス研究室= **表をここへ写すのをやめた**。上の「両方に書かないと片肺」は
+#     コメントで念を押していたのに **12日間ほんとうに片肺だった**(goods-afi/someday-room)。
+#     読む口を1本にする= `head_resolve.named_head()`(正本= org_registry.yml の managed_by、
+#     正本にまだ項が無い分だけ head_resolve.FALLBACK_HEAD が受ける)。ズレは
+#     `python scripts/llm/head_resolve.py` が鳴らす。下の NAMED_HEAD は **import が失敗した
+#     時だけ**使う最後の砦で、平時は読まれない(消すと import 事故で素通しへ戻るので残す)。
+#   ★2026-09-16 ローカルLLM部門の4室+fusoh2室は司令塔 local-lab(ローカル研究室)へ移管。
+NAMED_HEAD = {
+    "goods-afi": "aegis-gl",
+    "someday-room": "hq",
+    "llm-edu": "local-lab",
+    "llm-qa": "local-lab",
+    "llm-growth": "local-lab",
+    "imagegen": "local-lab",
+}
+
+try:
+    from head_resolve import named_head as _named_head
+except Exception:                       # ★読めない時も配達を殺さない(fail-open)
+    def _named_head(dept):
+        return NAMED_HEAD.get(dept)
 
 
 ORG_REGISTRY = r"D:\SougouStartFolder\00_AI-HQ\org_registry.yml"
@@ -103,6 +144,58 @@ def display_names():
     except Exception:
         pass
     return out
+
+
+# ★投函の既定名義(--from を省いた時の従来値)。2026-09-12 まではこれが**固定**だった。
+DEFAULT_SENDER = "シャビ・アロンソ(研究室HQ)"
+ROSTER_GLOB = os.path.join(LOCAL, "_daemon_codever", "roster_%s.json")
+
+
+def sender_of_dept(dept):
+    """部門スラッグ → 投函の名義 `"<主人格>(<部門の日本語名>)"`。引けなければ ""。
+
+    ★2026-09-12 新設(HQ-0263・依頼= 研究室HQ シャビ・アロンソ msg 1548147771910135899)。
+      壊れていた実物= `local/discord_processed.jsonl` の `DISPATCH-research-room-1789175978288`
+      (2026-09-12T10:19:38)。`from_dept=web-research` / `from_dept_explicit=true` まで
+      正しく載っているのに、`author` だけ「シャビ・アロンソ(研究室HQ)」だった。
+      **発注元の情報は既に機械が持っていて、名義を書く側へ渡っていなかっただけ**だ。
+      実測= dispatch便 2,269本中 `from_dept` キーのある547本のうち、
+      **62本**が「HQ名義なのに from_dept が hq でない」
+      (research-room 31 / aegis-gl 14 / kaizen-analyst 5 / qa-reviewer 4 /
+       web-research 3 / hr-room 2 / system-engineer 2 / llm-edu 1)。
+      ★キー無し1,722行は判定できないので数に入れていない。
+
+    ★**新しい判定器は足していない**。使うのは既にある2つだけ=
+      ① `display_names()`(`org_registry.yml` の display_ja)
+      ② 常駐が起動時に書く名簿 `local/_daemon_codever/roster_<dept>.json` の `names[0]`
+      names[0] は部門の顔だと実測で確かめた(hq=シャビ・アロンソ / aegis-gl=ケヴィン・デブライネ /
+      hr-room=ククール / web-research=カスミ / research-room=ルカ・モドリッチ /
+      kaizen-analyst=トトリ / llm-edu=中野五月 / platform-se=一ノ瀬怜)。
+
+    ★既存の挙動は1ミリも変わらない= `sender_of_dept("hq")` は
+      "シャビ・アロンソ(研究室HQ)" を返す= 従来の固定既定値と**同一の文字列**だ。
+    ★読むだけ。roster へは書かない(C-054= 見張っている脈を見張り以外の手で更新するな)。
+    ★引けなければ ""(fail-open)= 呼び出し側が従来の既定値へ落ちる。通信路は止めない。
+    """
+    dept = (dept or "").strip()
+    if not dept:
+        return ""
+    ja = display_names().get(dept, "")
+    if not ja:
+        return ""                   # 部門名が引けない=名義を作らない(嘘を書くより黙る)
+    try:
+        names = json.load(open(ROSTER_GLOB % dept, encoding="utf-8")).get("names") or []
+        who = str(names[0]).strip() if names else ""
+    except Exception:
+        who = ""                    # 一度も起動していない部門=人格が分からない
+    # ★人格が引けない時は**部門名だけの名義を作らない**。
+    #   理由= 名義は `sender.split("(")[0]` で表投稿の `--persona` へそのまま流れる(544/640行)。
+    #   部門名を人格名として渡すと persona_send が解決できず、表投稿だけ静かに落ちる
+    #   (post_work_to_channel は例外を握り潰す=便は届くが表に出ない)。
+    #   ★実測で names が空なのは imagegen / incident / kukuru-nakama / report-notify の4室=
+    #     人格が居ない通知専用室で、**壊れていた62件には1件も含まれない**。
+    #     直す対象が0件の枝のために、表投稿を壊す危険を取らない。
+    return f"{who}({ja})" if who else ""
 
 
 def addressee_warning(body, depts):
@@ -163,8 +256,13 @@ def addressee_warning(body, depts):
 
 def head_of(dept):
     """その部門の「部門長」を返す。部門長自身・最上位・判定不能は None(=素通し)。"""
-    if dept in ("hq", "research-room", "aegis-gl", "keiei-kikaku"):
+    # ★2026-09-16 local-lab(ローカル研究室)を追加= カテゴリ「ローカルLLM部門」の部門長自身。
+    #   ここへ入れないと local-lab 自身の上申が「部門長(=自分)を飛ばした」と判定される。
+    if dept in ("hq", "research-room", "aegis-gl", "keiei-kikaku", "local-lab"):
         return None                 # 部門長自身と最上位、横から支える経営企画は対象外
+    _nh = _named_head(dept)
+    if _nh:
+        return _nh                  # ★カテゴリより先に名指し(移設されても管轄が動かない)
     try:
         import urllib.request
         tok = open(os.path.join(LOCAL, "discord_bot_token.txt"), encoding="utf-8").read().strip()
@@ -483,7 +581,7 @@ def enjoh_gate_pass(body, dept):
 
 def dispatch(dept, sender, body, also_post=False, dry_run=False, work="", audience="",
              from_dept="", from_dept_explicit=False, from_dept_rec=None, from_dept_src="arg",
-             quiet_ack_ok=False, already_gated=False):
+             quiet_ack_ok=False, already_gated=False, sender_src="arg"):
     """1部門へ指令を投函する。戻り値=(ok, msg_id)。
 
     ★C-023: work(=--workの一行)が実質値を持つ時だけ「実依頼」として相手部門チャンネルへ表投稿する。
@@ -531,6 +629,9 @@ def dispatch(dept, sender, body, also_post=False, dry_run=False, work="", audien
             print(f"    見出し: {build_work_header(sender, work)}")
         else:
             print(f"  [dry-run] {dept} <- {len(body)}字 (ch={ch})")
+        # ★名義とその出所を出す(2026-09-12・HQ-0263)。dry-run は確認のための実行だから
+        #   毎回出してよい(本番の投函行には足さない= 常に鳴る行は読まれなくなる)。
+        print(f"    名義= {sender}(出所={sender_src})")
         print(f"    宛先の宣言= {aud['audience'] or '(無し)'}")
         if not aud["audience"]:
             print(AUDIENCE_WARN)
@@ -581,6 +682,11 @@ def dispatch(dept, sender, body, also_post=False, dry_run=False, work="", audien
         rec["from_dept"] = (fd_rec or "").strip()
         rec["from_dept_explicit"] = bool(from_dept_explicit)
         rec["from_dept_src"] = from_dept_src   # arg=人手 / env=機械が載せた / default=既定hq
+        # ★名義の出所も同じ形で残す(2026-09-12・HQ-0263)。
+        #   arg=--from で人が指定 / dept=発注元の部門から引いた / default=引けず従来の固定値。
+        #   ★後から「まだHQ名義を撃っている便がどれだけ在るか」を数えられる形にしておく=
+        #     直したことを台帳で確かめられない機構は、次に壊れた時に気づけない。
+        rec["author_src"] = sender_src
         if is_work:
             rec["work"] = work.strip()   # 何を頼んだかを便にも残す(後追い可能に)
         # ★★手番ゼロの復路便であることを**送り手の機械が**宣言する
@@ -654,7 +760,11 @@ def main():
                          "**3回踏んでいる**。★registryのコメントにもセッションの記憶にも"
                          "書いてあった上で3回目が出た= **文書に置くだけでは止まらない**。"
                          "投函行の `(ch=...)` に出る**部屋の日本語名**を送る前に読め。")
-    ap.add_argument("--from", dest="sender", default="シャビ・アロンソ(研究室HQ)")
+    # ★default は None(2026-09-12・HQ-0263)。理由= `--from-dept` 側(下)と同じで、
+    #   **指定されたのか既定値が入ったのかを区別する**ため。省かれた時は発注元の部門から
+    #   名義を引く= 機械が既に持っている `from_dept` / `GO5_DEPT` を名義へ渡す。
+    #   ★引けなければ従来の固定既定値へ落ちる(fail-open)。
+    ap.add_argument("--from", dest="sender", default=None)
     ap.add_argument("--body-file")
     ap.add_argument("--body")
     ap.add_argument("--also-post", action="store_true")
@@ -701,6 +811,19 @@ def main():
         _envd = (os.environ.get("GO5_DEPT") or "").strip()
         if _envd:
             from_dept_rec, from_dept_src, rec_explicit = _envd, "env", True
+
+    # ★★名義を発注元から引く(2026-09-12・HQ-0263)。★`from_dept_rec` を使う=
+    #   `GO5_DEPT` で機械が載せた発注元もここで効く(--from-dept を省いた部屋のセッションが
+    #   一番よくHQ名義を撃っていた)。`a.from_dept` は従来どおり書き換えない。
+    #   ★sender_src= arg(人が指定) / dept(発注元から引いた) / default(引けず従来値)。
+    sender_explicit = a.sender is not None
+    if sender_explicit:
+        sender_src = "arg"
+    else:
+        a.sender = sender_of_dept(from_dept_rec)
+        sender_src = "dept" if a.sender else "default"
+        if not a.sender:
+            a.sender = DEFAULT_SENDER
 
     body = a.body or ""
     if a.body_file:
@@ -775,7 +898,7 @@ def main():
     for d in depts:
         good, _ = dispatch(d, a.sender, body, a.also_post, a.dry_run, a.work, a.audience,
                            a.from_dept, rec_explicit, from_dept_rec, from_dept_src,
-                           a.quiet_ack_ok, already_gated=True)
+                           a.quiet_ack_ok, already_gated=True, sender_src=sender_src)
         ok += 1 if good else 0
     print(f"投函 {ok}/{len(depts)} 部門")
     warn = addressee_warning(body, depts)
