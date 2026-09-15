@@ -714,8 +714,15 @@ def handle_image_request(rec, raw_line, content, channel, dept=None):
         target = image_rooms.channel_name(key) or channel
         persona = conf.get("persona") or IMAGE_PERSONA
         dept = key
-    # 部屋へ一言(タグ生成+生成で数十秒。C-036=起動器であるこのプロセスが結果まで出す)。
-    send(channel, "「" + content.strip()[:40] + "」の絵を、私のPCの中だけで描いてみるね。少し待ってて。")
+    # ★優依はこの部屋で「実況」を喋らない(2026-09-16 Chami直= 「なんでデーモンが話す配線をした?
+    #   あれ恒久的にいらんって話になってるはず」)。根拠は2026-07-27にChamiが確定させた設計=
+    #   「Discordに打つ→本セッションに届く→答える/普段は黙る/裏で問題だけ上がる」。
+    #   ★絵が**この部屋に出る**なら、絵そのものが返事だ。言葉が要るのは
+    #     **絵が別の部屋へ行く時**(ここで黙ると、どこへ出たのか誰にも分からない)だけ。
+    #   ★失敗の報せ(下の rc!=0)は残す=合図を出したChamiに何も返さないのは沈黙の事故。
+    if target != channel:
+        send(channel, "「" + content.strip()[:40] + "」の絵は " + target
+                      + " に出すね。私のPCの中だけで描くよ。")
     args = [sys.executable, LOCAL_CHAIN, content.strip(),
             "--discord", target, "--persona", persona]
     if dept:
@@ -731,8 +738,10 @@ def handle_image_request(rec, raw_line, content, channel, dept=None):
         err = type(e).__name__ + ": " + str(e)
     append_line(PROCESSED, raw_line)
     if rc == 0:
-        send(channel, "画像生成ルームに貼ったよ。ぜんぶ私のPCの中だけで作ったの。どうかな?"
-                      "気に入らなければ言い方を変えてもう一度頼んで。")
+        # ★成功時も同じ部屋なら黙る(絵が貼られている=それが返事)。別の部屋へ出した時だけ言う。
+        if target != channel:
+            send(channel, target + " に貼ったよ。ぜんぶ私のPCの中だけで作ったの。"
+                          "気に入らなければ言い方を変えてもう一度頼んで。")
         log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "answered", "channel": channel,
              "q": content[:200], "a": "[画像生成/local_chain] " + out[:200], "sent": True,
              "growth": True, "image": True})

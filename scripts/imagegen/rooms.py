@@ -97,7 +97,11 @@ LORA_DEPTS = tuple(d for d, v in ROOMS.items() if v.get("lora_hint"))
 CUE_REQUIRED_DEPTS = ("imagegen-fusoh-v0", "imagegen-fusoh-v2")
 
 # 頭に付ける印。Discordの `/` はスラッシュコマンドUIを出してしまうので使わない。
-CUE_PREFIXES = ("!描いて", "!描", "!draw", "!e", "!絵",
+# ★先頭の「生成依頼」はChami本人が決めた語(2026-09-16 02:32 msg=画像生成ローカル-fusoh_v0手描き風・
+#   原文「生成依頼 / これがひとまずトリガーワードの一つとして設定しといて」)。**Chamiの語を先頭に置く**=
+#   部屋へ出す説明(cue_help)にもこれが最初に載る。★改行を挟んで本文が来る書き方なので、
+#   印を剥がす時に改行も落とす(order_of の strip を見ろ)。
+CUE_PREFIXES = ("生成依頼", "!描いて", "!描", "!draw", "!e", "!絵",
                 "絵:", "絵:", "画:", "画:", "描いて:", "描いて:")
 _CUE_SORTED = tuple(sorted(CUE_PREFIXES, key=len, reverse=True))
 
@@ -120,7 +124,7 @@ def order_of(dept, text, natural=None):
         return False, ""
     for p in _CUE_SORTED:
         if body.startswith(p):
-            return True, body[len(p):].strip(" 　:：、,")
+            return True, body[len(p):].strip(" 　:：、,\r\n\t")
     if not cue_required(dept):
         return True, body           # 既存室=従来どおり全部注文
     if natural is not None and natural(body):

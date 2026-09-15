@@ -80,8 +80,14 @@ class Harness(object):
             raise AssertionError("local_chain が起動されていない")
 
 
-def deliver(text, dept, channel="ローカルllm-画像生成ルーム-優依"):
-    """本物の handle() をそのまま通す。"""
+def deliver(text, dept, channel=None):
+    """本物の handle() をそのまま通す。
+
+    ★channel を省いたら**その部屋の実名**(台帳から引く)を使う= 本番と同じ「同じ部屋に出す」形。
+      別の部屋へ貼る形(優依の自室で頼んで画像生成ルームへ出す)は channel を明示して作る。
+    """
+    if channel is None:
+        channel = rooms.channel_name(dept) or "ローカルllm-画像生成ルーム-優依"
     rec = {"content": text, "channel": channel, "dept": dept,
            "msg_id": "test-0001", "author": "chami_fusoh"}
     h = Harness()
@@ -121,6 +127,12 @@ class TestCueTable(unittest.TestCase):
         ok, body = rooms.order_of("imagegen-fusoh-v0", "!描", None)
         self.assertTrue(ok)
         self.assertEqual(body, "")
+
+    def test_chami_trigger_word_works_with_a_newline(self):
+        """★Chami本人が決めた語(2026-09-16 02:32 原文「生成依頼」)。改行を挟んだ書き方で来る。"""
+        ok, body = rooms.order_of("imagegen-fusoh-v0", "生成依頼\n\n銀髪ロング 制服 桜", None)
+        self.assertTrue(ok)
+        self.assertEqual(body, "銀髪ロング 制服 桜")
 
     def test_help_line_is_built_from_the_table(self):
         self.assertIn(rooms.CUE_PREFIXES[0], rooms.cue_help())
@@ -172,6 +184,32 @@ class TestRoomV2(TestRoomV0):
 
     def test_room_persona_is_kasumi(self):
         self.assertEqual(rooms.ROOMS[self.DEPT]["persona"], "中野五月")
+
+
+class TestNoNarration(unittest.TestCase):
+    """★優依は画像室で実況を喋らない(2026-09-16 Chami直=「デーモンが話す配線は恒久的にいらん」)。
+
+    2026-07-27にChamiが確定させた設計= 「打ったら本人に届く/普段は黙る/問題だけ上がる」。
+    絵が同じ部屋に出るなら**絵そのものが返事**だ。言葉が要るのは別の部屋へ出した時だけ。
+    """
+
+    def test_order_in_the_room_produces_no_words(self):
+        h = deliver("!描 銀髪ロング 制服 桜", "imagegen-fusoh-v0")
+        self.assertTrue(h.spawned, "注文を描かなかった")
+        self.assertEqual(h.sent, [], "絵と一緒に実況を喋った: %r" % (h.sent,))
+        self.assertEqual(h.sent_as, [], "別名義で実況を喋った: %r" % (h.sent_as,))
+
+    def test_order_in_v2_room_produces_no_words(self):
+        h = deliver("!描 制服 教室", "imagegen-fusoh-v2")
+        self.assertTrue(h.spawned)
+        self.assertEqual(h.sent, [])
+
+    def test_cross_room_still_says_where_it_went(self):
+        """★別の部屋へ貼る時だけは言う=黙るとどこへ出たか分からない(沈黙の事故)。"""
+        h = deliver("女の子の絵を描いて", "imagegen", channel="ローカルllm成長進捗")
+        self.assertTrue(h.spawned)
+        self.assertTrue(h.sent, "別部屋へ貼ったのに、行き先を誰にも言わなかった")
+        self.assertIn("ローカルllm-画像生成ルーム-優依", " ".join(t for _, t in h.sent))
 
 
 class TestExistingRoomUnchanged(unittest.TestCase):
