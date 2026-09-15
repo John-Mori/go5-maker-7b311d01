@@ -10,14 +10,26 @@ Write-Host ("time: {0}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
 # expected fleet (script -> human role). Keep in sync with supervise_daemons.ps1 (O2: generate from registry).
 $fleet = [ordered]@{
   'discord_gateway.py' = 'gateway (Discord -> queue)'
-  'daemon_keeper.py'   = 'keeper (guards 17 dept daemons)'
-  'dept_daemon.py'     = 'dept character daemons (expect 17)'
+  # 2026-09-16: was 19 (stale since 2026-07-22). Real count = daemon_keeper.DEPTS.
+  # +astro-room on 2026-09-16 => 41. Do not count by eye; load DEPT_CONF / read DEPTS.
+  'daemon_keeper.py'   = 'keeper (guards 41 dept daemons)'
+  'dept_daemon.py'     = 'dept character daemons (expect 41: +astro-room on 2026-09-16)'
   'absence_watchdog.py'= 'watchdog (stalls/DLQ)'
   'local_responder.py' = 'local qwen responder'
   'gemini_responder.py'= 'gemini responder'
   'claude_responder.py'= 'claude fallback responder'
   'office_daily.py'    = 'office daily'
-  'inbox_waiter.py'    = 'session waiters (chime)'
+}
+# 2026-07-22: inbox_waiter.py moved out of the required fleet (no longer reported as DOWN).
+#   Reason: the waiter is a ONE-SHOT (it fires once on a new message and exits), so being
+#   absent is normal. A check that always says [DOWN] becomes noise and stops being read
+#   (ORG-09 / ORG-42: an alarm that always misfires gets ignored).
+#   The mechanism that wakes a session is now 00_AI-HQ/scripts/hq_chime.py (kept resident).
+#   Shown below for reference only - absence is NOT an error.
+# NOTE: keep this file ASCII-only (PowerShell 5.1 reads .ps1 in the ANSI codepage).
+$optional = [ordered]@{
+  'inbox_waiter.py'    = 'session waiter (one-shot; absence is OK)'
+  'hq_chime.py'        = 'HQ chime (resident; wakes the session)'
 }
 $allPy = @(Get-CimInstance Win32_Process -Filter "Name='python.exe'")
 Write-Host ""
@@ -27,6 +39,11 @@ foreach ($sc in $fleet.Keys) {
   $pids = ($procs | ForEach-Object { $_.ProcessId }) -join ','
   $mark = if ($procs.Count -ge 1) { 'OK ' } else { 'DOWN' }
   Write-Host ("  [{0}] {1,-22} x{2,-2} {3}  ({4})" -f $mark, $sc, $procs.Count, $pids, $fleet[$sc])
+}
+foreach ($sc in $optional.Keys) {
+  $procs = @($allPy | Where-Object { $_.CommandLine -and ($_.CommandLine -like ('*' + $sc + '*')) })
+  $pids = ($procs | ForEach-Object { $_.ProcessId }) -join ','
+  Write-Host ("  [INFO] {0,-22} x{1,-2} {2}  ({3})" -f $sc, $procs.Count, $pids, $optional[$sc])
 }
 
 # Claude workers (daemon-spawned, --print)

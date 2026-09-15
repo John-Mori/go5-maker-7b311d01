@@ -101,6 +101,10 @@ CODEX_TERRA_DEPTS = frozenset((
     "past-room", "future-room", "soudan-room", "goods-afi", "someday-room",
     "web-research", "kaizen-analyst", "dream-care", "report-notify",
     "imagegen", "health-log", "manga-shorts",
+    # 2026-09-16 astro-room(西洋占星術サイト班)を明示。Chamiが「ボス」を名簿に入れたので
+    # @ボス召喚がこの部屋から飛ぶ。既定(DEFAULT_MODEL)も terra なので挙動は変わらないが、
+    # 表に無い部門は「決めていない」のか「terraで良い」のか読めない=明示しておく。
+    "astro-room",
 ))
 
 
