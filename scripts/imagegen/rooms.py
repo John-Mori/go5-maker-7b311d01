@@ -91,18 +91,21 @@ LORA_DEPTS = tuple(d for d, v in ROOMS.items() if v.get("lora_hint"))
 #   imagegen室は今までどおり全便を注文として扱う=1文字も挙動を変えない(C-035)。
 #   広げたくなったら CUE_REQUIRED_DEPTS に dept を1つ足すだけで足りる。
 #
-# ★合図の形= 「頭に付ける印」または「日本語の言い回し」のどちらでもよい(片方だけだと
-#   取りこぼす)。印だけにすると素のプロンプト(「銀髪ロング 制服 桜」)が通らなくなり、
-#   言い回しだけにすると印を打った短い注文が通らなくなる。
+# ★2026-09-16 03:0x Chami直で**合図は1本に絞った**。原文=
+#     msg 1549476416641572937「生成’依頼  で始まるチャットじゃないと生成が始まらない仕組みにして。
+#                              間違えて生成が走らないようにこのチャットで間に ‘をあえて入れた。」
+#     msg 1549477000807194637「1。でも印はいらんかな」
+#       (直前にアメスが出した二択= 1.「生成依頼」と!印だけを引き金に / 2.「〜の絵を描いて」も残す)
+#   → 引き金は**「生成依頼」で始まる時だけ**。`!描`系の印も、「〜の絵を描いて」の曖昧マッチも外す。
+#   ★中野五月便(llm-qa)の「LoRA名(fusoh_v0/fusoh_v2)をトリガーに」は**Chami本人のこの決定で
+#     置き換わった**= LoRA名は引き金にしない(部屋がどちらのLoRAを使うかは ROOMS が持つ)。
+#   ★Chamiが自分で打った「生成’依頼」(間に ‘ )は**当たらないのが正解**= 完全一致の頭合わせ。
 CUE_REQUIRED_DEPTS = ("imagegen-fusoh-v0", "imagegen-fusoh-v2")
 
-# 頭に付ける印。Discordの `/` はスラッシュコマンドUIを出してしまうので使わない。
-# ★先頭の「生成依頼」はChami本人が決めた語(2026-09-16 02:32 msg=画像生成ローカル-fusoh_v0手描き風・
-#   原文「生成依頼 / これがひとまずトリガーワードの一つとして設定しといて」)。**Chamiの語を先頭に置く**=
-#   部屋へ出す説明(cue_help)にもこれが最初に載る。★改行を挟んで本文が来る書き方なので、
-#   印を剥がす時に改行も落とす(order_of の strip を見ろ)。
-CUE_PREFIXES = ("生成依頼", "!描いて", "!描", "!draw", "!e", "!絵",
-                "絵:", "絵:", "画:", "画:", "描いて:", "描いて:")
+# 引き金はこの1語だけ。★増やす時はChamiの言葉を待つ(勝手に印を足すと誤発火の口が増える)。
+#   ★改行を挟んで本文が来る書き方(「生成依頼\n\n銀髪ロング…」)なので、語を剥がす時に改行も落とす
+#     (order_of の strip を見ろ)。
+CUE_PREFIXES = ("生成依頼",)
 _CUE_SORTED = tuple(sorted(CUE_PREFIXES, key=len, reverse=True))
 
 
@@ -114,29 +117,33 @@ def cue_required(dept):
 def order_of(dept, text, natural=None):
     """この便を画像注文として拾うか。返り= (拾うか, 絵に渡す本文)。
 
-    natural= 「絵を描いて」を読む日本語判定(local_responder.wants_image を渡す想定)。
-             語彙ゲートの正本は向こうにあるので、こちらでは持たず**受け取る**。
-    ★合図の印を剥がした本文を返す=「!描 銀髪の少女」→「銀髪の少女」。
-      印だけで本文が空なら (True, "") を返す。聞き返すのは呼んだ側の仕事。
+    natural= 「絵を描いて」を読む日本語判定(local_responder.wants_image)。
+             ★合図が要る部屋では**使わない**(2026-09-16 Chami「1。でも印はいらんかな」=
+               曖昧マッチを外す決定)。合図の要らない既存室のために引数だけ残してある。
+    ★合図を剥がした本文を返す=「生成依頼 銀髪の少女」→「銀髪の少女」。
+      合図だけで本文が空なら (True, "") を返す。聞き返すのは呼んだ側の仕事。
     """
     body = (text or "").strip()
     if not body:
         return False, ""
+    if cue_required(dept):
+        # ★この部屋は「生成依頼」で**始まる**時だけ。それ以外は何を書いてあっても雑談。
+        for p in _CUE_SORTED:
+            if body.startswith(p):
+                return True, body[len(p):].strip(" 　:：、,\r\n\t")
+        return False, body
     for p in _CUE_SORTED:
         if body.startswith(p):
             return True, body[len(p):].strip(" 　:：、,\r\n\t")
-    if not cue_required(dept):
-        return True, body           # 既存室=従来どおり全部注文
-    if natural is not None and natural(body):
-        return True, body
-    return False, body
+    return True, body               # 既存室=従来どおり全部注文(C-035)
 
 
 def cue_help():
-    """合図の書き方(部屋へ出す1行)。印は正本のここから引く=説明とコードがずれない。"""
-    return ("絵を頼む時は頭に " + " / ".join(CUE_PREFIXES[:5])
-            + " のどれかを付けてね(例: 「!描 銀髪ロング 制服 桜」)。"
-              "「〜の絵を描いて」と書いてくれても拾うよ。それ以外は雑談として読むだけにする。")
+    """合図の書き方(部屋へ出す1行)。語は正本のここから引く=説明とコードがずれない。"""
+    cue = CUE_PREFIXES[0]
+    return ("絵を頼む時は頭に「" + cue + "」と書いてね"
+            "(例: 「" + cue + " 銀髪ロング 制服 桜」/ 改行して続けてもいい)。"
+            "この言葉で始まらない便は全部、雑談として読むだけにする。")
 
 
 def channel_name(dept):

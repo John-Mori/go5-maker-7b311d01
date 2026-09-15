@@ -1405,6 +1405,9 @@ def handle(rec, raw_line, growth=None):
     #   旧= この部屋のChami便は**全部**注文として handle_image_request へ直行していた。
     #       実害= 雑談「これデーモン?デーモンの返信いらんよ」を優依が絵にしようとした。
     #   新= fusohの2室だけ「合図のある便」に限って拾う(正本= rooms.CUE_REQUIRED_DEPTS)。
+    #   ★2026-09-16 03:0x Chami直で合図を**「生成依頼」で始まる時だけ**の1本に絞った
+    #     (msg 1549476416641572937 / 1549477000807194637「1。でも印はいらんかな」)。
+    #     `!描`系の印も wants_image の曖昧マッチも、この2室では効かない= rooms.order_of が決める。
     #       合図の無い便は**描かない・喋らない**(Chami原文「デーモンの返信いらんよ」)。
     #       黙って捨てるのではなく responder_log.jsonl に mode=image_no_cue で残す=
     #       「拾わなかった」が後から数えられる(silent failにしない)。
@@ -1421,8 +1424,9 @@ def handle(rec, raw_line, growth=None):
             print(f"  合図なし=描かない [{channel}] {content[:30]!r}")
             return
         if not _prompt.strip():
-            # 印だけ来た(「!描」で送信)。何を描くのか分からないので聞き返して終わる。
-            send(channel, "合図は受け取ったよ。何を描くか続けて書いてくれる?(例: 「!描 銀髪ロング 制服 桜」)")
+            # 合図だけ来た(「生成依頼」で送信)。何を描くのか分からないので聞き返して終わる。
+            send(channel, "合図は受け取ったよ。何を描くか続けて書いてくれる?"
+                          "(例: 「生成依頼 銀髪ロング 制服 桜」)")
             append_line(PROCESSED, raw_line)
             log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "image_cue_only",
                  "channel": channel, "dept": _idept, "q": content[:200], "image": True,

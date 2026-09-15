@@ -2,6 +2,9 @@
 """合図ゲート(雑談と画像注文の線引き)の検査。
 
 依頼= アメス便 1549468992396329025(依頼元 imagegen-fusoh-v0)。
+★2026-09-16 03:0x 合図を**「生成依頼」で始まる時だけ**の1本に絞った(Chami直
+  msg 1549476416641572937 / 1549477000807194637「1。でも印はいらんかな」)。
+  `!描`系の印と「〜の絵を描いて」の曖昧マッチは、この2室では引き金にしない。
 ★この検査は**判定と分岐を本物のまま**通す。偽物にするのは外へ出る手だけ=
   Discordへの送信(send)・ファイル追記(append_line/log)・ComfyUIの起動(subprocess.run)。
 ★旧コード(scripts/llm/local_responder.py.bak_20260916_cue)に当てると
@@ -104,27 +107,32 @@ class TestCueTable(unittest.TestCase):
         self.assertTrue(rooms.cue_required("imagegen-fusoh-v2"))
         self.assertFalse(rooms.cue_required("imagegen"))   # 既存室は変えない(C-035)
 
+    def test_the_cue_is_exactly_one_word(self):
+        """★2026-09-16 Chami直「1。でも印はいらんかな」= 引き金は「生成依頼」1本だけ。"""
+        self.assertEqual(rooms.CUE_PREFIXES, ("生成依頼",))
+
     def test_cue_is_stripped_from_the_prompt(self):
-        ok, body = rooms.order_of("imagegen-fusoh-v0", "!描 銀髪ロング 制服 桜", None)
+        ok, body = rooms.order_of("imagegen-fusoh-v0", "生成依頼 銀髪ロング 制服 桜", None)
         self.assertTrue(ok)
         self.assertEqual(body, "銀髪ロング 制服 桜")
 
-    def test_fullwidth_and_halfwidth_colon_both_work(self):
-        for head in ("絵:", "絵:", "画:", "画:"):
-            ok, body = rooms.order_of("imagegen-fusoh-v0", head + "猫", None)
-            self.assertTrue(ok, head)
-            self.assertEqual(body, "猫", head)
+    def test_old_marks_are_now_chitchat(self):
+        """★外した印(!描系・絵:系)は、もう引き金にならない=雑談として読むだけ。"""
+        for head in ("!描 猫", "!draw cat", "!絵 猫", "絵:猫", "画:猫", "描いて:猫"):
+            ok, _ = rooms.order_of("imagegen-fusoh-v0", head, lr.wants_image)
+            self.assertFalse(ok, head)
 
-    def test_natural_japanese_is_accepted_when_given(self):
+    def test_natural_japanese_is_no_longer_a_trigger(self):
+        """★「〜の絵を描いて」の曖昧マッチも外した(Chami「印はいらんかな」の前提=1本化)。"""
         ok, _ = rooms.order_of("imagegen-fusoh-v0", "女の子の絵を描いて", lr.wants_image)
-        self.assertTrue(ok)
+        self.assertFalse(ok)
 
     def test_chitchat_is_rejected(self):
         ok, _ = rooms.order_of("imagegen-fusoh-v0", CHITCHAT, lr.wants_image)
         self.assertFalse(ok)
 
     def test_cue_only_returns_empty_body(self):
-        ok, body = rooms.order_of("imagegen-fusoh-v0", "!描", None)
+        ok, body = rooms.order_of("imagegen-fusoh-v0", "生成依頼", None)
         self.assertTrue(ok)
         self.assertEqual(body, "")
 
@@ -134,8 +142,35 @@ class TestCueTable(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(body, "銀髪ロング 制服 桜")
 
+    def test_chamis_own_typo_probe_does_not_fire(self):
+        """★Chamiが**わざと**間に ‘ を入れて試した文(msg 1549476416641572937)。
+
+        原文=「生成’依頼  で始まるチャットじゃないと生成が始まらない仕組みにして。
+               間違えて生成が走らないようにこのチャットで間に ‘をあえて入れた。」
+        → 頭の完全一致だから当たらない。これが「完全一致で足りるか」への実物の答え。
+        """
+        ok, _ = rooms.order_of("imagegen-fusoh-v0", "生成’依頼  で始まるチャットじゃないと", None)
+        self.assertFalse(ok)
+
+    def test_the_cue_must_be_at_the_head(self):
+        """途中に出てきても引き金にしない=「さっきの生成依頼どうなった?」で描かない。"""
+        ok, _ = rooms.order_of("imagegen-fusoh-v0", "さっきの生成依頼どうなった?", None)
+        self.assertFalse(ok)
+
+    def test_known_cost_a_sentence_starting_with_the_cue_is_an_order(self):
+        """★頭一致1本にした代償(隠さず固定しておく)。
+
+        「生成依頼のやり方教えて」は**注文として通る**(本文=「のやり方教えて」)。
+        頭に置いた語で始める限り注文、というChamiの決めたとおりの挙動。
+        直すならChamiの言葉を待つ(勝手に助詞を弾く判定を足さない)。
+        """
+        ok, body = rooms.order_of("imagegen-fusoh-v0", "生成依頼のやり方教えて", lr.wants_image)
+        self.assertTrue(ok)
+        self.assertEqual(body, "のやり方教えて")
+
     def test_help_line_is_built_from_the_table(self):
         self.assertIn(rooms.CUE_PREFIXES[0], rooms.cue_help())
+        self.assertNotIn("!描", rooms.cue_help())
 
 
 class TestRoomV0(unittest.TestCase):
@@ -157,18 +192,26 @@ class TestRoomV0(unittest.TestCase):
         self.assertEqual(h.logged[0].get("dept"), self.DEPT)
         self.assertTrue(h.appended, "PROCESSED に積んでいない(同じ便を何度も読む)")
 
-    def test_cue_order_is_drawn_without_the_cue_mark(self):
-        h = deliver("!描 銀髪ロング 制服 桜", self.DEPT)
+    def test_cue_order_is_drawn_without_the_cue_word(self):
+        h = deliver("生成依頼 銀髪ロング 制服 桜", self.DEPT)
         self.assertTrue(h.spawned, "合図付きの注文を描かなかった")
         self.assertIn("銀髪ロング 制服 桜", h.spawned[0])
-        self.assertNotIn("!描", " ".join(h.spawned[0]))
+        self.assertNotIn("生成依頼", " ".join(h.spawned[0]))
 
-    def test_natural_order_is_drawn(self):
+    def test_cue_order_is_drawn_exactly_once(self):
+        """★中野五月便の完了条件=「トリガー有り=**1回だけ**生成」。"""
+        h = deliver("生成依頼\n\n銀髪ロング 制服 桜", self.DEPT)
+        self.assertEqual(len(h.spawned), 1, "1便で複数回走った: %r" % (h.spawned,))
+
+    def test_natural_order_is_not_drawn_anymore(self):
+        """★「〜の絵を描いて」だけでは描かない(2026-09-16 合図1本化)。"""
         h = deliver("探偵っぽい女の子の絵を描いて", self.DEPT)
-        self.assertTrue(h.spawned, "「絵を描いて」を拾えなかった")
+        self.assertEqual(h.spawned, [], "合図無しで描いた")
+        self.assertEqual(h.sent, [], "合図無しの便に返事をした")
+        self.assertIn("image_no_cue", h.modes())
 
     def test_cue_only_asks_back_and_does_not_draw(self):
-        h = deliver("!描", self.DEPT)
+        h = deliver("生成依頼", self.DEPT)
         self.assertEqual(h.spawned, [])
         self.assertEqual(len(h.sent), 1)
         self.assertIn("image_cue_only", h.modes())
@@ -238,13 +281,13 @@ class TestNoNarration(unittest.TestCase):
     """
 
     def test_order_in_the_room_produces_no_words(self):
-        h = deliver("!描 銀髪ロング 制服 桜", "imagegen-fusoh-v0")
+        h = deliver("生成依頼 銀髪ロング 制服 桜", "imagegen-fusoh-v0")
         self.assertTrue(h.spawned, "注文を描かなかった")
         self.assertEqual(h.sent, [], "絵と一緒に実況を喋った: %r" % (h.sent,))
         self.assertEqual(h.sent_as, [], "別名義で実況を喋った: %r" % (h.sent_as,))
 
     def test_order_in_v2_room_produces_no_words(self):
-        h = deliver("!描 制服 教室", "imagegen-fusoh-v2")
+        h = deliver("生成依頼 制服 教室", "imagegen-fusoh-v2")
         self.assertTrue(h.spawned)
         self.assertEqual(h.sent, [])
 
@@ -254,6 +297,34 @@ class TestNoNarration(unittest.TestCase):
         self.assertTrue(h.spawned)
         self.assertTrue(h.sent, "別部屋へ貼ったのに、行き先を誰にも言わなかった")
         self.assertIn("ローカルllm-画像生成ルーム-優依", " ".join(t for _, t in h.sent))
+
+
+class TestReplayOfRealChamiMessages(unittest.TestCase):
+    """★実物の再生。2026-09-16 深夜にChamiがfusoh_v0室へ実際に打った4便を、
+    台帳(local/discord_processed.jsonl / responder_log.jsonl)から起こしてそのまま通す。
+    「登録だけで完了にしない」(中野五月便の条件)の、机の上で出来る側の証拠。
+    """
+
+    DEPT = "imagegen-fusoh-v0"
+
+    # (実文, 描くか)
+    REAL = [
+        ("生成依頼\n\nこれがひとまずトリガーワードの一つとして設定しといて", True),
+        ("生成’依頼  で始まるチャットじゃないと生成が始まらない仕組みにして。"
+         "間違えて生成が走らないようにこのチャットで間に ‘をあえて入れた。", False),
+        ("1。でも印はいらんかな", False),
+        ("これデーモン?デーモンの返信いらんよ", False),
+    ]
+
+    def test_replay(self):
+        for text, should_draw in self.REAL:
+            h = deliver(text, self.DEPT)
+            if should_draw:
+                self.assertTrue(h.spawned, "描くはずが描かなかった: %r" % (text[:24],))
+            else:
+                self.assertEqual(h.spawned, [], "描かないはずが描いた: %r" % (text[:24],))
+                self.assertEqual(h.sent, [], "黙るはずが喋った: %r" % (text[:24],))
+                self.assertIn("image_no_cue", h.modes(), text[:24])
 
 
 class TestExistingRoomUnchanged(unittest.TestCase):
