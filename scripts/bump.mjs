@@ -21,6 +21,13 @@
  *   ★分割ページ(KouhoLists.html / analytics.html / Stock.html / StockLists.html)も index.html と
  *     同じ ?v= を共有するため対象に含める(2026-08-11 別ページ化・2026-08-16 投稿履歴を StockLists.html へ分離)。
  *     ★ここに足し忘れると分割ページだけ古いJSがキャッシュされ静かに事故る(=CIスモークが版混在でfail)。
+ *
+ * ★取り残し検出(2026-09-16 AD研究室モドリッチの計測を受けて追加):
+ *   「全参照が同一N」だけを見る混在チェックは、揃った瞬間に検出力が0になる
+ *   (index.htmlを触らないコミットでJSだけ変えると、混在すら起きず静かに取り残す)。
+ *   → `.bump_state.json` に「直近バンプの起点commit」を焼き、--check のたびに
+ *      その起点からHEADまでの間で参照アセットが変更されていないかを見る(git diffで実測)。
+ *      混在の有無に関係なく毎回効く=揃えても検出力は落ちない。
  */
 import { readFileSync, writeFileSync, existsSync, readdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -93,8 +100,43 @@ if (uniq.length > 1) {
   }
 }
 
+// ★取り残し検出: 直近バンプの起点(.bump_state.json)からHEADまでの間で、
+//   参照アセット(src/href の ?v= 付きパス)が変更されていないかを見る。
+//   混在チェック(uniq.length>1)と違い、揃っていても常に効く=検出力が0にならない。
+const STATE_PATH = join(ROOT, ".bump_state.json");
+function detectStaleAssets() {
+  if (!existsSync(STATE_PATH)) return null; // 初回導入前=判定材料なし(赤にしない)
+  let state;
+  try {
+    state = JSON.parse(readFileSync(STATE_PATH, "utf8"));
+  } catch {
+    return null; // 壊れたstateで検査を止めない(fail-open)
+  }
+  if (!state.base_commit) return null;
+
+  const ASSET_RE = /(?:src|href)="([^"?]+)\?v=\d+"/g;
+  const assetPaths = new Set();
+  for (const f of files) {
+    let m;
+    ASSET_RE.lastIndex = 0;
+    while ((m = ASSET_RE.exec(f.src))) assetPaths.add(m[1]);
+  }
+
+  const diff = spawnSync("git", ["diff", "--name-only", state.base_commit, "HEAD"], { cwd: ROOT, encoding: "utf8" });
+  if (diff.status !== 0) return null; // 起点commitがもう無い(履歴書き換え等)=fail-open、混在チェックに任せる
+  const changed = new Set(diff.stdout.split("\n").map((s) => s.trim()).filter(Boolean));
+
+  return [...assetPaths].filter((p) => changed.has(p)).sort();
+}
+
 if (check) {
   console.log(`現在 v=${cur} / 参照 ${found.length} 箇所 / ${files.length} ファイル / 混在 ${uniq.length > 1 ? "あり:" + uniq.join(",") : "なし"}`);
+  const stale = detectStaleAssets();
+  if (stale && stale.length) {
+    console.error(`⚠ 中身が変わったのに ?v= が据え置きの疑い= ${stale.length}件: ${stale.join(", ")}`);
+    console.error("  直近バンプの起点以降にこれらが変更された。node scripts/bump.mjs でバンプすること。");
+    process.exit(9);
+  }
   console.log("V=" + cur);
   process.exit(0);
 }
@@ -144,5 +186,17 @@ if (existsSync(stampScript)) {
     process.exit(7);
   }
   console.log("↳ schedule/.verstamp.json も焼き直した(差分があれば同じコミットに含めること)");
+}
+
+// ★取り残し検出の起点を焼く: 今バンプした瞬間のHEADを「ここまでは検査済み」の基準にする。
+//   次回 --check はこの起点からの差分だけを見るので、今回同梱コミットで動く参照アセット変更は
+//   まだ「起点より前」=誤検知しない(起点はこのバンプ実行時点のHEAD=これから積むコミットの親)。
+const headRev = spawnSync("git", ["rev-parse", "HEAD"], { cwd: ROOT, encoding: "utf8" });
+if (headRev.status === 0) {
+  const baseCommit = headRev.stdout.trim();
+  writeFileSync(STATE_PATH, JSON.stringify({ base_commit: baseCommit, bumped_to: next, bumped_at: new Date().toISOString() }, null, 2) + "\n");
+  console.log(`↳ .bump_state.json を焼いた(起点=${baseCommit.slice(0, 7)})`);
+} else {
+  console.error("⚠ git rev-parse HEAD に失敗。.bump_state.json は更新しなかった(取り残し検出が次回働かない可能性)。");
 }
 console.log("V=" + next);
