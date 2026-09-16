@@ -63,6 +63,22 @@ PERSONA_TENTATIVE = "ネイキッド・スネーク"
 # 機微=司令塔直轄(防御的ガード。codex部屋は該当しない想定だが念のため)
 SENSITIVE_DEPTS = ("dream-care", "past-room", "hr-room", "health-log")
 
+# ★2026-09-16 止血(研究室HQ・Chami直接指示)= **Chami本人の@ボス名指しは上のガードで弾かない。**
+#   壊れていた実物= 👤人事部門-補強•キャラ設定(hr-room)で 11:47:35 と 11:48:38 に
+#   sensitive_deferred が2連続(codex_responder_log.jsonl)。2通目はChami本人の
+#   「＠ボス 引き継がず、ここで考えてくれ」(msg 1549612874945663090)で、
+#   **回すなという指示そのものを回し返していた**。
+#   なぜ弾いてよいか= ここへ来る便は discord_gateway.route_codex_summon を通った
+#   **@ボス名指しだけ**(is_codex_mentioned)。共通規律§3.8「Chamiが相手を名指しした時は
+#   階梯を経由せず直送してよい」/§3.7「Chamiの直接指示はどの裁定より上」。
+#   他人(AI)が機微部屋でボスを名指した時は従来どおり司令塔へ回す=防御の意図は残す。
+#   ★値の正本は `scripts/_common/chami_identity.py` **1本だけ**
+#     (2026-09-16 イージス研究室が一本化。それ以前は3箇所に写しが散っていた)。
+#     ★ここに写しを作り直すな。ユーザ名かIDが変わった日、直し忘れた写しが**黙って**誤判定する。
+#     ★try/except で包むな= 読めない時は起動時に落ちる方がよい(無音の無効化を作らない)。
+sys.path.insert(0, os.path.join(ROOT, "scripts", "_common"))
+from chami_identity import from_chami  # noqa: E402
+
 # Codexは遅い(実測45〜60秒/件)。1巡回の上限を小さくして暴走と長時間ブロックを防ぐ。
 QUEUE_CLAIM_CAP = 2
 QUEUE_DB = os.path.join(LOCAL, "queue", "inbox.db")
@@ -477,7 +493,7 @@ def handle(rec, raw_line, lease_id=None, deliveries=1):
 
     origin_dept = origin_dept_for(rec)
     mark(channel, msg_id, "既読")           # 掴んで読んだ=まず既読
-    if origin_dept in SENSITIVE_DEPTS:
+    if origin_dept in SENSITIVE_DEPTS and not from_chami(rec):
         mark(channel, msg_id, "即答")
         escalate(channel, raw_line)
         notify_room(channel, "受け取りました。ここは司令塔が直接読む部屋なので、そちらへ回しました。")

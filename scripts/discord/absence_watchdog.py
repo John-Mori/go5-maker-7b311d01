@@ -222,7 +222,10 @@ UNANSWERED_ALERT_DEPT = "aegis-gl"  # 鳴らす先=イージス研究室(部門�
 UNANSWERED_MARK = "⚠Chamiの便に誰も返していません"   # ←この検査自身の警報の目印(返事に数えない)
 UNANSWERED_OK_MARK = "✅返事が付きました"            # ←解消の知らせ。これも返事に数えない
 UNANSWERED_SKIP_DEPTS = ("router",)  # 通知受付=機械の掲示板。人の返事は元々出ない
-CHAMI_USERNAMES = ("chami_fusoh",)
+# ★Chami本人かの判定は `scripts/_common/chami_identity.py` 1本に寄せた(2026-09-16 イージス研究室)。
+#   ここには写しを置かない= ユーザ名かIDが変わった日、直し忘れた写しが黙って誤判定し、
+#   この見張りの場合は「Chamiの発言が無い」と読んで**警報が鳴らなくなる**(沈黙の形で出る)。
+from chami_identity import is_chami_user  # noqa: E402
 CHANNELS_FILE = os.path.join(LOCAL, "discord_channels.json")
 BOT_TOKEN_FILE = os.path.join(LOCAL, "discord_bot_token.txt")
 GUILD_ID = "1498341160207515678"
@@ -1745,7 +1748,7 @@ def unanswered_verdict(msgs, now_epoch, threshold_sec=UNANSWERED_SEC):
         return (False, None, 0, "")
     chami_at = None
     for i, m in enumerate(msgs):
-        if str((m.get("author") or {}).get("username") or "") in CHAMI_USERNAMES:
+        if is_chami_user(m.get("author")):
             chami_at = i
             break
     if chami_at is None:
@@ -1799,7 +1802,7 @@ def answered_since(msgs, alerted_id):
                 continue
         except (TypeError, ValueError):
             continue
-        if str((m.get("author") or {}).get("username") or "") in CHAMI_USERNAMES:
+        if is_chami_user(m.get("author")):
             continue                      # ★Chami自身の催促は返事ではない
         if _is_watchdog_notice(msg_text(m)):   # ★同上(embedで出た自分の✅を返事と数えない)
             continue

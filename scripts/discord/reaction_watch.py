@@ -115,7 +115,11 @@ KAIZEN_DEPT = "kaizen-analyst"
 #     (run_kaizen_daily_repair.py が取り込む)。★止めるのは一覧の配達だけ= 個別便(🔥の本体)は
 #     1件も削っていない(上の send(dept,...) はそのまま)。
 KAIZEN_DIGEST = os.path.join(LOCAL, "_work", "reaction_watch_kaizen_digest.md")
-CHAMI_USER_ID = "490925528367497227"   # chami_fusoh(実測 2026-07-29)。判定の補助であって条件ではない
+# ★Chami本人かの判定は `scripts/_common/chami_identity.py` 1本に寄せた(2026-09-16 イージス研究室)。
+#   ここには写しを置かない= ユーザ名かIDが変わった日、直し忘れた写しが黙って誤判定し、
+#   この見張りの場合は Chami が押した印を「機械が押した」と読んで巡回から落ちる(沈黙の形で出る)。
+#   ★上の msg_text と違い try/except を被せない= 判定が黙って壊れる方が、起動しないより悪い。
+from chami_identity import is_chami_user  # noqa: E402
 DISCORD_EPOCH = 1420070400000
 
 # ★拾う絵文字の一覧(許可制)。ここに無いものは全部無視する。
@@ -438,7 +442,7 @@ def collect(api, chans, since_ms, marks, seen, now_str):
                     # ★content だけでは embed で出た部屋の本文が0字になる(便6-2)。
                     "content": msg_text(m),
                     "by": [f"{u.get('username')}({u.get('id')})" for u in humans],
-                    "by_chami": any(str(u.get("id")) == CHAMI_USER_ID for u in humans),
+                    "by_chami": any(is_chami_user(u) for u in humans),
                     "detected_at": now_str,
                 })
                 time.sleep(0.2)   # 実引きは連打しない(レート制限に当たりにくくする)
