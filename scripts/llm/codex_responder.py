@@ -496,7 +496,17 @@ def handle(rec, raw_line, lease_id=None, deliveries=1):
     if origin_dept in SENSITIVE_DEPTS and not from_chami(rec):
         mark(channel, msg_id, "即答")
         escalate(channel, raw_line)
-        notify_room(channel, "受け取りました。ここは司令塔が直接読む部屋なので、そちらへ回しました。")
+        # ★2026-09-16 撤去(Chami直接指示・イージス研究室)= ここに在った
+        #   「受け取りました。ここは司令塔が直接読む部屋なので、そちらへ回しました。」を出さない。
+        #   Chami原文=「これやめろって」(msg 1549628255173353625 / 12:49:26 JST / hr-room)。
+        #   ★中身の無い一次ackは**沈黙より悪い**(共通規律§2)。Codex自身の心得
+        #     `scripts/codex/codex_briefing.py:193`=「『司令塔へ回しました』だけの返事を出すな」を、
+        #     responder 側が破っていた= 機械が自分の掟を破る形になっていた。
+        #   ★恒久 DEF-otacon-radio-df36094b69(炎上/C-038・C-040)の第2の口。
+        #     第1の口(重い依頼の「受け取った。処理を開始する。」)は撤去済= test_codex_no_ack.py。
+        #   ★沈黙にはしていない= 上の escalate() が生の便を司令塔の主受付箱
+        #     (local/discord_inbox.jsonl)へ入れ、既読/即答の印は部屋へ残る。
+        #     回送の防御(他人のAI便は Codex を起こさない)は HQ の意図どおり触っていない。
         log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "sensitive_deferred",
              "channel": label, "channel_id": channel})
         return "sensitive_deferred"

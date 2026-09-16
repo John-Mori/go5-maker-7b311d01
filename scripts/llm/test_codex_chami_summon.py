@@ -77,6 +77,12 @@ def main():
         fails.append(f"B: 機微部屋の他人名指しを回していない(防御が消えた): mode={mode!r}")
     if ran:
         fails.append("B: 機微部屋で他人の名指しからCodexを起動した(NG)")
+    # ★2026-09-16 追加(Chami直接指示「これやめろって」msg 1549628255173353625)=
+    #   回すこと自体は残すが、**部屋へ出す中身の無い定型文は撤去した**。
+    #   ここが在るのは、この試験が定型文(BOUNCE)を握っている唯一の場所だからだ
+    #   = 撤去を戻した日に、この行が赤で拾う。
+    if sent:
+        fails.append(f"B: 回送時に部屋へテキストを出した(中身無しackの復活・NG): {sent!r}")
 
     if fails:
         for f in fails:
