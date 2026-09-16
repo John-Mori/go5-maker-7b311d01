@@ -151,6 +151,50 @@ def elapsed_note(draw_sec, tag_sec=None):
     return "所要 %.0f秒(描画)" % draw_sec
 
 
+def _audit(content, status, ch, channel, persona, msg_id, image_path, files_n):
+    """Discordへ**実際に渡した本文**を送信台帳へ1行残す(2026-09-16 イージス研究室)。
+
+    ★依頼= 中野五月 DISPATCH-aegis-gl-1789568669959「webhook payload(caption全文)を
+      ローカルへ1行だけ残せるなら、次からは実物確認を記憶でなく数字でできる。今は
+      『載ったはず』を実物で裏取りできない」。壊れた実物= 23:13:32 の go5org_00017_.png=
+      所要時間の行が載ったかを、ローカルのどの台帳からも読めなかった。
+    ★記録先を新設しない(ORG-11)= 正本は scripts/discord/send_audit.py 1本。
+      あちらの docstring は「撃つのは bot_send と persona_send の2箇所だけ」と書いているが、
+      **画像便はその数え落とし**だった= ここが3つ目のOUT口だ。
+    ★fail-open= この中では絶対に例外を出さない。台帳の1行のために投稿を殺さない。
+    """
+    sa = None
+    try:
+        import send_audit as sa                 # sys.path は discord_upload が通している
+        sa.record("imagegen", body=content, status=status,
+                  channel_id=str(ch.get("id", "")), channel=channel,
+                  dept=str(ch.get("dept", "") or ""), persona=persona, msg_id=msg_id)
+    except Exception:
+        pass
+    # ★「どのpngがどの投稿になったか」だけは send_audit の列に無い(画像便に固有)。
+    #   ここは**索引**であって写しではない= 本文は持たせない(ORG-11= 本文の写しを増やすと、
+    #   頭だけの写しが3つ並んで1つも再現できない、の型を繰り返す)。
+    #   読み方= この行の msg_id → send_audit.jsonl の body(全文)。
+    try:
+        # ★検査の走行を本番の索引へ混ぜない。判定は send_audit の正本へ委ねる
+        #   = 「テスト時は環境変数を設定する」という人手の入口を新しく増やさない。
+        base = os.environ.get("GO5_LOCAL_DIR") or os.path.join(ROOT, "local")
+        name = "imagegen_posts.jsonl"
+        if sa is not None and sa._is_test_entry():
+            name = "imagegen_posts_test.jsonl"
+        p = os.path.join(base, "llm", name)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "channel": channel,
+                "persona": persona, "status": str(status), "msg_id": msg_id,
+                "image": os.path.basename(image_path), "files": files_n,
+                "chars": len(content), "pid": os.getpid(),
+            }, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
 def discord_upload(image_path, channel, persona, caption="", note="", extra_images=None):
     """Webhookにmultipartで画像を添付投稿(キャラ名義)。
 
@@ -197,11 +241,29 @@ def discord_upload(image_path, channel, persona, caption="", note="", extra_imag
         parts.append(b"\r\n")
     parts.append(f"--{boundary}--\r\n".encode())
     body = b"".join(parts)
-    req = urllib.request.Request(hook, data=body,
+    # ★2026-09-16 イージス研究室: wait=true を付けた(中野五月 DISPATCH-aegis-gl-1789568669959)。
+    #   付けないとDiscordは **204・本文なし** を返す= msg_id が取れず、台帳の1行から実物の
+    #   投稿へ辿り直せない。persona_send は 2026-09-03 に同じ理由で既に付けている(実績あり)。
+    url = hook + ("&" if "?" in hook else "?") + "wait=true"
+    req = urllib.request.Request(url, data=body,
                                  headers={"Content-Type": f"multipart/form-data; boundary={boundary}",
                                           "User-Agent": "go5-imagegen"})
-    with urllib.request.urlopen(req, timeout=60) as r:
-        print(f"Discord投稿OK ({r.status}) → {channel} as {persona}")
+    files_n = 1 + len(list(extra_images or []))
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            raw = r.read()
+            status = r.status
+        try:
+            msg_id = str(json.loads(raw).get("id") or "")
+        except Exception:
+            msg_id = ""                         # 204やJSONでない応答= 投稿は生きている
+        _audit(content, status, ch, channel, persona, msg_id, image_path, files_n)
+        print(f"Discord投稿OK ({status}) → {channel} as {persona}"
+              + (f" msg={msg_id}" if msg_id else ""))
+    except Exception as e:
+        # ★出せなかった便も台帳に残す(鳴らないガードと同じで、消えた投稿は後から数えられない)。
+        _audit(content, "ERR:" + type(e).__name__, ch, channel, persona, "", image_path, files_n)
+        raise
 
 
 def main():

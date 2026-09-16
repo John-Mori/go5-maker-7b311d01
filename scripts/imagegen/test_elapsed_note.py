@@ -60,10 +60,16 @@ def captured_payload(gen, caption, note, channel="画像生成ローカル-fusoh
         def __exit__(self, *a):
             return False
 
+        def read(self):
+            # ★2026-09-16: wait=true を付けたので、本物のDiscordは投稿JSONを返す。
+            #   偽物もそれに合わせる= msg_id を拾う枝を本物のまま通すため。
+            return b'{"id": "1549999999999999999"}'
+
     def fake_urlopen(req, timeout=60):
         body = req.data
         head = body.split(b"\r\n\r\n", 1)[1].split(b"\r\n--", 1)[0]
         seen["payload"] = json.loads(head.decode("utf-8"))
+        seen["url"] = req.full_url
         return _Res()
 
     real = gen.urllib.request.urlopen
@@ -75,7 +81,40 @@ def captured_payload(gen, caption, note, channel="画像生成ローカル-fusoh
         gen.discord_upload(img, channel, "優依", caption, note=note)
     finally:
         gen.urllib.request.urlopen = real
+    LAST.clear()
+    LAST.update(seen)
     return seen.get("payload") or {}
+
+
+LAST = {}
+
+
+def audited(gen, caption, note):
+    """本番と同じ道で discord_upload を1回通し、**台帳に落ちた行**をその場で読む。
+
+    ★書き先だけサンドボックスへ逃がす(GO5_LOCAL_DIR)。判定と分岐は本物のまま=
+      台帳へ書くか/何を書くかは generate.py の中の本物のコードが決める。
+    """
+    box = tempfile.mkdtemp(prefix="imgaudit_")
+    old_env = os.environ.get("GO5_LOCAL_DIR")
+    os.environ["GO5_LOCAL_DIR"] = box
+    sys.modules.pop("send_audit", None)          # LOCAL を読み直させる
+    try:
+        payload = captured_payload(gen, caption, note)
+    finally:
+        if old_env is None:
+            os.environ.pop("GO5_LOCAL_DIR", None)
+        else:
+            os.environ["GO5_LOCAL_DIR"] = old_env
+        sys.modules.pop("send_audit", None)
+
+    def rows(name):
+        p = os.path.join(box, "llm", name)
+        if not os.path.exists(p):
+            return []
+        return [json.loads(l) for l in io.open(p, encoding="utf-8").read().splitlines() if l.strip()]
+
+    return payload, rows("send_audit_test.jsonl"), rows("imagegen_posts_test.jsonl")
 
 
 def run(gen, label):
@@ -115,32 +154,85 @@ def run(gen, label):
     src = io.open(os.path.join(_HERE, "local_chain.py"), encoding="utf-8").read()
     ok("--tag-seconds" in src and '"%.1f" % (t1 - t0)' in src,
        "D-1 local_chain が測ったタグ変換の秒数を generate へ渡す")
+
+    # --- E 撃った本文がローカルに残る(2026-09-16 中野五月 DISPATCH-aegis-gl-1789568669959) ---
+    #   壊れた実物= 23:13:32 の go5org_00017_.png。所要時間の行が載ったかを、ローカルの
+    #   どの台帳からも読めなかった=「載ったはず」を数字で裏取りできなかった。
+    cap = "生成依頼テキストを読んで画像生成して"
+    note = gen.elapsed_note(33.0, 34.0)
+    payload, audit, index = audited(gen, cap, note)
+    body = audit[0].get("body", "") if audit else ""
+    ok(len(audit) == 1, "E-1 画像を1枚貼ると送信台帳に1行だけ残る(実測 %d行)" % len(audit))
+    ok(body == payload.get("content"),
+       "E-2 台帳の本文が、Discordへ渡した content と**1文字も違わない**(頭だけの写しではない)")
+    ok("所要 67秒(タグ変換 34秒 / 描画 33秒)" in body,
+       "E-3 その本文から所要時間の行を**そのまま読める**= 実物確認が記憶でなく数字になる")
+    ok(bool(audit and audit[0].get("msg_id")),
+       "E-4 msg_id が入る(wait=true)= 台帳の行から実物の投稿へ辿り直せる")
+    ok("wait=true" in (LAST.get("url") or ""),
+       "E-5 webhookのURLに wait=true が付いている(付けないとDiscordは204・本文なし)")
+    ok(len(index) == 1 and index[0].get("image", "").endswith(".png")
+       and index[0].get("msg_id") == (audit[0].get("msg_id") if audit else None),
+       "E-6 どのpngがどの投稿になったかの索引が1行残る(msg_idで本文へ繋がる)")
+    ok("content" not in (index[0] if index else {}),
+       "E-7 索引は本文の写しを持たない(ORG-11= 本文の正本は send_audit 1本)")
+
+    # --- F 台帳のために投稿を殺さない(fail-open) -----------------------------------
+    real_rec = None
+    try:
+        import send_audit as _sa
+        real_rec = _sa.record
+
+        def boom(*a, **k):
+            raise RuntimeError("台帳が壊れている")
+
+        _sa.record = boom
+        p5 = captured_payload(gen, "台帳が死んでいても出す", gen.elapsed_note(9.0))
+        ok(p5.get("content", "").startswith("台帳が死んでいても出す"),
+           "F-1 台帳側が例外を出しても投稿は通る(最悪の事故は沈黙)")
+    except AssertionError:
+        raise
+    finally:
+        if real_rec is not None:
+            _sa.record = real_rec
     return not _fails
 
 
 def mustfail():
-    """時間を足す前の版(.bak)で、この検査が本当に赤くなるかをその場で示す。"""
-    bak = os.path.join(_HERE, "generate.py.bak_20260916_elapsed")
-    if not os.path.exists(bak):
-        print("SKIP: 比較用の .bak が無い= " + bak)
-        return True
-    tmp = os.path.join(tempfile.mkdtemp(prefix="imgnote_old_"), "generate_old.py")
-    with io.open(tmp, "w", encoding="utf-8") as f:
-        f.write(io.open(bak, encoding="utf-8").read())
-    try:
-        gen = load_generate(tmp)
-    except Exception as e:
-        print("  OK  旧版は読み込みで落ちる(= 赤): %s" % e)
-        return True
-    red = not hasattr(gen, "elapsed_note")
-    print(("  OK  " if red else "  NG  ") + "旧版には elapsed_note が無い= この検査は赤くなる")
-    return red
+    """足す前の版(.bak)で、この検査が本当に赤くなるかをその場で示す。
+
+    ★2本ある= 所要時間(_elapsed)と、台帳へ残す口(_sendaudit)。どちらの版でも
+      この検査のどこかが必ず赤くなることを、同じ手番で見せる。
+    """
+    reds = []
+    for bak, attr, why in (
+            ("generate.py.bak_20260916_elapsed", "elapsed_note", "所要時間の1行(A/B)"),
+            ("generate.py.bak_20260916_sendaudit", "_audit", "撃った本文の台帳(E)")):
+        p = os.path.join(_HERE, bak)
+        if not os.path.exists(p):
+            print("SKIP: 比較用の .bak が無い= " + p)
+            continue
+        tmp = os.path.join(tempfile.mkdtemp(prefix="imgnote_old_"), "generate_old.py")
+        with io.open(tmp, "w", encoding="utf-8") as f:
+            f.write(io.open(p, encoding="utf-8").read())
+        try:
+            gen = load_generate(tmp)
+        except Exception as e:
+            print("  OK  %s の版は読み込みで落ちる(= 赤): %s" % (bak, e))
+            reds.append(True)
+            continue
+        red = not hasattr(gen, attr)
+        print(("  OK  " if red else "  NG  ")
+              + "%s には %s が無い= %s が赤くなる" % (bak, attr, why))
+        reds.append(red)
+    return bool(reds) and all(reds)
 
 
 if __name__ == "__main__":
     if "--mustfail" in sys.argv:
         sys.exit(0 if mustfail() else 1)
+    TOTAL = 18
     good = run(load_generate(), "現物 scripts/imagegen/generate.py")
-    print(("PASS 画像便の所要時間 %d/%d" % (10 - len(_fails), 10)) if good
+    print(("PASS 画像便の所要時間と送信台帳 %d/%d" % (TOTAL - len(_fails), TOTAL)) if good
           else ("FAIL %d件: %s" % (len(_fails), " / ".join(_fails))))
     sys.exit(0 if good else 1)
