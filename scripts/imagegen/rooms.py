@@ -71,6 +71,27 @@ ROOMS = {
         "persona": "中野五月",
         "label": "fusoh_v2(漫画)",
     },
+    # ★2026-09-16 Chamiが建てた3室目(便 ESC-local-lab-1549779860707090463)。原文=
+    #   「1549637404401598495　ここのルームは "D:\総合スタートファイル\AIArtCreater\ComfyUI\
+    #     models\loras\itsumono\checkpoint-e50_s600.safetensors"
+    #     このRoLAを使って生成してねという部屋。」
+    #   ★同日13:25のChami直「今後も1LoRAにつき1部屋を立てる。」「ルールは統一。」の3室目にあたる
+    #     =新しい決まりではなく、既に下りている決まりの3回目の実行。
+    #   ★実測(2026-09-16・Discord API の GET /channels)= 部屋名「twitter用-生成依頼を冒頭に付ける」。
+    #     親カテゴリ= ローカルLLM部門(1548732279973617696)= fusoh 2室と同じ。
+    #   ★LoRAの実物も実測済= loras\itsumono\checkpoint-e50_s600.safetensors
+    #     (256,056,360バイト・2026-09-16 18:33)。置き場を全部歩いて "itsumono" に当たるのはこの1本だけ
+    #     =誤爆しない。hint はフォルダ名で当てている(fusoh 2室と同じ形)。
+    #   ★"persona" は**わざと書いていない**= この便に人格の指名が無く、人格の決定はChamiの領域だ。
+    #     local_responder は conf.get("persona") or IMAGE_PERSONA で**優依**へ落ちる=絵は出る。
+    #     キャラを置くならChamiの言葉を待ってここへ1行足すだけでいい。
+    "imagegen-itsumono": {
+        "channel_id": "1549637404401598495",
+        "lora_hint": "itsumono",
+        "lora_strength": 0.8,
+        "ckpt": CKPT_ILLUSTRIOUS_V2,
+        "label": "itsumono(twitter用)",
+    },
 }
 
 # LoRAを当てる部屋だけ(既存の imagegen は素のまま=挙動を1文字も変えない)

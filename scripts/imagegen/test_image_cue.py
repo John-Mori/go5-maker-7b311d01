@@ -110,10 +110,19 @@ class TestCueTable(unittest.TestCase):
     def test_the_table_is_derived_from_the_lora_rooms(self):
         """★2026-09-16 13:25 Chami「今後も1LoRAにつき1部屋を立てる。ルールは統一。」
         合図の要る部屋= LoRAを持つ部屋。名簿を別に持たない(=二重管理を作らない)。
-        今日の値は直書き時代と同じ2件であることも、ここで固定しておく。"""
+
+        ★2026-09-16 研究室HQ: 「今日の値は2件」という**数字の固定をやめた**。
+          3室目(imagegen-itsumono・Chami直 ESC-local-lab-1549779860707090463)を建てた時、
+          配線は全部正しいのにここだけが赤くなった。部屋が増えるたび人手でこの数字を書き換える形は、
+          rooms.py が同じ日に捨てた「人手の入口」そのものだ(1LoRAにつき1部屋を立て続ける限り再発する)。
+          固定するのは数ではなく**規律**にする= ①導出であること ②LoRAを持つ部屋は漏れなく入ること
+          ③持たない部屋は入らないこと。fusoh 2室が落ちていないかの退行検知は下で別に残す。"""
         self.assertEqual(rooms.CUE_REQUIRED_DEPTS, rooms.lora_depts())
-        self.assertEqual(set(rooms.CUE_REQUIRED_DEPTS),
-                         {"imagegen-fusoh-v0", "imagegen-fusoh-v2"})
+        for dept, conf in rooms.ROOMS.items():
+            self.assertEqual(dept in rooms.CUE_REQUIRED_DEPTS,
+                             bool(conf.get("lora_hint")), dept)
+        self.assertLessEqual({"imagegen-fusoh-v0", "imagegen-fusoh-v2"},
+                             set(rooms.CUE_REQUIRED_DEPTS))
 
     def test_the_cue_is_exactly_one_word(self):
         """★2026-09-16 Chami直「1。でも印はいらんかな」= 引き金は「生成依頼」1本だけ。"""
