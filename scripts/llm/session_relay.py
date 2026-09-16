@@ -1652,7 +1652,10 @@ def _relay_rate_block(dept, path=None, hours=24):
       (実測= test_relay_rate_note.py D-3。鳴らない部屋への追加は0字)。
 
     ★費用= relay_rate.load() は request_log.jsonl 8.5MB を舐めて実測 0.125秒/回(2026-09-16)。
-      封筒1つにつき1回なので今は許容範囲。ログが伸びて効いてきたら窓で切る所から直す。
+      封筒1つにつき1回なので今は許容範囲。★**「効いてきたら直す」を人の目に預けない**
+      (2026-09-17 研究室HQ指摘= それこそ人手の入口を要件にした機構だ)。
+      0.5秒を超えた瞬間に機械が1行残す= relay_rate.note_slow() / 受け取りは
+      _relay_rate_slow_line()(下)。閾値・記録先・鳴り方は全部あちら側に在る。
     """
     try:
         if not dept:
@@ -2020,7 +2023,54 @@ def _ledger_lines(dept):
         _alarm = ""
     if _alarm:
         led.append(_alarm)
+    # ★回送レート計そのものが重くなった時の1行(HQ-0269・2026-09-17 イージス研究室)。
+    #   ★0件なら1文字も足さない= 平時の起動文は既存と完全に同一。
+    _slow = _relay_rate_slow_line(dept)
+    if _slow:
+        led.append(_slow)
     return led
+
+
+# ---------------------------------------------------------------- 回送レート計の費用(HQ-0269)
+RELAY_RATE_SLOW_DEPT = "aegis-gl"    # ★この機構の所有部門(ownership.jsonl の claim と同じ)
+
+
+def _relay_rate_slow_line(dept):
+    """回送レート計の load() が閾値を超えた事実を、**所有部門の台帳へ**1行で渡す。
+
+    なぜ封筒ではなく台帳か(研究室HQ `DISPATCH-aegis-gl-1789570636582` の指定)=
+      封筒は毎便組み直される= 一度鳴り始めたら毎便鳴り続ける= **無視される安全網**になる。
+      台帳(_ledger_lines)は boot_hash の外に在り ledger_hash の差分でしか送られないので、
+      鳴り始めた時に1回届き、直れば黙る。回送レートの数字(毎便変わる)とは逆の性質だ。
+
+    なぜ所有部門だけか= 直せるのは claim を握っている部屋だけ。19部屋へ配ると
+      「自分の手番ではない警報」を18部屋に積むことになる(規律§4=鳴っている≠届いている)。
+
+    ★自然に消える= relay_rate.slow_last() は直近7日に鳴った行しか返さない。
+      費用を畳めば次の週から出なくなる= 手で警報を消して回る必要がない。
+    """
+    try:
+        if dept != RELAY_RATE_SLOW_DEPT:
+            return ""
+        import sys                                  # ★遅延import(常駐の起動を重くしない)
+        if HERE not in sys.path:
+            sys.path.insert(0, HERE)
+        import relay_rate                           # noqa: PLC0415
+        last = relay_rate.slow_last()
+        if not last:
+            return ""
+        return ("★**回送レート計が重くなっている**(機械が測った・HQ-0269)= "
+                "`relay_rate.load()` が %s に **%.2f秒**(閾値 %.2f秒)掛かった。"
+                "対象= %s(%s MB / %s 行)。\n"
+                "  → %s\n"
+                "  (記録= %s ・この行は直近7日鳴っていなければ自動で消える)"
+                % (last.get("ts", "?"), last.get("elapsed_sec") or 0.0,
+                   last.get("threshold_sec") or 0.0, last.get("log", "?"),
+                   last.get("log_mb", "?"), last.get("log_lines", "?"),
+                   last.get("次の一手", "load() を窓で切る"),
+                   relay_rate.slow_log_path()))
+    except Exception:                                # noqa: BLE001
+        return ""                                    # fail-open= 見張りが起動文を殺さない
 
 
 def _boot_prompt(dept, conf, generation, handoff_path=None, handoff_failed=False, ledger=True):
