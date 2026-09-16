@@ -115,10 +115,50 @@ except Exception:
     _REACT_CODEX = {"送信": ("uptsukiyomi", "1522060098355069139")}
     _REACT_NAME = {"送信": "sendms"}
 SENT_MARK_FALLBACK = "\U0001F4EE"      # 📮 = カスタム絵文字が引けない時だけの退避(Claude側のみ)
+# ★2026-09-12 **印を押さない部屋**(Chami直接指示・llm-edu msg 1548006584809168931 01:25:30)
+#   原文=「優依に送った時には <:sendms:1527369203819085864> の絵文字スタンプつけないようにしてよ、
+#          あれClaude専用の処理だから」。
+#   sendms は「Claude(司令塔)の処理系に乗った」という意味の印で、優依(ローカルLLM)は
+#   その処理系に乗らない= 押すと**乗っていない経路に乗った印が付く**嘘になる。
+#   ★Codexの時と同じ考え方で、撃ち分けの判断は enqueue に使った rec["dept"] 1枚で決める
+#     (拾う側= local_responder が見る札と同じもの。表を2か所に持たない= ORG-11)。
+#   ★代わりの印は作らない= Chamiは「付けるな」としか言っていない。絵文字の意味の正本は
+#     改善提案部門の絵文字管理台帳で、勝手に1つ増やすのは当室の持ち場ではない。
+#   ★画像生成ルーム(imagegen)は外す= あの部屋の一次消費者は花海咲季(Claude)で、
+#     優依は並走で写されるだけ(discord_gateway の imagegen 分岐)。印の意味は変わらない。
+#   ★2026-09-16 imagetag(プロンプト変換と学習)を足した= あの部屋を拾うのも優依(local_responder
+#     .drain_queue)で、Claudeの常駐は立てていない。押せば「Claudeの処理系に乗った」という
+#     同じ嘘になる(部屋が増えた分だけ嘘が増える、ではなく、理由が同じなら同じ表に載せる)。
+NO_SENT_MARK_DEPTS = ("llm-growth", "imagetag")   # 優依の自室 / 優依が拾うタグ部屋
 
 
-def sent_mark_for(guild, dept):
+def _local_pipeline_order(dept, content):
+    """この便は「生成依頼」で始まる画像注文か(=ローカルが描く便・Claude印を押さない)。
+
+    ★2026-09-16 Chami直令(hq msg 1549650439178428447)=
+      「生成依頼 から始まった時は画像生成だから、Claud送信用の各種スタンプを押さないで」。
+    ★判定の正本は scripts/imagegen/rooms.py。**ここへ写経しない**= 合図語(CUE_PREFIXES)も
+      対象の部屋(LoRA部屋)もあちらが持つ。部屋を1つ建てた時にここを直す手番を作らない。
+    ★fail-open= rooms.py が読めなければ False(=従来どおり押す)。印の都合で配達を止めない。
+    """
+    try:
+        if not content:
+            return False
+        sys.path.insert(0, os.path.join(ROOT, "scripts", "imagegen"))
+        import rooms                       # noqa: E402
+        return bool(rooms.local_pipeline_order(str(dept or ""), str(content)))
+    except Exception:
+        return False
+
+
+def sent_mark_for(guild, dept, content=""):
     """配達時に押す送信印を1つ選ぶ。dept=='codex' なら Codex印、それ以外は従来どおり。
+
+    ★戻りが None なら**何も押さない**(2026-09-12 追加。上の NO_SENT_MARK_DEPTS が経緯)。
+      押下点は2か所(生便とChamiミラー)あるので、どちらも戻り値で分岐させる=
+      「押さない部屋」の表を押下点の数だけ写さない。
+    ★content= その便の本文。**部屋ではなく便ごと**に押さない条件(「生成依頼」で始まる注文)
+      が2026-09-16に増えたので受ける。既定は空文字= 渡さない呼び側の挙動は1つも変わらない。
 
     ★Codex側は 📮 へ落とさない= react.py の「IDアンカー」と同じ考え方。
       確定IDを持つ印は、ギルドの実名照合が1件も当たらなくても custom を撃つ
@@ -127,6 +167,10 @@ def sent_mark_for(guild, dept):
     ★discord.utils は使わない= この関数はモジュール読込時に在る必要があり、
       discord の import は run_gateway() の中(遅延)だから。
     """
+    if str(dept or "") in NO_SENT_MARK_DEPTS:
+        return None                      # ★押さない(Claude専用の印を優依の部屋へ出さない)
+    if _local_pipeline_order(dept, content):
+        return None                      # ★押さない(「生成依頼」便=描くのはローカル・2026-09-16)
     emojis = list(getattr(guild, "emojis", None) or [])
     if str(dept or "") == "codex":
         name, eid = _REACT_CODEX.get("送信", ("uptsukiyomi", "1522060098355069139"))
@@ -457,6 +501,26 @@ def record_from_message(m, chinfo):
     if ref:
         rec["reply_to"] = ref               # ★返信でない便には**キーを足さない**(従来と1バイト同じ)
     return rec
+
+
+_IMAGE_DEPTS_CACHE = None
+
+
+def _image_depts():
+    """優依へ写す画像ルームの集合。正本= scripts/imagegen/rooms.py(部屋が増えたら向こうだけ直す)。
+
+    ★読めない時は従来の1室に落とす。gatewayは組織の心臓なので、ここで例外を出して
+      全部門の配達を止める方がよほど悪い(可用性に関わる所は fail-open)。
+    """
+    global _IMAGE_DEPTS_CACHE
+    if _IMAGE_DEPTS_CACHE is None:
+        try:
+            sys.path.insert(0, os.path.join(ROOT, "scripts", "imagegen"))
+            import rooms as _rooms
+            _IMAGE_DEPTS_CACHE = frozenset(_rooms.ROOMS)
+        except Exception:
+            _IMAGE_DEPTS_CACHE = frozenset(("imagegen",))
+    return _IMAGE_DEPTS_CACHE
 
 
 def _ledger_load(path):
@@ -893,9 +957,17 @@ def run_gateway():
                 try:
                     # ミラーには rec が無いので、召喚の判定だけ本経路と同じ関数で取る
                     # (@ボス と書かれたChami便のミラーにも Codex印が付く=表示が本経路と揃う)。
+                    # ★2026-09-12: 召喚でない時は**その部屋のdept**を渡す(旧= 空文字)。
+                    #   優依の部屋(llm-growth)はミラー便にも印を押さない= 押下点が2つある
+                    #   のに片方だけ直すと「本体には付かないがミラーには付く」で再発する(C-064)。
+                    #   空文字でも llm-growth 以外の挙動は1つも変わらない(下の分岐は codex と
+                    #   NO_SENT_MARK_DEPTS しか見ていない)。
                     _mdept = ("codex" if (_codex_summon_on()
-                                          and is_codex_mentioned(m.content or "")) else "")
-                    emoji = sent_mark_for(m.guild, _mdept)
+                                          and is_codex_mentioned(m.content or ""))
+                              else str((chan_map.get(str(m.channel.id)) or {}).get("dept", "")))
+                    emoji = sent_mark_for(m.guild, _mdept, m.content or "")
+                    if emoji is None:
+                        return          # ★押さない部屋(ミラーもenqueueしないのでここで終わり)
                     await m.add_reaction(emoji)
                 except Exception as e:
                     log(f"ミラー送信印失敗(継続): {type(e).__name__}")
@@ -984,15 +1056,44 @@ def run_gateway():
         st = q.stats()
         log(f"受信[{rec['channel']}] msg={rec['msg_id']} {'enqueue' if added else '重複無視'} "
             f"(ready={st['ready']} leased={st['leased']})")
+        # ★画像生成ルーム(imagegen)= 優依を花海咲季(Claude)へ**並走**させる (中野五月 DISPATCH 2026-09-09)。
+        #   上の enqueue(dept=imagegen)は花海咲季(dept_daemon)が claim する経路で**無傷**。
+        #   ここは*追加*で、同じChami便を優依の生きた受付箱(discord_inbox_llm.jsonl=
+        #   local_responder が毎巡回ドレイン)へも1回だけ写す。優依側は channel==画像生成ルーム を
+        #   handle_image_request へ直行させる。bot/webhookは上流(Bot/Webhook無視の分岐)で除外済=
+        #   人間(Chami)便のみ。二重写しは専用台帳(imagegen_fanout.seen)で防ぐ(再接続リプレイ対策)。
+        #   ★これは優依を*足すだけ*。花海咲季の切替はイージス研究室(aegis-gl)が発火条件成立後に握る。
+        #   ★2026-09-14 研究室HQ: ここを1室固定から**画像ルームの集合**へ広げた
+        #     (Chami直令 msg 1548842898773123105= LoRA別の2室を新設)。集合の正本は
+        #     scripts/imagegen/rooms.py。読めなければ従来どおり imagegen 1室だけに戻す
+        #     (=画像が増えないだけで、gateway本体は絶対に止めない・fail-open)。
+        if rec.get("dept") in _image_depts():
+            _fan_seen = os.path.join(LOCAL, "imagegen_fanout.seen")
+            if rec["msg_id"] not in _ledger_load(_fan_seen):
+                _ledger_append(_fan_seen, rec["msg_id"])
+                try:
+                    with open(os.path.join(LOCAL, "discord_inbox_llm.jsonl"), "a",
+                              encoding="utf-8") as _f:
+                        _f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+                    log(f"優依並走: 画像便({rec.get('dept')})を優依受付箱へ写した msg={rec['msg_id']} "
+                        f"(花海咲季のqueueは無傷)")
+                except OSError as _e:
+                    log(f"優依並走の写しに失敗(花海咲季経路は継続): {type(_e).__name__}")
         if ACTIVE_JOBS and added and _dept_allowed(rec["dept"]):
             # A2: 送信印 (3段印の1段目=「届いた」の即可視化・裁定2026-07-18で移植)。
             # 並走中は鳩と二重押しになるが、同一Bot同一絵文字はDiscord側で1個に収束=無害。
             try:
                 # ★受け手がCodexなら Codex印(uptsukiyomi)。札は enqueue に使った rec["dept"]
                 #   そのもの= 拾う側(codex_responder)と同じ1枚を見る(上 sent_mark_for 参照)。
-                emoji = sent_mark_for(m.guild, rec["dept"])
+                emoji = sent_mark_for(m.guild, rec["dept"], rec.get("content") or "")
                 if rec["dept"] == "codex":
                     log(f"送信印=Codex msg={rec['msg_id']} → {emoji}")
+                if emoji is None:
+                    # ★2026-09-12 押さない部屋(優依の自室)。**黙って飛ばさない**=
+                    #   「印が付かない」を事故と見分けられるよう、意図した非押下だと残す。
+                    #   2026-09-16 「生成依頼」便もここを通る(部屋ではなく便ごとの非押下)。
+                    log(f"送信印=押さない({rec['dept']}) msg={rec['msg_id']}")
+                    return
                 await m.add_reaction(emoji)
             except Exception as e:
                 log(f"送信印失敗(配達は継続): {type(e).__name__}")

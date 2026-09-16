@@ -173,6 +173,15 @@ YUI_MD = os.path.join(_HQ, "departments", "hr", "characters", "yui.md")
 INBOX_LLM = os.path.join(LOCAL, "discord_inbox_llm.jsonl")  # llm-growth部屋専用=Claude稼働中でも本人が応対
 QDB = os.path.join(LOCAL, "queue", "inbox.db")  # ★O1(2026-07-20): カットオーバー後の受信経路
 QUEUE_DEPT = "llm-growth"  # 自室のdept(discord_channels.json)
+# ★2026-09-16 Chami直令(研究室HQ DISPATCH-aegis-gl-1789535197199)で建った部屋。
+#   原文=「ここの部屋に画像を貼ったらコードブロックでその画像を表現するためのプロンプト変換をする
+#          部屋にして欲しい」「以後はローカルLLMが橋渡ししてくれればいい」
+#   = 橋渡し役は**優依(この常駐)**。Claudeの常駐(dept_daemon)は立てない=
+#     daemon_keeper.DEPTS へ足していない(足すと画像1枚ごとにClaudeが起きる)。
+#   ★この部屋は画像**生成**室ではないので rooms.py の ROOMS には入れない
+#     (入れると合図規律 cue_required() と gateway の画像ファンアウトが巻き込む)。
+#     入口は queue 1本= gateway が台帳(discord_channels.json)を見て積んだ行を下で拾う。
+TAG_DEPT = "imagetag"      # 部屋「プロンプト変換と学習」(id 1549486988569354320)
 GROWTH_CHANNELS = ("ローカルllm成長進捗",)  # 自室のDiscordチャンネル名(org_registry.yml id=1526159156019462194)
 LESSONS = os.path.join(LOCAL, "llm", "lessons.jsonl")     # 採点台帳(grade.py が書く)
 KNOWLEDGE = os.path.join(LOCAL, "llm", "knowledge.md")    # 知識パック(build_knowledge.py が書く)
@@ -672,6 +681,11 @@ try:
 except Exception:                    # 画像経路が壊れても会話は止めない(§3 fail-open)
     image_rooms = None
 
+try:
+    import wd14_tag                  # noqa: E402  画像→タグ列の橋渡し(部屋 imagetag 専用)
+except Exception:                    # タガーが読めなくても自室の会話は止めない(§3 fail-open)
+    wd14_tag = None
+
 
 def image_dept_of(rec):
     """この便が画像ルームの便なら dept を返す。違えば None。
@@ -786,6 +800,84 @@ def handle_image_request(rec, raw_line, content, channel, dept=None):
              "err": (err or out)[:300]})
         print(f"  画像生成失敗→Claude [{channel}] rc={rc} {(err or out)[:80]!r}")
     return True
+
+
+def send_plain(dept, text):
+    """人格の名義を付けずBotの口から1本出す(タグ列=機械の出力なので人格を着せない)。
+
+    ★persona_send ではなく bot_send を使う理由= あちらには口調ゲート(D/D-2・末尾英文除去)が
+      乗っていて、**英語のタグ列は削られ得る**。この部屋の本体は英語のタグ列そのものだ。
+    """
+    r = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "discord", "bot_send.py"),
+                        "--dept", dept, text],
+                       capture_output=True, text=True, encoding="utf-8", errors="replace")
+    return r.returncode == 0
+
+
+def tag_image_paths(rec):
+    """この便に付いている画像の**ローカルパス**を返す。無ければ空。
+
+    ・gateway が受信時に退避した `attachments_local`(local/attachments/…)が第一。
+    ・退避に失敗した便(CDNのURLだけ)でも黙って終わらせない= その場で落としてくる。
+      落とせなければ空= 呼び元が「画像が見つからなかった」と**言う**。
+    """
+    paths = []
+    for p in (rec.get("attachments_local") or []):
+        ap = p if os.path.isabs(p) else os.path.join(ROOT, p)
+        if wd14_tag is not None and wd14_tag.is_image_path(ap) and os.path.exists(ap):
+            paths.append(ap)
+    if paths:
+        return paths
+    import urllib.request
+    os.makedirs(os.path.join(LOCAL, "attachments"), exist_ok=True)
+    for i, u in enumerate(rec.get("attachments") or []):
+        if not isinstance(u, str) or wd14_tag is None or not wd14_tag.is_image_path(u.split("?", 1)[0]):
+            continue
+        ext = os.path.splitext(u.split("?", 1)[0])[1][:8] or ".png"
+        dest = os.path.join(LOCAL, "attachments", f"{rec.get('msg_id', 'noid')}_{i}{ext}")
+        try:
+            if not (os.path.exists(dest) and os.path.getsize(dest) > 0):
+                req = urllib.request.Request(u, headers={"User-Agent": "Mozilla/5.0 (go5-tagroom)"})
+                with urllib.request.urlopen(req, timeout=60) as r, open(dest, "wb") as f:
+                    f.write(r.read())
+            paths.append(dest)
+        except Exception as e:
+            print(f"  添付の取得に失敗: {type(e).__name__}")
+    return paths
+
+
+def handle_tag_request(rec, raw_line):
+    """部屋「プロンプト変換と学習」。**画像が貼られた時だけ**タグ列(プロンプト)を返す。
+
+    ★引き金は「画像の添付そのもの」(研究室HQ裁定 2026-09-16)= 合図語をここで発明しない。
+      文章だけの便は**何もしない・喋らない**(ここは学習のメモも置かれる部屋だ)。
+      ただし黙って捨てず responder_log.jsonl に mode=tag_no_image を残す=後から数えられる。
+    """
+    channel = rec.get("channel") or ""
+    paths = tag_image_paths(rec)
+    if not paths:
+        append_line(PROCESSED, raw_line)
+        log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "tag_no_image", "channel": channel,
+             "dept": TAG_DEPT, "q": (rec.get("content") or "")[:200], "sent": False})
+        print(f"  画像なし=何もしない [{channel}]")
+        return False
+    if wd14_tag is None:
+        append_line(PROCESSED, raw_line)
+        log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "tag_failed", "channel": channel,
+             "dept": TAG_DEPT, "err": "wd14_tag import失敗", "sent": False})
+        print("  タグ付けの正本(wd14_tag)を読めない")
+        return False
+    got = wd14_tag.tag_files(paths)
+    body = wd14_tag.format_reply(got, names=[os.path.basename(p) for p in paths])
+    sent = send_plain(TAG_DEPT, body)
+    append_line(PROCESSED, raw_line)
+    log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+         "mode": "tagged" if got.get("ok") else "tag_failed",
+         "channel": channel, "dept": TAG_DEPT, "image": True, "sent": sent,
+         "n": len(got.get("items") or []), "a": body[:300],
+         "err": "" if got.get("ok") else str(got.get("error"))[:200]})
+    print(f"  タグ列を返した [{channel}] {len(paths)}枚 ok={got.get('ok')} sent={sent}")
+    return bool(got.get("ok"))
 
 
 def handle_growth(rec, raw_line, content, channel):
@@ -1595,28 +1687,40 @@ def drain_queue():
     done = 0
     try:
         processed = _processed_msg_ids()
-        while done < 5:  # 1巡回の上限(暴走ガード)
-            c = q.claim(dept=QUEUE_DEPT, who="local_responder")
-            if c is None:
-                break
-            rec = c["body"] if isinstance(c["body"], dict) else {}
-            mid = str(rec.get("msg_id", c.get("msg_id") or ""))
-            if mid and mid in processed:
-                q.ack(c["id"], result="skip(処理済)")
-                continue
-            try:
-                # claim は dept=llm-growth 限定なので、この経路は定義上すべて自室の便
-                handle(rec, json.dumps(rec, ensure_ascii=False), growth=True)
-                q.ack(c["id"], result="qwen応答")
-            except Exception as e:
-                # 失敗は握りつぶさずmain箱へ回す(dept_daemonと同じ安全網)
-                q.ack(c["id"], result=f"失敗:{type(e).__name__}")
-                append_line(FOR_CLAUDE, json.dumps(rec, ensure_ascii=False))
-            done += 1
+        # ★2026-09-16 拾う部屋が2つになった。TAG_DEPT(プロンプト変換と学習)は
+        #   **Claudeの常駐を持たない**ので、ここで畳まないとキュー行が誰にも拾われず
+        #   45秒で受領スタンプ・30分でrouterへエスカレする(=画像1枚ごとに空騒ぎになる)。
+        for _dept in (QUEUE_DEPT, TAG_DEPT):
+            n = 0
+            while n < 5:  # 1巡回の上限(暴走ガード)。★上限は部屋ごと=
+                #   自室が5件詰まっている巡回でもタグ部屋が飢えない(共有カウンタにしない)。
+                n += 1
+                c = q.claim(dept=_dept, who="local_responder")
+                if c is None:
+                    break
+                rec = c["body"] if isinstance(c["body"], dict) else {}
+                mid = str(rec.get("msg_id", c.get("msg_id") or ""))
+                if mid and mid in processed:
+                    q.ack(c["id"], result="skip(処理済)")
+                    continue
+                try:
+                    if _dept == TAG_DEPT:
+                        # 画像→タグ列。文章だけの便は中で何もせずに畳む(引き金は添付そのもの)。
+                        handle_tag_request(rec, json.dumps(rec, ensure_ascii=False))
+                        q.ack(c["id"], result="タグ列")
+                    else:
+                        # claim は dept=llm-growth 限定なので、この経路は定義上すべて自室の便
+                        handle(rec, json.dumps(rec, ensure_ascii=False), growth=True)
+                        q.ack(c["id"], result="qwen応答")
+                except Exception as e:
+                    # 失敗は握りつぶさずmain箱へ回す(dept_daemonと同じ安全網)
+                    q.ack(c["id"], result=f"失敗:{type(e).__name__}")
+                    append_line(FOR_CLAUDE, json.dumps(rec, ensure_ascii=False))
+                done += 1
     finally:
         q.close()
     if done:
-        print(f"  queue経路 {done}件処理 [llm-growth]")
+        print(f"  queue経路 {done}件処理 [{QUEUE_DEPT}/{TAG_DEPT}]")
     return done
 
 
