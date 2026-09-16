@@ -32,6 +32,7 @@ ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, HERE)
 from ask_gemini import ask, read_key  # noqa: E402
 from behop_trigger import is_behop_mentioned  # noqa: E402
+from tokenless_router import scripted_reply  # noqa: E402
 
 # テスト: 環境変数 GO5_LOCAL_DIR があれば local/ の代わりにそれを使う(全パス)。
 # 注意: ask_gemini.read_key() 自体はこの変数を見ない(常にリポジトリ本体のlocal/を見る=元コードのまま変更なし)。
@@ -126,13 +127,37 @@ def append_line(path, line):
         f.write(line.rstrip("\n") + "\n")
 
 
+def mark(channel, msg_id, kind):
+    """進捗印(既読/即答)。押し方の正本= scripts/lib/mark_press.py(ORG-11・写しを増やさない)。
+    べき等・fail-open= 押せなくても本筋を止めない(結果は local/llm/mark_audit.jsonl に残る)。"""
+    if not (channel and msg_id):
+        return
+    try:
+        sys.path.insert(0, os.path.join(ROOT, "scripts", "lib"))
+        from mark_press import press
+        press(channel, msg_id, kind, caller="gemini_responder.mark")
+    except Exception:
+        pass
+
+
 def handle(rec, raw_line):
     content = rec.get("content", "")
     channel = rec.get("channel", "")
+    msg_id = str(rec.get("msg_id") or "")
     if rec.get("dept") in SENSITIVE_DEPTS:
         append_line(FOR_CLAUDE, raw_line)
         append_line(PROCESSED, raw_line)
-        send(channel, "受け取ったよ。ここは司令塔(アメスたち)が直接読む部屋だから、次に起きた時に必ず応えるね。")
+        # ★2026-09-16 撤去(イージス研究室)= ここに在った
+        #   「受け取ったよ。ここは司令塔(アメスたち)が直接読む部屋だから、次に起きた時に必ず応えるね。」
+        #   を出さない。codex_responder.py:499 と同文型の**中身の無い一次ack**で、
+        #   共通規律§2=「内容の無い一次ackは沈黙より悪い」に反する。
+        #   Chami原文=「これやめろって」(msg 1549628255173353625 / 2026-09-16 12:49:26 JST / hr-room)。
+        #   ★恒久 DEF-otacon-radio-df36094b69(炎上/C-038・C-040)の兄弟口。
+        # ★沈黙にはしていない(§2「ただし黙って落とすな」)= 上の append_line が生の便を
+        #   司令塔の主受付箱へ入れ、下の印が「読んだ/その場で完結した」を部屋へ残す。
+        #   撤去前のこの分岐は mark() を一度も押しておらず、単純撤去だと部屋が無音になった。
+        mark(channel, msg_id, "既読")
+        mark(channel, msg_id, "即答")
         log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "sensitive_deferred", "channel": channel})
         return
     if not content.strip():
@@ -143,6 +168,16 @@ def handle(rec, raw_line):
         log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "escalated_no_text", "channel": channel})
         return
     is_work = any(w in content for w in WORK_WORDS)
+    # ごく短い挨拶・相槌・稼働確認・使い方案内は、Geminiへ送る必要がない。
+    # 全文一致だけなので「ありがとう。次は直して」のような実依頼は奪わない。
+    scripted = scripted_reply(content, "gemini")
+    if scripted:
+        ok = send(channel, scripted["text"])
+        log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "tokenless_answered",
+             "intent": scripted["intent"], "channel": channel, "sent": ok})
+        append_line(PROCESSED, raw_line)
+        print(f"  Python定型応答 [{channel}] intent={scripted['intent']}")
+        return
     # べホップ(強Gemini)への委譲: 名指し かつ 非作業依頼だけ(縄張り規約)。ここで完結=下のホイミン
     # 応答(ask)は実行しない(排他)ので二重応答は起きない。既定OFF=behop_enabled()がFalseなら
     # このブロックは丸ごとスキップされ、以降は従来どおりホイミンが処理する(回帰ゼロ)。

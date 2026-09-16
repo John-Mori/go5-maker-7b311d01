@@ -259,6 +259,19 @@ def send(channel, text):
     return r.returncode == 0
 
 
+def mark(channel, msg_id, kind):
+    """進捗印(既読/即答)。押し方の正本= scripts/lib/mark_press.py(ORG-11・写しを増やさない)。
+    べき等・fail-open= 押せなくても本筋を止めない(結果は local/llm/mark_audit.jsonl に残る)。"""
+    if not (channel and msg_id):
+        return
+    try:
+        sys.path.insert(0, os.path.join(ROOT, "scripts", "lib"))
+        from mark_press import press
+        press(channel, msg_id, kind, caller="local_responder.mark")
+    except Exception:
+        pass
+
+
 def log(rec):
     os.makedirs(os.path.dirname(LOG), exist_ok=True)
     with open(LOG, "a", encoding="utf-8") as f:
@@ -1388,7 +1401,18 @@ def handle(rec, raw_line, growth=None):
     if rec.get("dept") in SENSITIVE_DEPTS:
         append_line(FOR_CLAUDE, raw_line)
         append_line(PROCESSED, raw_line)
-        send(channel, "受け取ったよ。ここは司令塔(アメスたち)が直接読む部屋だから、次に起きた時に必ず応えるね。")
+        # ★2026-09-16 撤去(イージス研究室)= ここに在った
+        #   「受け取ったよ。ここは司令塔(アメスたち)が直接読む部屋だから、次に起きた時に必ず応えるね。」
+        #   を出さない。codex_responder.py:499 と同文型の**中身の無い一次ack**で、
+        #   共通規律§2=「内容の無い一次ackは沈黙より悪い」に反する。
+        #   Chami原文=「これやめろって」(msg 1549628255173353625 / 2026-09-16 12:49:26 JST / hr-room)。
+        #   ★恒久 DEF-otacon-radio-df36094b69(炎上/C-038・C-040)の兄弟口。
+        # ★沈黙にはしていない(§2「ただし黙って落とすな」)= 上の append_line が生の便を
+        #   司令塔の主受付箱へ入れ、下の印が「読んだ/その場で完結した」を部屋へ残す。
+        #   撤去前のこの分岐は mark() を一度も押しておらず、単純撤去だと部屋が無音になった。
+        # ★この編集は handle() の機微分岐だけ= research-room 所有の別topic(keigo恒久修正)には触れていない。
+        mark(channel, str(rec.get("msg_id") or ""), "既読")
+        mark(channel, str(rec.get("msg_id") or ""), "即答")
         log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "sensitive_deferred", "channel": channel})
         return
     # ★画像生成ルーム(中野五月 DISPATCH 2026-09-09)= この部屋のChami便は語彙ゲート(wants_image)を
