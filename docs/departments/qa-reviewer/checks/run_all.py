@@ -13,6 +13,7 @@ CHECKS = [
     "check_manifest_coverage.py",
     "replay_sweep_trap.py",
     "check_dept_firing.py",
+    "check_solo_tag_typo.py",
     "check_version_consistency.py",
     "check_skills_installed.py",
 ]

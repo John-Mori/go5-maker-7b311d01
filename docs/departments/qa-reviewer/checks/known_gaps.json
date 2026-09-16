@@ -1,18 +1,22 @@
 [
+ "aegis-gl",
  "ai-office",
  "consult-intel",
  "data-org",
  "dream-care",
+ "frontend",
  "future-room",
  "health-log",
+ "hq",
  "hr-context",
  "imagegen",
  "incident",
- "learning-coach-2",
+ "keiei-kikaku",
  "llm-edu",
  "llm-qa",
  "meeting-a",
  "meeting-b",
  "past-room",
+ "platform-se",
  "system-engineer-b"
 ]
