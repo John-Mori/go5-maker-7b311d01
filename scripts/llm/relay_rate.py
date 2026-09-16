@@ -61,6 +61,24 @@ def since(rows, hours):
     return [r for r in rows if r[2] >= edge]
 
 
+def stats(dept, hours=24, path=None):
+    """1部屋ぶんの回送レートを返す。**CLIも封筒もここを通す**(ORG-11= 数え方を2つ持たない)。
+
+    ★2026-09-16 イージス研究室が切り出した。理由は2つ=
+      ① share の計算式が main() の中にしか無かった= 封筒側へ書き写すと正本が2つになる。
+      ② path を引数で受ける= 検査が合成ログを食わせられる(load の既定引数は def 時に
+         束縛されるので、LOG を差し替えても効かない)。
+    """
+    rows = load(path or LOG)
+    win = since(rows, hours)
+    n = sum(1 for s, _, _ in win if s == dept)
+    return {"dept": dept, "hours": hours, "count": n,
+            "total_all_rooms": len(win),
+            "share_pct": round((100.0 * n / len(win)) if win else 0.0, 1),
+            "count_14d": sum(1 for s, _, _ in since(rows, 24 * 14) if s == dept),
+            "to": dict(collections.Counter(t for s, t, _ in win if s == dept))}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dept", help="この部屋だけを見る(スラッグ)")
@@ -70,23 +88,19 @@ def main():
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
 
+    if a.dept:
+        out = stats(a.dept, a.hours)
+        n, share = out["count"], out["share_pct"]
+        print(json.dumps(out, ensure_ascii=False) if a.json
+              else f"{a.dept}: 直近{a.hours}時間で {n} 件を他室へ回した"
+                   f"(全部屋合計 {out['total_all_rooms']} 件の {share:.0f}%)/ 直近14日 {out['count_14d']} 件"
+                   + ("\n  宛先= " + ", ".join(f"{k} {v}件" for k, v in out["to"].items()) if out["to"] else ""))
+        return
+
     rows = load()
     win = since(rows, a.hours)
     long = since(rows, 24 * 14)
     by_room = collections.Counter(s for s, _, _ in win)
-
-    if a.dept:
-        n = by_room.get(a.dept, 0)
-        share = (100.0 * n / len(win)) if win else 0.0
-        out = {"dept": a.dept, "hours": a.hours, "count": n,
-               "total_all_rooms": len(win), "share_pct": round(share, 1),
-               "count_14d": sum(1 for s, _, _ in long if s == a.dept),
-               "to": dict(collections.Counter(t for s, t, _ in win if s == a.dept))}
-        print(json.dumps(out, ensure_ascii=False) if a.json
-              else f"{a.dept}: 直近{a.hours}時間で {n} 件を他室へ回した"
-                   f"(全部屋合計 {len(win)} 件の {share:.0f}%)/ 直近14日 {out['count_14d']} 件"
-                   + ("\n  宛先= " + ", ".join(f"{k} {v}件" for k, v in out["to"].items()) if out["to"] else ""))
-        return
 
     if a.json:
         print(json.dumps({"hours": a.hours, "total": len(win),

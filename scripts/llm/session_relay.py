@@ -1486,6 +1486,194 @@ def _fcc_hint(rec, is_work):
         return ""                                        # fail-open= 気づかせ線で封筒を壊さない
 
 
+# ★★2026-09-13 部屋の職掌の外の話題を、部屋の心がけではなく**機構**で弾く。
+#   発注= DEF-llm-edu-2b15d8e3a0(中野五月 `DISPATCH-aegis-gl-1789259768195`)。
+#   引き金= Chami msg 1548128860497780857「ここはローカルLLMの部門だから。ちゃんと弾かなあかんよ〜」
+#           (炎上スタンプ=恒久対策まで行け)。09-12にローカルllm言語教育部門が sendms/配送の印
+#           = **基盤の話題**をその部屋で説明してしまった。
+#   真因= inbox_poller は channel→dept の固定配送で、topic router が無い。弾くのは部屋の判断層
+#         だけで、その判断が外れた。「以後説明せず回す」は心がけであって対策ではない(§3)。
+#   ★fail-open= 便は絶対に握り潰さない(自動ブロックを作らない)。封筒へ**注意を1つ足すだけ**。
+#     沈黙が最悪の事故だと発注元も名指しで書いている。例外は全部 "" へ倒す。
+#   ★C-035= 名指しの1部屋の話を全部屋へ広げない。表に行が無い部屋には1文字も足さない。
+#   ★語は増やすな(§FCC_HINT_WORDS と同じ理由)。取りこぼしは前提で、拾った分だけ得をする形。
+ROOM_SCOPE_PATH = os.path.join(HQ, "departments", "00_common", "部屋の職掌.json")
+SCOPE_GUARD_LOG = os.path.join(LOCAL, "llm", "scope_guard.jsonl")
+
+
+def _room_scope_table():
+    """部屋の職掌の表を**都度読み**する(1語足せば次の便から効く=常駐の再起動は要らない)。"""
+    try:
+        with open(ROOM_SCOPE_PATH, encoding="utf-8") as f:
+            return (json.load(f) or {}).get("rooms") or {}
+    except Exception:                                    # noqa: BLE001
+        return {}                                        # 読めない=判定材料が無い(黙る)
+
+
+def _scope_guard_log(dept, rec, hits, row, 抑止=""):
+    """当たった便を1行だけ残す(監査= 後から実測で数えられる。発注元がDEFを閉じる材料)。
+
+    ★抑止="" は普通の発火。値が入っている時は「語は当たったが鳴らさなかった」行
+      = 引用除外が**取りこぼしを作っていないか**を後から数えるための材料(2026-09-13)。
+      黙って落とすと、除外が効き過ぎていても誰も気づけない。
+    """
+    try:
+        os.makedirs(os.path.dirname(SCOPE_GUARD_LOG), exist_ok=True)
+        rec_out = {
+            "ts": _now_iso(),
+            "dept": dept,
+            "msg_id": str((rec or {}).get("msg_id") or ""),
+            "author": str((rec or {}).get("author") or ""),
+            "from_dept": str((rec or {}).get("from_dept") or ""),
+            "当たった語": list(hits),
+            "回す先": list(row.get("回す先") or ()),
+        }
+        if 抑止:
+            rec_out["抑止"] = str(抑止)
+        with open(SCOPE_GUARD_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec_out, ensure_ascii=False) + "\n")
+    except Exception:                                    # noqa: BLE001
+        pass                                             # 監査が書けなくても封筒は出す
+
+
+def _scope_own_words(txt):
+    """本文から「その人が今そこで新しく書いた行」だけを残す(2026-09-13 イージス研究室)。
+
+    ★壊れた実物(改善提案部門 トトリ `DISPATCH-aegis-gl-1789265265890`):
+      待ち解除機構が、診断返信の中に**引用された**シャビ・アロンソの待機ackへ文字列一致し、
+      誤って追撃を撃った。語一致で判定する機構は、引用・転記を「本人の発言」と読む。
+      scope_guard も同じ語一致なので同じ穴を踏み得る= 先回りで塞ぐ(C-038の向き)。
+
+    ★落とすのは**機械で境界が判るものだけ**:
+      ・``` で囲んだコードブロック(ログ・コマンド・JSONの貼り付け)
+      ・行頭の `>` = Markdownの引用行
+      ・`--- 本文ここから ---` 〜 `--- 本文ここまで ---`(この配送系が他msgを転記する時の囲い)
+    ★「」は落とさない= 日本語では強調・語の指示にも使う。落とすと本物を大量に取りこぼす
+      (語を増やさないのと同じ理由で、**除外も増やさない**)。
+    ★fail-open= ここで例外を出さない。判らなければ原文をそのまま返す(=今までどおり鳴る)。
+    """
+    try:
+        s = str(txt or "")
+        out, in_fence, in_relay = [], False, False
+        for line in s.split("\n"):
+            st = line.strip()
+            if st.startswith("```"):
+                in_fence = not in_fence
+                continue
+            if st.startswith("--- 本文ここから"):
+                in_relay = True
+                continue
+            if st.startswith("--- 本文ここまで"):
+                in_relay = False
+                continue
+            if in_fence or in_relay:
+                continue
+            if st.startswith(">"):
+                continue
+            out.append(line)
+        return "\n".join(out)
+    except Exception:                                    # noqa: BLE001
+        return str(txt or "")
+
+
+def _scope_guard_hint(rec, dept):
+    """職掌の外(=その部屋では受けず回す話題)の便にだけ、封筒へ注意を1つ置く。
+
+    鳴らす条件は3つ全部が要る(fail-closed= 迷ったら何も足さない):
+      ①その部屋が表に登録されている(未登録の部屋には1文字も足さない)。
+      ②本文に out_words が1語以上当たる。
+      ③発信元が「黙る発信元」ではない= **回す先の部門自身からの便**では鳴らさない。
+        (基盤部門がその部屋へ出す完遂報告まで毎回鳴ると、常に誤発火する安全網=無視される線になる)
+      ★2026-09-13に④を足した= 当たった語が**引用・コードブロック・転記の中にしか無い**便では
+        鳴らさない(`_scope_own_words`)。改善提案部門が実際に踏んだ誤発火と同型だからだ。
+        ただし**黙って落とさない**= 監査へ `抑止` 付きで1行残し、後から数えられるようにする。
+    ★Chami便には from_dept が無い= ③を素通りする= **必ず鳴る**。09-12の事故はChami便だった。
+    """
+    try:
+        row = (_room_scope_table() or {}).get(str(dept or ""))
+        if not row:
+            return ""
+        txt = str((rec or {}).get("content") or "")
+        if not txt.strip():
+            return ""
+        hits = [w for w in (row.get("out_words") or ()) if w and w in txt]
+        if not hits:
+            return ""
+        src = str((rec or {}).get("from_dept") or "")
+        if src and src in (row.get("黙る発信元") or ()):
+            return ""
+        # ★④引用除外。置く順はここ= ③(黙る発信元)の**後**。元から鳴らさない便で
+        #   「抑止」の行を積むと、監査を読む側のノイズになるだけだ。
+        own = _scope_own_words(txt)
+        own_hits = [w for w in hits if w in own]
+        if not own_hits:
+            _scope_guard_log(dept, rec, hits, row, 抑止="引用・コード・転記の中だけ")
+            return ""
+        hits = own_hits
+        _scope_guard_log(dept, rec, hits, row)
+        to = " / ".join(row.get("回す先") or ()) or "プラットフォームSE"
+        return ("\n=== ★この便は、この部屋の職掌の外かもしれない ===\n"
+                f"当たった語: {' / '.join(hits[:5])}"
+                f"{'…' if len(hits) > 5 else ''}"
+                f" = {row.get('out_label') or 'この部屋では受けない話題'}\n"
+                f"★この部屋の持ち場は「{row.get('in_hint') or '登録なし'}」だ。"
+                f"上の話題は **{to}** が持っている。\n"
+                "★**ここで説明するな。弾いて回せ。**本文に『これは自分の範囲外だ・"
+                f"{to} へ回すべき』とはっきり書き、返信の**最終行**に `<<WORK>>` とだけ置け"
+                "(その1行は本文から取り除かれ、正しい回送経路へ回される)。\n"
+                "★**黙って落とすな**= 扱えないなら「扱えない」と言う。偽の受領より沈黙が良いが、"
+                "沈黙はもっと悪い。\n"
+                "★違うと思ったら無視してよい(機械が語で当たりを付けただけだ。"
+                "最終判断はこの会話を持っているあなたにある)。\n")
+    except Exception:                                    # noqa: BLE001
+        return ""                                        # fail-open= 予防線で封筒を壊さない
+
+
+# ---------------------------------------------------------------- 回送レート(DEF-hq-2c62407ee9 恒久)
+RELAY_RATE_FLOOR = 3      # ★この件数**以上**回している部屋にだけ出す(0件の部屋には1文字も出さない)
+
+
+def _relay_rate_block(dept, path=None, hours=24):
+    """自室が直近24時間で何件よそへ回したかを、封筒へ1行で載せる。
+
+    なぜ在るか= 2026-08-02 Chami「すぐ他に回そうとする癖があるな…構造的な問題だよこれは」
+    (DEF-hq-2c62407ee9)が 2026-09-16 に再発(「いやカスミがやってよ」「回しすぎ」)。
+    共通規律§3.8 は1ヶ月半前から在るのに止まらなかった= **文言では止まらない**ので数字を置く。
+    数える側は研究室HQ作の scripts/llm/relay_rate.py(commit 2e12590)。ここは載せる口だけ。
+
+    ★**送り手に何も要求しない**= 回す時に理由を書かせる形にはしない。人手の入口を要件に
+      した機構は実測0件になる(--from-dept の明示が0件だった実例)。勝手に載る形にする。
+
+    ★**起動文ではなく封筒**へ入れる。理由は共通規律・セッション状態と同じで(上の1690行)、
+      起動文はセッション作成時の1回しか読まれないが、この数字は**毎便変わる**。
+      台帳(_ledger_lines)側へ入れてもいけない= あれは boot_hash から外れている代わりに
+      ledger_hash で差分を見ており、24時間窓がスライドするたびに台帳全文(aegis-gl 実測
+      7,312字)を送り直す軽い枝が発火する。封筒なら**鳴る部屋にだけ 200字**で済む
+      (実測= test_relay_rate_note.py D-3。鳴らない部屋への追加は0字)。
+
+    ★費用= relay_rate.load() は request_log.jsonl 8.5MB を舐めて実測 0.125秒/回(2026-09-16)。
+      封筒1つにつき1回なので今は許容範囲。ログが伸びて効いてきたら窓で切る所から直す。
+    """
+    try:
+        if not dept:
+            return ""
+        import sys                              # ★遅延import(常駐の起動を重くしない)
+        if HERE not in sys.path:
+            sys.path.insert(0, HERE)
+        import relay_rate                       # noqa: PLC0415
+        st = relay_rate.stats(dept, hours=hours, path=path)
+        if st["count"] < RELAY_RATE_FLOOR:
+            return ""                           # ★0件・少数の部屋には出さない(封筒を太らせない)
+        return ("\n★★**回送レート(実測・直近%d時間)**= あなたはこの%d時間で **%d件** を"
+                "他室へ回している(全部屋の回送 %d件 のうち **%.0f%%**)。\n"
+                "★回す前に共通規律§3.8 の1問に答えたか= **上げて、結論が変わるか?** "
+                "変わらないなら自室で終わらせろ。\n"
+                "  (数え直す= `python scripts/llm/relay_rate.py --dept %s`)\n"
+                % (hours, hours, st["count"], st["total_all_rooms"], st["share_pct"], dept))
+    except Exception:                            # noqa: BLE001
+        return ""                                # fail-open= 数え側が落ちても封筒は殺さない
+
+
 def build_envelope(rec, is_work=False, state="", dept="", disc_full=True, disc_fp="",
                    verdict_full=True, verdict_fp="", verdict_added=(), conf=None):
     """新着1件を「原文のまま」の封筒にする(提案書§5.2)。
@@ -1552,6 +1740,11 @@ def build_envelope(rec, is_work=False, state="", dept="", disc_full=True, disc_f
         # ★セッション状態(2026-07-26)。**封筒に入れる**理由は共通規律と同じ=
         #   起動文は最初の1回しか読まれないが、状態は**毎便変わる**ので毎便渡す必要がある。
         + str(state or "")
+        # ★2026-09-16 回送レート(DEF-hq-2c62407ee9 恒久側)。状態の直後に置く理由=
+        #   これも「毎便変わる自室の数字」で、セッション状態と同じ性格のものだから。
+        #   封筒エコー切り(meta_strip)は「この部屋のセッション状態」の見出しから末尾までを
+        #   落とすので、この位置なら**既存の切りにそのまま覆われる**(新しい印を足さずに済む)。
+        + _relay_rate_block(dept)
         # ★前の便で口調が崩れていたら、その実物を突き返す(2026-08-12・Chamiの🔥)。
         #   崩れていない時は**1文字も足さない**(封筒を毎便太らせない)。
         + tone_fb
@@ -1585,6 +1778,10 @@ def build_envelope(rec, is_work=False, state="", dept="", disc_full=True, disc_f
         # ★C-049 §7-B の気づかせ線(2026-08-29)。work_note と同じ場所=**本文の後ろ**に置く。
         #   本文には1文字も触らない(封筒の作法= 短縮・要約・判定を本文へ混ぜない)。
         f"{_fcc_hint(rec, is_work)}"
+        # ★2026-09-13 職掌の外の話題を弾かせる線(DEF-llm-edu-2b15d8e3a0)。
+        #   work_note / _fcc_hint と同じ**本文の後ろ**= 本文には1文字も触らない。
+        #   ★便は止めない(fail-open)。判断はこの会話を持っているセッションが持つ。
+        f"{_scope_guard_hint(rec, dept)}"
     )
 
 
@@ -2224,9 +2421,9 @@ def _run_claude(prompt, token, session_id=None, model=RELAY_MODEL, timeout=RELAY
     #   止血を残すと28,000字超の便を無用にファイルへ逃がし、セッションに余分なReadを1回強いる
     #   =恒久対策の劣化になる。**同じ穴を2つの機構で塞がない**(ORG-11と同じ話)。
     #   ★prompt_spill.py 自体は残す= ただし**用途は変わった**。2026-08-24時点で
-    #     dept_daemon.generate()(5019行)・dept_daemon の work 側(5157行)・persona_render.py(291行)・
-    #     claude_responder.handle() は**全て stdin 化済み**で、argvにpromptを載せる起動は残っていない
-    #     (grep実測 2026-08-24・イージス研究室)。prompt_spill は `guard`(逃がす)ではなく
+    #     dept_daemon.generate()(5019行)・dept_daemon の work 側(5157行)・persona_render.py(291行)は
+    #     **全て stdin 化済み**。claude_responder.handle() は2026-09-06に固定受領をPython化し、
+    #     AIプロセス自体を起動しなくなった。prompt_spill は `guard`(逃がす)ではなく
     #     `measure`(長さを測るだけ=監視の供給源)として呼ばれている。
     #     ★この注記は元々「dept_daemon と persona_render はまだ argv」と書いていたが、
     #       同じ8/13中に両方 stdin 化され**古くなっていた**。止血の要否を判断する材料なので直した。
@@ -3703,7 +3900,7 @@ def defects_block(dept, head=True):
         return "\n".join(lines)
     _n_fire = sum(1 for d in items if d.get("enjo"))
     if _n_fire:
-        lines.append(f"  ★**🔥(炎上)が {_n_fire}件ある。先頭に出してある**"
+        lines.append(f"  ★**<:enjoh:1541126866981752883>(恒久)が {_n_fire}件ある。先頭に出してある**"
                      "= Chamiが「これは事故だ・恒久対策まで行け」と押した印(C-038/C-040)。")
     slim = ledger_slim_on()                          # ★HQ-0220③ 痩身(既定OFF)
     for i, d in enumerate(items[:DEFECT_BLOCK_MAX], 1):
@@ -3711,7 +3908,7 @@ def defects_block(dept, head=True):
                                              else DEFECT_SYMPTOM_MAX]
         # ★🔥= Chamiが炎上スタンプを押した= **恒久対策まで行け**(C-038/C-040)。
         #   再発と同じ見た目で並べると重さが伝わらないので、頭に印を出す。
-        _fire = "🔥【炎上=恒久対策まで行け】 " if d.get("enjo") else ""
+        _fire = "<:enjoh:1541126866981752883>【恒久=恒久対策まで行け】 " if d.get("enjo") else ""
         lines.append(f"  {i}. [{d['id']}] {_fire}{sym or '(症状の記録なし)'}"
                      + (_slim_marks(d) if slim else ""))
         if slim:
@@ -3761,14 +3958,14 @@ def requests_block(dept, head=True, limit=DEFECT_BLOCK_MAX):
                      "上から順に進めろ):")
     _n_fire = sum(1 for d in items if d.get("enjo"))
     if _n_fire:
-        lines.append(f"  ★**🔥(炎上)の {_n_fire}件を先頭に置いた**"
+        lines.append(f"  ★**<:enjoh:1541126866981752883>(恒久)の {_n_fire}件を先頭に置いた**"
                      "= Chamiが「これは事故だ・恒久対策まで行け」と押した印(C-038/C-040)。"
                      "残りは従来どおり古い順。")
     slim = ledger_slim_on()                          # ★HQ-0220③ 痩身(既定OFF)
     for i, d in enumerate(items[:limit], 1):
         sym = " ".join(d["symptom"].split())[:DEFECT_SYMPTOM_SLIM if slim
                                              else DEFECT_SYMPTOM_MAX]
-        _fire = "🔥【炎上=恒久対策まで行け】 " if d.get("enjo") else ""
+        _fire = "<:enjoh:1541126866981752883>【恒久=恒久対策まで行け】 " if d.get("enjo") else ""
         lines.append(f"  {i}. [{d['id']}] {_fire}{sym or '(依頼の本文なし。元の便を見ること)'}"
                      + (_slim_marks(d) if slim else ""))
         if slim:
@@ -5037,6 +5234,78 @@ def _char_parts(conf):
     return out
 
 
+def _char_note_tag(conf):
+    """更新通知がどちらの文面で出たかをログに残す印(2026-09-12 イージス研究室)。
+
+    ★なぜ要るか= 通知の**本文はどこにも保存されない**(prompt は走行に渡るだけ)。
+      印が無いと「複数人格の部屋で固定しない文面が実際に出た」を後から実物で示せず、
+      発注元(manga-shorts)は台帳を閉じる材料を持てない=commit hashは実物にならない。
+    """
+    n = len(list((conf or {}).get("personas") or ()))
+    return f"・人格{n}名={'固定しない文面' if n > 1 else '単数の文面(従来どおり)'}"
+
+
+def _char_update_note(conf, names=None, kind="solo"):
+    """characterfile更新通知の文面(2026-09-12 イージス研究室・DEF-manga-shorts-845a033c51)。
+
+    引き金= Chami msg 1548031056404414485(2026-09-11・<:enjoh:1541126866981752883>)
+      「Fableの依頼になると口調アメス固定になる設定でもあんの?」
+    何が起きたか= ames.md が編集され、この通知が manga-shorts(6人格の部屋)のセッションへ
+      「下のファイルを今すぐ読み直して、**その声で書け**」を注入した。あの部屋は
+      **誰として答えるかを話題で選ぶ**運用(アメスはトラブル時のみ・平時は前に出ない)なのに、
+      通知が**単数人格の部屋を前提**にした文面だったので、通常タスクまでアメス口調へ固定された。
+      ★モデル選択(Fable/Opus)は無関係= 誤解の実体はこの文面だ。
+
+    直し= 部屋の人格数で文面を分ける。分岐の材料は既に在る(`_boot_prompt` も
+      L1855「人格は次の1人だけだ」/ L1858「複数の人格が居る」で同じ conf を見て分けている)。
+      更新通知側だけがそれを見ずに一律「その声で書け」と言っていた=**片肺**だった。
+      - 単数の部屋= 従来と1文字も変えない(「その声で書け」でよい・回帰なし)
+      - 複数の部屋= 「読み直せ。ただし**誰として答えるかは従来どおり話題で選ぶ**」へ。
+        ★1人へ固定するなと**名指しで**言う(黙って省くだけでは、直前に読ませた1枚へ
+          引きずられる。C-026の相方混線と同じ形だ)。
+
+    kind= "extra"(台帳更新と同居する枝) / "solo"(人格だけ更新の軽量枝) /
+          "resend"(起動文の全文を積む枝= パスの列挙は起動文側に在るので names は載せない)
+    ★fail-open: conf が読めない・personas が無い部屋は単数扱い=従来の文面のまま。
+    """
+    multi = len(list((conf or {}).get("personas") or ())) > 1
+    listing = "".join(f"- {p}\n" for p in (names or ()))
+    # ★単数の部屋の文面は**旧版のまま1文字も変えない**(kindごとに言い回しが違うので個別に持つ)。
+    solo_reload = {
+        "extra": "★記憶の中の口調ではなく、下のファイルを今すぐ読み直して、その声で書け。\n",
+        "solo": ("★セッション起動後に台帳が編集されている。**記憶の中の口調ではなく、"
+                 "下のファイルを今すぐ読み直して**、その声で書け。\n"),
+        "resend": ("★セッション起動後に台帳が編集されている。**記憶の中の口調ではなく、"
+                   "下に挙げたcharacterfileを今すぐ読み直して**、その声で書け。\n"),
+    }
+    multi_reload = {
+        "extra": "★記憶の中の口調ではなく、下のファイルを今すぐ読み直せ。\n",
+        "solo": ("★セッション起動後に台帳が編集されている。**記憶の中の口調ではなく、"
+                 "下のファイルを今すぐ読み直せ**。\n"),
+        "resend": ("★セッション起動後に台帳が編集されている。**記憶の中の口調ではなく、"
+                   "下に挙げたcharacterfileを今すぐ読み直せ**。\n"),
+    }
+    scope_line = (
+        "★**誰として答えるかは、従来どおり話題の内容であなた自身が選べ。**"
+        "この部屋には複数の人格が居る=**更新されたファイルの人格へ固定するな。**"
+        "平時は前に出ない待機枠(トラブル時だけ出る補佐)は、更新されても平時は前に出ない。\n"
+    ) if multi else ""
+    reload_line = (multi_reload if multi else solo_reload)[kind]
+    if kind == "extra":
+        return ("\n=== ★人格ファイル(characterfile)も更新された"
+                "(以後はファイルの中身が正) ===\n"
+                + reload_line + listing + scope_line)
+    head = ("=== ★この部屋の人格ファイル(characterfile)が更新された"
+            "(以後はファイルの中身が正) ===\n")
+    if kind == "resend":
+        # ★この枝はパスを列挙しない= 直後に起動文の全文が続き、そちらがパスを挙げる。
+        return head + reload_line + scope_line
+    return (head + reload_line + listing + scope_line
+            + "★これは運用の変更ではない(起動文は前のままで正)。"
+            "読み直すのはこのファイルだけでよい。\n"
+            "=== ここまで ===\n\n")
+
+
 def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=None):
     """新着1件を、その部屋の永続セッションへ**原文のまま**渡す。
 
@@ -5524,10 +5793,9 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
                 _extra = ""
                 if char_changed:
                     _names = char_changed_paths or sorted(char_parts)
-                    _extra = ("\n=== ★人格ファイル(characterfile)も更新された"
-                              "(以後はファイルの中身が正) ===\n"
-                              "★記憶の中の口調ではなく、下のファイルを今すぐ読み直して、その声で書け。\n"
-                              + "".join(f"- {p}\n" for p in _names))
+                    # ★文面は `_char_update_note` が持つ(複数人格の部屋で1人へ固定しない
+                    #   =DEF-manga-shorts-845a033c51)。ここへ literal を書き戻すな。
+                    _extra = _char_update_note(conf, _names, kind="extra")
                 prompt = ("=== ★この部屋の台帳が更新された(未確認の不具合 / 未完了の依頼)。"
                           "**以後はこちらが正**。前に渡した一覧はこれで置き換えろ ===\n"
                           "★運用(規律・役割・人格の名簿)は変わっていない=起動文は前のままで正。\n"
@@ -5536,23 +5804,18 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
                           + "\n=== ここまで ===\n\n") + envelope
                 _log(dept, f"台帳の更新→**台帳だけ**を送る(起動文{len(boot):,}字は積まない"
                            f"・台帳{len(ledger_text):,}字"
-                           f"{'・人格の読み直しも同居' if char_changed else ''})")
+                           f"{'・人格の読み直しも同居' + _char_note_tag(conf) if char_changed else ''})")
                 _record(rid, dept, "running",
                         f"台帳の更新(軽量) 台帳={len(ledger_text)}字 節約={len(boot) - len(ledger_text)}字 "
                         f"人格同居={'yes' if char_changed else 'no'} "
                         f"規律={'全文' if disc_full else '3行'}({_disc_why or '変更なし'})")
             elif char_changed and entry.get("boot_hash") == boot_hash and not _resend:
                 _names = char_changed_paths or sorted(char_parts)
-                prompt = ("=== ★この部屋の人格ファイル(characterfile)が更新された"
-                          "(以後はファイルの中身が正) ===\n"
-                          "★セッション起動後に台帳が編集されている。**記憶の中の口調ではなく、"
-                          "下のファイルを今すぐ読み直して**、その声で書け。\n"
-                          + "".join(f"- {p}\n" for p in _names)
-                          + "★これは運用の変更ではない(起動文は前のままで正)。"
-                          "読み直すのはこのファイルだけでよい。\n"
-                          "=== ここまで ===\n\n") + envelope
+                # ★文面は `_char_update_note` が持つ(DEF-manga-shorts-845a033c51)。
+                prompt = _char_update_note(conf, _names, kind="solo") + envelope
                 _log(dept, f"人格ファイルの更新→**読み直しの指示だけ**を送る"
-                           f"(起動文{len(boot):,}字は積まない・更新{len(_names)}枚)")
+                           f"(起動文{len(boot):,}字は積まない・更新{len(_names)}枚"
+                           f"{_char_note_tag(conf)})")
                 _record(rid, dept, "running",
                         f"人格ファイルの更新(軽量) 枚数={len(_names)} 節約={len(boot)}字 "
                         f"規律={'全文' if disc_full else '3行'}({_disc_why or '変更なし'})")
@@ -5573,10 +5836,7 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
                     #   起動文の本文は同じだが、起動文はcharacterfileの**パス**を列挙して
                     #   「読め」と言うので、再送すればセッションはファイルを読み直す。
                     #   記憶の中の古い口調を捨てさせる1文を足す。
-                    _head = ("=== ★この部屋の人格ファイル(characterfile)が更新された"
-                             "(以後はファイルの中身が正) ===\n"
-                             "★セッション起動後に台帳が編集されている。**記憶の中の口調ではなく、"
-                             "下に挙げたcharacterfileを今すぐ読み直して**、その声で書け。\n")
+                    _head = _char_update_note(conf, kind="resend")
                     _why_resend = "人格ファイルの更新"
                 prompt = _head + boot + "\n=== ここまで ===\n\n" + envelope
                 _log(dept, f"{_why_resend}→生きているセッションへ起動文を同送する")
