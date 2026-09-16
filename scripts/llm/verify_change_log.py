@@ -29,12 +29,34 @@ import re
 import subprocess
 import sys
 
+# ★既定の cp932 では報告に混ざる `✓` で **検査そのものが落ちる**(2026-09-16 実測・イージス研究室)。
+#   検査が例外で死ぬと「違反ゼロ」と見分けが付かない= 黙って通ったように見えるのが一番まずい。
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:                                    # noqa: BLE001
+    pass
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 LEDGER = os.path.join(ROOT, "local", "llm", "change_log.jsonl")
 
 # ★commitが「意図的に空」だと分かる正直な自己申告の形。これは嘘ではない=別枠で報告する。
 _HONEST_UNCOMMITTED_MARKERS = ("未commit", "止血", "(未)", "pending")
+
+
+def _norm_rel(path):
+    """`\\` を `/` にし、先頭の `./` だけを剥がした相対パスを返す。
+
+    ★`lstrip("./")` を使うな(2026-09-16 実測・イージス研究室で自分の行が踏んだ):
+      lstrip は**文字集合**を剥がすので `.gitattributes` が `gitattributes` になり、
+      commitの差分と一致せず `files_missing_from_commit` の**偽の赤**が出る。
+      うちには `.gitattributes` `.gitignore` `.claude/...` と先頭ドットの正規ファイルが在る。
+    """
+    p = str(path).replace("\\", "/")
+    while p.startswith("./"):
+        p = p[2:]
+    return p
 
 
 def _split_touched(v):
@@ -71,7 +93,7 @@ def _strip_repo_prefix(part, current_repo):
                 rest = part[len(head):].strip()
                 return rest, name
     if current_repo and current_repo != "5SecMovieMaker":
-        p = part.replace("\\", "/").lstrip("./")
+        p = _norm_rel(part)
         if not p.startswith(current_repo + "/") and not os.path.isabs(part):
             return current_repo + "/" + p, current_repo
     return part, current_repo
@@ -91,7 +113,7 @@ def _touched_files(entry):
     for p in items:
         p, repo = _strip_repo_prefix(p, repo)
         if repo and repo != "5SecMovieMaker" and not p.startswith(repo + "/"):
-            p = repo + "/" + p.replace("\\", "/").lstrip("./")
+            p = repo + "/" + _norm_rel(p)
         # 注記の丸括弧以降は捨てる("path(新規作成)" 等)。
         p = p.split("(")[0].strip()
         if p:
@@ -177,7 +199,7 @@ def _commit_touches(commit_hash, path, root=None):
     if r.returncode != 0:
         return False
     changed = {ln.strip().replace("\\", "/") for ln in r.stdout.splitlines() if ln.strip()}
-    needle = path.replace("\\", "/").lstrip("./")
+    needle = _norm_rel(path)
     # ★HQ側のcommitを照合する時、台帳の書き方は `00_AI-HQ/departments/...`(5秒動画側から見た相対)。
     #   HQ repo の中では先頭の `00_AI-HQ/` は無いので落とす。
     if root and os.path.normpath(root) == os.path.normpath(REPOS["00_AI-HQ"]):
@@ -194,7 +216,7 @@ def _is_git_trackable(path, root=None):
       repoの外(対象外)、HQ側のcommitなら**まさに本体**(照合する)。
       以前は無条件に対象外にしていたため、HQ側の行は「触った」を1件も照合していなかった。
     """
-    p = path.replace("\\", "/").lstrip("./")
+    p = _norm_rel(path)
     if p.startswith("local/") or p.startswith("../"):
         return False
     if os.path.isabs(path):
@@ -306,6 +328,15 @@ def main():
         # ★must-fail= 事故当時の実装(split(\",\") だけ)へ戻すと1本目の検査が赤くなる=検査が生きている。
         old = [p.split("(")[0].strip() for p in real.split(",") if p.split("(")[0].strip()]
         _chk("must-fail: 事故当時の実装なら1本の塊になる(検査が生きている証拠)", len(old), 1)
+
+        # ★2026-09-16 実測でこの検査を足した(イージス研究室が `.gitattributes` の行で偽の赤を踏んだ)。
+        #   `lstrip("./")` は文字集合を剥がすので、先頭ドットのファイル名が丸ごと削れていた。
+        _chk("先頭ドットのファイル名を削らない(.gitattributes / .gitignore)",
+             [_norm_rel(".gitattributes"), _norm_rel("./.gitignore"),
+              _norm_rel(".claude\\settings.json")],
+             [".gitattributes", ".gitignore", ".claude/settings.json"])
+        _chk("must-fail: 事故当時の実装なら .gitattributes が gitattributes になる(検査が生きている証拠)",
+             ".gitattributes".replace("\\", "/").lstrip("./"), "gitattributes")
 
         print("==== 全部PASS ====" if n_fail == 0 else f"==== FAIL {n_fail}件 ====")
         return 0 if n_fail == 0 else 1
