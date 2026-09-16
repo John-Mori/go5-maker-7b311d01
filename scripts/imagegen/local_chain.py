@@ -252,6 +252,10 @@ def main():
         cmd += ["--out", out]
     if channel and persona:
         cmd += ["--discord", channel, "--persona", persona, "--caption", text]
+        # ★2026-09-16 イージス研究室: タグ変換段の秒数を渡す(Chami原文=「かかった時間も
+        #   教えてもらえるようにして」)。描画段は generate.py が自分で測る=
+        #   投稿本文には「所要 N秒(タグ変換 A秒 / 描画 B秒)」が載る。
+        cmd += ["--tag-seconds", "%.1f" % (t1 - t0)]
     cmd.append(tags)
     r = subprocess.run(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                        encoding="utf-8", errors="replace", timeout=1800)

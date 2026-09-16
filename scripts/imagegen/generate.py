@@ -94,7 +94,9 @@ def generate(pos, neg=NEG_DEFAULT, out=None, timeout=600, lora=None, lora_streng
                     os.makedirs(os.path.dirname(out), exist_ok=True)
                     with open(out, "wb") as f:
                         f.write(data)
-                    print(f"生成完了({time.time()-t0:.0f}秒): {out}")
+                    global LAST_DRAW_SEC
+                    LAST_DRAW_SEC = time.time() - t0
+                    print(f"生成完了({LAST_DRAW_SEC:.0f}秒): {out}")
                     return out
     raise TimeoutError("生成がタイムアウト")
 
@@ -102,7 +104,26 @@ def generate(pos, neg=NEG_DEFAULT, out=None, timeout=600, lora=None, lora_streng
 import urllib.parse
 
 
-def discord_upload(image_path, channel, persona, caption=""):
+# ★2026-09-16 イージス研究室: 描画にかかった秒数を残す(Chami原文=「かかった時間も
+#   教えてもらえるようにして」msg 1549777099580121232・回送 DISPATCH-aegis-gl-1789566427422)。
+#   generate() の戻り値は**変えていない**= 外から import している口を壊さないため。
+LAST_DRAW_SEC = None
+
+
+def elapsed_note(draw_sec, tag_sec=None):
+    """投稿本文へ添える所要時間の1行を作る(空文字なら何も足さない)。
+
+    ★測れていない段は書かない(推測で埋めない)= tag_sec が無ければ内訳を出さない。
+    ★素のunicode絵文字を置かない(共通規律§5の表記)。
+    """
+    if draw_sec is None:
+        return ""
+    if tag_sec:
+        return "所要 %.0f秒(タグ変換 %.0f秒 / 描画 %.0f秒)" % (tag_sec + draw_sec, tag_sec, draw_sec)
+    return "所要 %.0f秒(描画)" % draw_sec
+
+
+def discord_upload(image_path, channel, persona, caption="", note=""):
     """Webhookにmultipartで画像を添付投稿(キャラ名義)。"""
     sys.path.insert(0, os.path.join(ROOT, "scripts", "discord"))
     from persona_send import ensure_webhook  # noqa
@@ -124,7 +145,14 @@ def discord_upload(image_path, channel, persona, caption=""):
         caption = enjoh_backstop(caption, tag="imagegen")
     except Exception:
         pass                                        # fail-open= 投稿は殺さない
-    payload = {"username": persona, "content": caption[:1900]}
+    # ★所要時間はゲートを通したキャプションの**後ろ**へ足す。1900字で切るのはキャプション側
+    #   だけにする= 長い依頼文の時に時間表示だけが消えると「載っていない」と読まれる。
+    if note:
+        head = caption[:1900 - len(note) - 1]
+        content = (head + "\n" + note) if head else note
+    else:
+        content = caption[:1900]
+    payload = {"username": persona, "content": content}
     if avatar:
         payload["avatar_url"] = avatar
     fname = os.path.basename(image_path)
@@ -143,6 +171,7 @@ def main():
     args = sys.argv[1:]
     neg, out, channel, persona, caption, ckpt = NEG_DEFAULT, None, None, None, "", None
     lora, lora_strength = None, 0.8
+    tag_sec = None
     rest = []
     i = 0
     while i < len(args):
@@ -163,6 +192,10 @@ def main():
             lora = args[i + 1]; i += 2
         elif a == "--lora-strength":
             lora_strength = float(args[i + 1]); i += 2
+        elif a == "--tag-seconds":
+            # 日本語→英語タグ変換にかかった秒数(local_chain.py が測って渡す)。
+            # 付けない従来の呼び方は内訳が出ないだけで、描画の秒数は出る。
+            tag_sec = float(args[i + 1]); i += 2
         else:
             rest.append(a); i += 1
     if not rest:
@@ -173,7 +206,8 @@ def main():
         CKPT = ckpt
     path = generate(" ".join(rest), neg, out, lora=lora, lora_strength=lora_strength)
     if channel and persona:
-        discord_upload(path, channel, persona, caption)
+        discord_upload(path, channel, persona, caption,
+                       note=elapsed_note(LAST_DRAW_SEC, tag_sec))
 
 
 if __name__ == "__main__":
