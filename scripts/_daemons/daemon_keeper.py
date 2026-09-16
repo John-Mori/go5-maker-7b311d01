@@ -251,7 +251,19 @@ WATCH_FILES = [DAEMON,
                #   **寄せた以上、ここに載っていないと「正本を直したのに常駐は古い版で読み続ける」**
                #   = 二重実装を潰した意味がそのまま消える。この検査(test_daemon_keeper.py の
                #   import 突合)が実際に赤で拾った=載せ忘れの再発を機械が数えている。
-               os.path.join(ROOT, "scripts", "_common", "msg_text.py")]
+               os.path.join(ROOT, "scripts", "_common", "msg_text.py"),
+               # ★2026-09-16 追加(C-042・イージス研究室)= dept_daemon が読むのに載っていなかった4本。
+               #   dispatch=投函経路(第3の出口) / output_gates=ゲートの呼び口(口調ゲートDはここ) /
+               #   tone_structure=口調の構造監査 / head_resolve=部門長の名寄せ。
+               #   ★この4本は 9c5b9bb(口調ゲートDをdispatchへ通した工事)で読まれる形になったのに、
+               #     表へ足していなかった= **ゲートDを配線しても、常駐は古いdispatchを読み続ける。**
+               #     第63世代の宿題「ゲートDが本番で1回鳴るのを見る」が、これでは永久に起きない。
+               #     『配線した』と『呼ばれている』は別物、の3度目だ(1度目=already_gatedの中、
+               #     2度目=写しが3箇所、3度目=載せ替えの経路)。
+               os.path.join(ROOT, "scripts", "llm", "dispatch.py"),
+               os.path.join(ROOT, "scripts", "llm", "output_gates.py"),
+               os.path.join(ROOT, "scripts", "llm", "tone_structure.py"),
+               os.path.join(ROOT, "scripts", "llm", "head_resolve.py")]
 RELOAD_DEBOUNCE_SEC = 90   # 変更が「落ち着いた」とみなすまで。編集の途中で載せ替えない
 # ★2026-07-29 追加。実測した事故=
 #   HQと実装エージェントが**何時間も連続で改修**した結果、90秒の間引きを何度も抜けて

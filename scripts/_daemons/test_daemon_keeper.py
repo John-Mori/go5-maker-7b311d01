@@ -317,12 +317,19 @@ def main():
               keeper._read_watch_files(_aged_copy(d, "same.py")) == keeper.WATCH_FILES)
 
         # ★本当に読み直しているか= 表へ1行足した写しでその1本が増える(定数を返しているだけなら増えない)
-        added = keeper._read_watch_files(_aged_copy(
-            d, "added.py",
-            lambda s: s.replace(
-                '               os.path.join(ROOT, "scripts", "_common", "msg_text.py")]',
-                '               os.path.join(ROOT, "scripts", "_common", "msg_text.py"),\n'
-                '               os.path.join(ROOT, "scripts", "llm", "_tsuika_kensa.py")]')))
+        #   ★2026-09-16 修正(イージス研究室)= 以前はこの仕掛けが**表の最後の1本の名前**
+        #     (msg_text.py)を直接書いていた。表の末尾へ1本足した日に、この検査だけが黙って
+        #     「何も足していない写し」を作り、読み直しの検査が空振りする= 検査が自分の理由で赤くなる。
+        #     表の末尾を名前で指すのをやめ、**閉じ括弧 `)]` そのもの**を入口にする。
+        def _append_one(s):
+            marker = ".py\")]"
+            i = s.index("WATCH_FILES = [")
+            j = s.index(marker, i) + len(marker)
+            return (s[:j - 1] + ",\n"
+                    '               os.path.join(ROOT, "scripts", "llm", "_tsuika_kensa.py")]'
+                    + s[j:])
+
+        added = keeper._read_watch_files(_aged_copy(d, "added.py", _append_one))
         check("表へ足した1本を、番人を再起動せずに拾う",
               added is not None and len(added) == len(keeper.WATCH_FILES) + 1
               and added[-1].endswith(os.path.join("scripts", "llm", "_tsuika_kensa.py")))
