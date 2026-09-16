@@ -265,7 +265,20 @@ class TestLoraLookup(unittest.TestCase):
         """置き場/fusoh_v0/なんでもいい名前.safetensors → 拾う。"""
         self._put("fusoh_v0", "model.safetensors")
         name, why = rooms.find_lora("imagegen-fusoh-v0")
-        self.assertEqual(name, "fusoh_v0/model.safetensors", why)
+        self.assertEqual(name, os.path.join("fusoh_v0", "model.safetensors"), why)
+
+    def test_the_separator_is_the_one_comfyui_accepts(self):
+        """★区切りは os.sep= ComfyUIが実際に受ける形(2026-09-16 実測)。
+
+        `/object_info/LoraLoader` の実名は 'fusoh_v0.safetensors\\checkpoint-….safetensors'。
+        "/" にすると `POST /prompt` が HTTP 400 を返し、**絵が1枚も出ない**。
+        見た目のために "/" へ直したら、この検査が赤くなって止める。
+        """
+        self._put("fusoh_v0", "model.safetensors")
+        name, why = rooms.find_lora("imagegen-fusoh-v0")
+        self.assertIn(os.sep, name, why)
+        if os.sep != "/":
+            self.assertNotIn("/", name, why)
 
     def test_file_name_still_works(self):
         """直置きのファイル名で入っている従来の形も変わらず拾う。"""
