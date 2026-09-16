@@ -158,6 +158,32 @@ def order_of(dept, text, natural=None):
     return True, body               # 既存室=従来どおり全部注文(C-035)
 
 
+def local_pipeline_order(dept, text):
+    """この便は「合図付きの画像注文」=**ローカルの経路が処理する仕事**か。
+
+    ★2026-09-16 Chami直令(hq msg 1549650439178428447)=
+        「生成依頼 から始まった時は画像生成だから、Claud送信用の各種スタンプを押さないで」
+      その便を描くのは優依のローカル経路(local_responder → local_chain → ComfyUI)で、
+      Claude(司令塔)はその処理系に乗らない。なのに送信印(sendms)や既読/着手を押すと
+      **乗っていない経路に乗った印**という嘘がChamiの画面に残る。
+      = 2026-09-12「優依の自室にはsendmsを押すな」(NO_SENT_MARK_DEPTS)と同じ理屈の拡張だ。
+
+    ★印を押すか押さないかの判定は**この関数1本**(ORG-11= 判定を2つ持たない)。
+      押下点は分かっているだけで5つ(gateway生便/gatewayミラー/handle()の既読/
+      relay直前の着手/走行中の既読・束ね印)ある。表を押下点の数だけ写さない。
+
+    ★**合図が要る部屋に限る**(C-035)。既存の `imagegen` 室は Claude 自身が
+      `scripts/imagegen/generate.py` を叩いて描く=あそこで印を消すとChamiの画面から
+      「Claudeが動いている」合図が消える。Chamiの理由(「画像生成だから」=ローカルが描く)が
+      当てはまるのは LoRA部屋だけなので、範囲もそこに合わせる。
+    ★fail-open の責任は**呼び側**にある(ここが読めない時は従来どおり押す)。
+    """
+    if not cue_required(dept):
+        return False
+    ok, _ = order_of(dept, text)
+    return bool(ok)
+
+
 def cue_help():
     """合図の書き方(部屋へ出す1行)。語は正本のここから引く=説明とコードがずれない。"""
     cue = CUE_PREFIXES[0]

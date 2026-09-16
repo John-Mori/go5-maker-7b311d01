@@ -28,9 +28,17 @@ CKPT = "waiIllustriousSDXL_v170.safetensors"
 NEG_DEFAULT = "lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, jpeg artifacts, signature, watermark, username, blurry"
 
 
-def workflow(pos, neg, w=832, h=1216, steps=26, cfg=6.0, seed=None):
+def workflow(pos, neg, w=832, h=1216, steps=26, cfg=6.0, seed=None,
+             lora=None, lora_strength=0.8):
+    """ComfyUIのAPIグラフを組む。
+
+    ★2026-09-14 研究室HQ: `lora` を足した(Chami直令 msg 1548842898773123105=
+      「それぞれのLoRAで画像生成するためのルーム」)。**LoRA別の部屋は、この口が無いと成立しない。**
+      lora=None の時のグラフは**以前と1ノードも変わらない**(既存の画像生成ルーム・
+      local_chain.py の呼び出しは1文字も挙動が変わらない)。
+    """
     seed = seed if seed is not None else int.from_bytes(os.urandom(4), "big")
-    return {
+    g = {
         "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": CKPT}},
         "2": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["1", 1], "text": pos}},
         "3": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["1", 1], "text": neg}},
@@ -42,6 +50,16 @@ def workflow(pos, neg, w=832, h=1216, steps=26, cfg=6.0, seed=None):
         "6": {"class_type": "VAEDecode", "inputs": {"samples": ["5", 0], "vae": ["1", 2]}},
         "7": {"class_type": "SaveImage", "inputs": {"images": ["6", 0], "filename_prefix": "go5org"}},
     }
+    if lora:
+        # LoraLoader は model と clip の両方を差し替える。★clip 側を繋ぎ忘れると
+        # 「LoRAを読んだのに効き目が薄い」という分かりにくい壊れ方になる。
+        g["8"] = {"class_type": "LoraLoader", "inputs": {
+            "model": ["1", 0], "clip": ["1", 1], "lora_name": lora,
+            "strength_model": lora_strength, "strength_clip": lora_strength}}
+        g["2"]["inputs"]["clip"] = ["8", 1]
+        g["3"]["inputs"]["clip"] = ["8", 1]
+        g["5"]["inputs"]["model"] = ["8", 0]
+    return g
 
 
 def api(path, payload=None):
@@ -52,9 +70,10 @@ def api(path, payload=None):
         return json.loads(r.read())
 
 
-def generate(pos, neg=NEG_DEFAULT, out=None, timeout=600):
+def generate(pos, neg=NEG_DEFAULT, out=None, timeout=600, lora=None, lora_strength=0.8):
     cid = str(uuid.uuid4())
-    res = api("/prompt", {"prompt": workflow(pos, neg), "client_id": cid})
+    res = api("/prompt", {"prompt": workflow(pos, neg, lora=lora, lora_strength=lora_strength),
+                          "client_id": cid})
     pid = res["prompt_id"]
     print(f"生成開始 prompt_id={pid[:8]}…")
     t0 = time.time()
@@ -123,6 +142,7 @@ def discord_upload(image_path, channel, persona, caption=""):
 def main():
     args = sys.argv[1:]
     neg, out, channel, persona, caption, ckpt = NEG_DEFAULT, None, None, None, "", None
+    lora, lora_strength = None, 0.8
     rest = []
     i = 0
     while i < len(args):
@@ -139,6 +159,10 @@ def main():
             caption = args[i + 1]; i += 2
         elif a == "--ckpt":
             ckpt = args[i + 1]; i += 2
+        elif a == "--lora":
+            lora = args[i + 1]; i += 2
+        elif a == "--lora-strength":
+            lora_strength = float(args[i + 1]); i += 2
         else:
             rest.append(a); i += 1
     if not rest:
@@ -147,7 +171,7 @@ def main():
     global CKPT
     if ckpt:
         CKPT = ckpt
-    path = generate(" ".join(rest), neg, out)
+    path = generate(" ".join(rest), neg, out, lora=lora, lora_strength=lora_strength)
     if channel and persona:
         discord_upload(path, channel, persona, caption)
 
