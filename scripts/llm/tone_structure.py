@@ -114,6 +114,26 @@ def other_persona_material(persona):
     return {"me": me or "", "names": names, "first_persons": sorted(set(fps))}
 
 
+# ★軸②の「合成」の定義はここ1本だけに置く(2026-09-16 AD研究室 msg 1549612208940654593)。
+#   経緯= 当室が合成の分布を**本文(口)でだけ**運んだ結果、同じ195便から AD研究室と
+#   違う分布が出た(当室 >0=63 / AD研究室 >0=27)。**道具の側に定義が無いのが原因**だ=
+#   人の頭の中にしか無い定義は次の手番で必ずズレる(§3「人手の入口を要件にした機構は
+#   実測0件になる」と同じ型)。以後この3本以外を混ぜたければ**この定数を変えて commit しろ**。
+#   ★bullet と bold は**入れない**= 箇条書きは平時の業務連絡でも普通に出る(backfill で
+#     bullet の >0 は 64/195 = 3分の1が該当してしまい、レポート体の骨格を指さない)。
+COMPOSITE_KEYS = ("hr", "bold_head", "numlabel")
+
+
+def composite_score(counts):
+    """軸②の合成指標= 区切り線 + 太字の節見出し + 太字の番号ラベル。
+
+    引数は `count_structure()` の戻り値(または同じキーを持つ台帳の1行)。
+    ★**閾値ではない。**大小を返すだけで「崩れている」とは言わない。
+    """
+    c = counts or {}
+    return sum(int(c.get(k) or 0) for k in COMPOSITE_KEYS)
+
+
 def count_structure(body, persona=None):
     """本文の構造指標を数える。**判定しない**(閾値も真偽も返さない)。
 
@@ -151,7 +171,7 @@ def count_structure(body, persona=None):
         if c:
             others_fp[fp] = c
 
-    return {
+    out = {
         "chars": len(text),
         "lines": len(lines),
         "bold": len(bolds),
@@ -169,3 +189,6 @@ def count_structure(body, persona=None):
         "other_first_person": others_fp,
         "other_first_person_total": sum(others_fp.values()),
     }
+    # ★合成は**同じ関数から**載せる= 台帳にも読み手にも同じ値が残る(口で運ばない)。
+    out["composite"] = composite_score(out)
+    return out

@@ -27,7 +27,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
-from tone_structure import count_structure           # noqa: E402
+from tone_structure import (COMPOSITE_KEYS, composite_score,   # noqa: E402
+                            count_structure)
 
 TONE_AUDIT = os.path.join(ROOT, "local", "llm", "tone_audit.jsonl")
 RECENT = os.path.join(ROOT, "local", "llm", "recent_*.jsonl")
@@ -49,11 +50,20 @@ def _summarize(label, rows):
     if not rows:
         print("  (0件。合流点を通った便がまだ無いか、台帳が別の場所に在る)")
         return
-    print(f"  {'指標':<22} {'中央値':>7} {'p90':>7} {'最大':>7} {'>0の便':>7}")
+    print(f"  {'指標':<22} {'中央値':>7} {'p90':>7} {'p99':>7} {'最大':>7} {'>0の便':>7}")
     for k in KEYS:
         v = [int(r.get(k) or 0) for r in rows]
         nz = sum(1 for x in v if x > 0)
-        print(f"  {k:<22} {_pct(v, .5):>7} {_pct(v, .9):>7} {max(v):>7} {nz:>7}")
+        print(f"  {k:<22} {_pct(v, .5):>7} {_pct(v, .9):>7} {_pct(v, .99):>7} "
+              f"{max(v):>7} {nz:>7}")
+    # ★合成は**個別指標と同じ表に必ず出す**= 口で運ぶと次の手番でズレる
+    #   (2026-09-16 AD研究室 msg 1549612208940654593 の指摘。当室が実際にズラした)。
+    #   ★古い台帳の行には composite キーが無いので、その場で同じ関数に通し直す。
+    cv = [int(r.get("composite") if r.get("composite") is not None
+              else composite_score(r)) for r in rows]
+    print(f"  {'composite':<22} {_pct(cv, .5):>7} {_pct(cv, .9):>7} {_pct(cv, .99):>7} "
+          f"{max(cv):>7} {sum(1 for x in cv if x > 0):>7}"
+          f"   ← 定義= {' + '.join(COMPOSITE_KEYS)}(tone_structure.COMPOSITE_KEYS)")
     # ★軸③の中身は名前が分かると効く(誰に引っ張られたか)。上位だけ出す。
     tally = {}
     for r in rows:
@@ -65,12 +75,67 @@ def _summarize(label, rows):
         print("  軸③ 内訳(上位): " + " / ".join(f"{k}×{c}" for k, c in top))
 
 
+def _one_msg(msg_id):
+    """★1便を同じ関数に通して数える(口で値を運ばないため)。
+
+    置き場が2つある= corpus(Chamiの指摘に紐づく元便)と recent_*(部門の便)。
+    どちらに在っても同じ `count_structure()` を通す= 読み手が同じ数字を再現できる。
+    """
+    src = os.path.join(ROOT, "local", "corpus", "chami.jsonl")
+    cand = []
+    try:
+        with open(src, encoding="utf-8") as f:
+            for ln in f:
+                if msg_id not in ln:
+                    continue
+                try:
+                    d = json.loads(ln)
+                except Exception:                        # noqa: BLE001
+                    continue
+                rt = d.get("reply_to") or {}
+                if rt.get("msg_id") == msg_id and (rt.get("content") or rt.get("body")):
+                    cand.append((rt.get("author") or "", rt.get("content") or rt.get("body")))
+    except OSError:
+        pass
+    for p in sorted(glob.glob(RECENT)):
+        try:
+            with open(p, encoding="utf-8") as f:
+                for ln in f:
+                    if msg_id not in ln:
+                        continue
+                    try:
+                        d = json.loads(ln)
+                    except Exception:                    # noqa: BLE001
+                        continue
+                    if str(d.get("msg_id") or "") == msg_id and d.get("body"):
+                        cand.append((d.get("author") or "", d["body"]))
+        except OSError:
+            continue
+    if not cand:
+        print(f"\n== msg {msg_id} ==\n  (本文が手元に無い。SKIP= 数字を作らない)")
+        return
+    author, body = cand[0]
+    r = count_structure(body, persona=author)
+    print(f"\n== msg {msg_id}(author={author}) ==")
+    for k in KEYS:
+        print(f"  {k:<22} {r.get(k)}")
+    print(f"  {'composite':<22} {r['composite']}"
+          f"   ← 定義= {' + '.join(COMPOSITE_KEYS)}")
+
+
 def main():
     persona = None
     if "--persona" in sys.argv:
         i = sys.argv.index("--persona")
         if i + 1 < len(sys.argv):
             persona = sys.argv[i + 1]
+    if "--msg" in sys.argv:
+        i = sys.argv.index("--msg")
+        if i + 1 < len(sys.argv):
+            _one_msg(sys.argv[i + 1])
+            return 0
+        print("--msg には msg_id が要る")
+        return 2
 
     live = []
     try:

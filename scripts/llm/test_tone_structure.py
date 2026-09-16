@@ -26,7 +26,8 @@ ROOT = os.path.dirname(os.path.dirname(HERE))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
-from tone_structure import count_structure, other_persona_material   # noqa: E402
+from tone_structure import (COMPOSITE_KEYS, composite_score,         # noqa: E402
+                            count_structure, other_persona_material)
 
 PASS = 0
 FAIL = 0
@@ -116,6 +117,23 @@ def main():
     _check("⑤ 戻り値に真偽値が混ざっていない(閾値を置かない段階)",
            [k for k, v in b.items() if isinstance(v, bool)], [])
 
+    # ⑦ 合成の定義。★これは 2026-09-16 に当室が実際にズラした箇所だ
+    #   (AD研究室 msg 1549612208940654593= 同じ195便から >0 が 63 と 27 に割れた)。
+    #   定義が**道具の中に1本だけ**在ること、bullet/bold を巻き込んでいないことを固定する。
+    _check("⑦ 合成の定義が hr+bold_head+numlabel の3本だけ",
+           list(COMPOSITE_KEYS), ["hr", "bold_head", "numlabel"])
+    mix = count_structure("---\n**■ 見出し**\n- あ\n- い\n**① 手順**\n**太字**", persona=None)
+    _check("⑦ composite が3本の和と一致する",
+           mix["composite"], mix["hr"] + mix["bold_head"] + mix["numlabel"])
+    _check("⑦ composite に bullet を混ぜていない(平時の箇条書きで膨らませない)",
+           mix["composite"] < mix["hr"] + mix["bold_head"] + mix["numlabel"] + mix["bullet"],
+           True)
+    _check("⑦ count_structure の戻り値が composite を持つ(口で運ばない)",
+           "composite" in b, True)
+    _check("⑦ 台帳の古い行(composite キー無し)も同じ関数で同じ値になる",
+           composite_score({k: mix[k] for k in ("hr", "bold_head", "numlabel")}),
+           mix["composite"])
+
     # ⑥ 実物(--real)。炎上した実便を corpus から読んで、数字を**出す**。判定はしない。
     if real:
         src = os.path.join(ROOT, "local", "corpus", "chami.jsonl")
@@ -142,6 +160,8 @@ def main():
                 print(f"      {k} = {r[k]}")
             _check("⑥ 実物で区切り線を2本拾う(骨格の写しと同じ形)", r["hr"], 2)
             _check("⑥ 実物で太字番号ラベルを3本拾う(①②③)", r["numlabel"], 3)
+            _check("⑥ 実物の composite が9(2+4+3・同じ関数で出した値)",
+                   r["composite"], 9)
 
     print(f"\n{PASS} PASS / {FAIL} FAIL")
     return 1 if FAIL else 0
