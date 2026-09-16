@@ -5,4 +5,4 @@ here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
 cp "$here/pre-commit" "$root/.git/hooks/pre-commit"
 chmod +x "$root/.git/hooks/pre-commit"
-echo "設置OK: .git/hooks/pre-commit (表記チェック=全角括弧・句点位置)"
+echo "設置OK: .git/hooks/pre-commit (①転送ツール混入ガード ②表記チェック=全角括弧・句点位置)"

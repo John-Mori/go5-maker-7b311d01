@@ -1,8 +1,24 @@
 #!/bin/sh
-# go5 表記チェック pre-commit フック (記載ミスの根治・Chami承認2026-07-15)。
-# ステージ済みの .md に 全角括弧（）/ 句点位置ミス「本文(補足)。」があればコミットを中止する。
-# 設置: bash scripts/hooks/install.sh (または本ファイルを .git/hooks/pre-commit へコピーし実行権付与)。
+# go5 pre-commit フック。設置: bash scripts/hooks/install.sh
+#   ① 転送/受信系の手道具がルート直下に混入していないか (2026-09-16 aegis-gl・ケヴィン・デブライネ)
+#   ② ステージ済みの .md の表記チェック (記載ミスの根治・Chami承認2026-07-15)
 # 回避: 意図的な例示などで通したい時は git commit --no-verify。
+
+# ── ① 転送ツール混入ガード ──────────────────────────────────
+# Chami「5SECのフォルダにbat置くな、関係ない。」(msg 1549490188701409385・恒久)。
+# 持ち場は E:\転送ツール\ 一式で、この運営runtimeではない(C-015拡張 2026-09-16)。
+# ★ステージ内容ではなく**ルート直下の実物**を見る= git管理外で置かれた手道具も止まる。
+# ★.md が1本も無いコミットでも走らせるため、②の早期 exit より**前**に置く(順序に意味がある)。
+python scripts/check_no_stray_transfer_tools.py
+rc=$?
+if [ "$rc" -ne 0 ]; then
+  echo ""
+  echo "転送/受信系の手道具がルート直下に居ます。E:\\転送ツール\\ へ退避してからコミットしてください。"
+  echo "(意図的なら git commit --no-verify)"
+  exit 1
+fi
+
+# ── ② 表記チェック(全角括弧・句点位置)────────────────────────
 files=$(git diff --cached --name-only --diff-filter=ACM | grep '\.md$')
 [ -z "$files" ] && exit 0
 python scripts/check_notation.py $files

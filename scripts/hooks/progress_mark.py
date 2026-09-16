@@ -184,21 +184,60 @@ def _entry_guard(payload):
 
     ★**部屋(dept)が解決できるより前に呼ぶ。** 手で開いた窓は部門の部屋と対になっていないので、
       下の dept 解決で return される=そこから後ろに置くと**狙った窓にだけ届かない**。
+
+    ★2026-09-16(aegis-gl): stdout へ直接 print するのをやめ、**文面を返す**形にした。
+      hookの stdout は JSON を**1つ**しか解釈しない= 同じ UserPromptSubmit へ相乗りした
+      _stray_guard と両方が鳴った日に JSON が2つ並んで**どちらも効かなくなる**。
+      集約して1回だけ出すのは `_emit_guards()` の仕事。
     """
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         import context_guard
         msg, _why = context_guard.decide_start(payload)
-        if msg:
-            print(json.dumps({
-                "systemMessage": msg,
-                "hookSpecificOutput": {
-                    "hookEventName": payload.get("hook_event_name") or "UserPromptSubmit",
-                    "additionalContext": msg,
-                },
-            }, ensure_ascii=False))
+        return msg or None
     except Exception:
-        pass                            # fail-open: 進捗印を絶対に止めない
+        return None                     # fail-open: 進捗印を絶対に止めない
+
+
+def _stray_guard(payload):
+    """★転送/受信系の手道具がルート直下に混入していないか見せる(2026-09-16 aegis-gl)。
+
+    判定と文面の正本は `scripts/hooks/stray_transfer_guard.py` の decide_stray()。
+    さらにその中の判定は `scripts/check_no_stray_transfer_tools.py` の check_root() 1本
+    =pre-commit と同じ関数を引く(ORG-11=判定を2つに割らない)。ここは payload を渡すだけ。
+
+    ★なぜ SessionStart ではなく**ここに相乗り**しているか= _entry_guard と同じ理由。
+      settings.json への書き込みがハーネスに止められる(2026-09-16 10:05 実測で再現)。
+      UserPromptSubmit は窓が開いて最初の一言で鳴り、以後も便ごとに鳴る=退避するまで
+      見え続ける(混入は普段ゼロなので黙る安全網のまま)。
+    ★セッションは殺さない。commit を本当に止めるのは .git/hooks/pre-commit の持ち場。
+    """
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import stray_transfer_guard
+        msg, _hits = stray_transfer_guard.decide_stray(payload)
+        return msg or None
+    except Exception:
+        return None                     # fail-open: 進捗印を絶対に止めない
+
+
+def _emit_guards(payload, msgs):
+    """入口の見張りたちの文面を**1つのJSONに畳んで**1回だけ出す。
+
+    hookの stdout は JSON 1つしか解釈されない。見張りが増えるたびに print を足すと、
+    2つ鳴った日に両方とも無効になる(=一番見せたい日に何も出ない)。ここで集約する。
+    """
+    body = [m for m in msgs if m]
+    if not body:
+        return
+    msg = "\n\n".join(body)
+    print(json.dumps({
+        "systemMessage": msg,
+        "hookSpecificOutput": {
+            "hookEventName": payload.get("hook_event_name") or "UserPromptSubmit",
+            "additionalContext": msg,
+        },
+    }, ensure_ascii=False))
 
 
 def main():
@@ -208,7 +247,8 @@ def main():
         return
     phase = sys.argv[1] if len(sys.argv) > 1 else "read"
     if phase == "read":
-        _entry_guard(payload)           # ★dept解決より前(手で開いた窓は部屋を持たない)
+        # ★dept解決より前(手で開いた窓は部屋を持たない)。出力は1つのJSONへ畳む。
+        _emit_guards(payload, [_entry_guard(payload), _stray_guard(payload)])
     try:
         from session_rooms import dept_of_payload
         dept, _ = dept_of_payload(payload)

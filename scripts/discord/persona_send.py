@@ -746,7 +746,12 @@ def english_backstop(body, persona, channel):
     判定は lang_gate 1本を引く(dept_daemon と同じ=経路が増えてもドリフトしない)。
 
     ① 英語前置き+日本語本文 → 前置きを剥がし、日本語本文だけ送る(握り潰さない)。
-    ② 本文まるごと英語(救う日本語が無い)→ **送らない**(Chami裁定ORG-23=英語を晒すより送らない)。
+    ② 日本語本文+**末尾/中間の英語段落** → その段落だけ剥いで日本語本文を送る
+       (2026-09-16 aegis-gl・ケヴィン・デブライネ / Chami msg 1549527667571818507「末尾の
+       英文いらんて」恒久+再発=4度目)。★剥ぐ手 `strip_english_paragraphs` は 09-11 から
+       lang_gate に在ったが、呼んでいたのは enjoh.py だけで**この最後の合流点が引いていなかった**
+       =穴は閾値でも関数不在でもなく**配線**。新しい判定は作らない(ORG-11=判定を2つに割らない)。
+    ③ 本文まるごと英語(救う日本語が無い)→ **送らない**(Chami裁定ORG-23=英語を晒すより送らない)。
     ★fail-open: モジュールが読めない/例外は素通し=送信を殺さない(最悪の事故は沈黙)。
     ★ミラー名義(Chami(...))はChami本人の言葉=Claudeの英文ダンプではない→対象外(触らない)。
 
@@ -757,11 +762,22 @@ def english_backstop(body, persona, channel):
             return body                       # ミラー=Chami本人の発言。英語でも触らない
         if os.path.join(ROOT, "scripts", "llm") not in sys.path:
             sys.path.insert(0, os.path.join(ROOT, "scripts", "llm"))
-        from lang_gate import detect_english_dump, strip_english_preamble
+        from lang_gate import (detect_english_dump, strip_english_preamble,
+                               strip_english_paragraphs)
         out, pre = strip_english_preamble(body)
         if pre.get("stripped"):
             print(f"[persona_send] ★英語前置きを剥離(英字{pre.get('removed_latin')})→日本語本文だけ送る",
                   file=sys.stderr)
+            body = out
+        # 末尾/中間の純英語段落。安全弁は lang_gate 側(日本語ゼロは触らない・名乗りタグを
+        # 含む段落は剥がない・残る日本語が20字未満なら何もしない)=通常返信は1ミリも変わらない。
+        out, para = strip_english_paragraphs(body)
+        if para.get("stripped"):
+            _by = ",".join(para.get("by") or [])
+            _ex = (para.get("excerpts") or [""])[0][:80]
+            print(f"[persona_send] ★英語段落を{para['stripped']}件剥離"
+                  f"(英字{para.get('removed_latin')}・判定{_by})→日本語本文だけ送る。"
+                  f"冒頭=…{_ex}…", file=sys.stderr)
             body = out
         hit = detect_english_dump(body)
         if hit is None:
@@ -777,6 +793,96 @@ def english_backstop(body, persona, channel):
         print(f"[persona_send] 言語ゲート不能({type(e).__name__})=素通し(送信は殺さない・fail-open)",
               file=sys.stderr)
         return body
+
+
+# ── 二重投稿ガード(2026-09-13・研究室HQ/シャビ・アロンソ DISPATCH-platform-se-1789239112088)──
+#   実害: 自動復帰した研究室(main)セッション(lab_owner_pid)が、main箱へ回送された部屋の便を
+#   処理して、その部屋の担当セッションが生きているのに**同じ persona 名義でその部屋へ中身無し
+#   ackを投稿**した= 同じ人格が同じ部屋で19秒差で二重に喋った(Chami msg
+#   1548403851043016705「これいらんよ、どうした?」)。止血(lab_revive_prompt.pyのプロンプト文)は
+#   **人へのお願い**であって機構ではない(§3 心がけに任せない・機構に載せる)。
+#   → Discordへ出る唯一の関門(OUT口)で機械的に止める。
+#
+#   ★誤発火を作らない(HQ明言「誤発火を作るなら入れない方が良い」・§3「常に誤発火する安全網は
+#     無視される」)。そのため**測った事故の署名に完全一致した時だけ**ブロックする:
+#       (1) 宛先が「担当=対話セッション本人」の部屋で、担当セッションが**今生きて働いている**
+#           (interactive_presence_<dept>.txt が PRESENCE_TTL 以内)
+#       (2) この persona_send を起こしたのが**研究室(main)セッション**
+#           (自分の先祖プロセスに lab_owner_pid が居る)、かつ
+#       (3) その lab_owner_pid が部屋の担当pidと**別物**(=研究室が他所の部屋を代弁している)。
+#   この3条件が全部成立する時だけ掛かる= 部屋本人の返信(mirror hook=部屋セッションpidの子)も、
+#   dept_daemon(lab_owner_pidの子ではない別デーモン)も、ここには絶対に掛からない。
+#   材料が読めない/プロセス表が取れない/判定不能は**素通し**(fail-open)。素通しても本人の1本は
+#   出るので可用性は落ちない(止めるのは"二重"の側だけ)。
+#   ★bot_send は persona 名義を持たない(--persona を拒否しpersona_sendへ誘導)= 同一persona二重は
+#     構造的に起きない。よってこのガードは persona_send 1口だけで足りる(C-064の全数確認の結論)。
+def _ancestry_pids(procs, start=None):
+    """自分から親を辿った pid 集合(自分自身を含む)。procs={pid:(ppid,exe)}。輪でも抜ける。"""
+    out = set()
+    pid = start if start is not None else os.getpid()
+    for _ in range(24):
+        if pid in out or pid not in procs:
+            break
+        out.add(pid)
+        pid = procs[pid][0]
+    return out
+
+
+def _room_live_owner(dept):
+    """部屋<dept>の担当=対話セッションが今生きて働いているか+その担当pid。無ければ (False, 0)。
+
+    正本は session_rooms(在席の記録元)。ここに写しを持たない= 在席TTL/置き場が変わっても追従する。
+    """
+    if not dept:
+        return (False, 0)
+    try:
+        if os.path.join(ROOT, "scripts", "llm") not in sys.path:
+            sys.path.insert(0, os.path.join(ROOT, "scripts", "llm"))
+        from session_rooms import presence_path, PRESENCE_TTL
+        p = presence_path(dept)
+        if (time.time() - os.path.getmtime(p)) >= PRESENCE_TTL:
+            return (False, 0)          # 在席が古い= 担当は働いていない= 他者が出しても二重にならない
+        try:
+            pid = int((json.loads(open(p, encoding="utf-8").read() or "{}") or {}).get("pid") or 0)
+        except Exception:
+            pid = 0                    # 旧形式(pid無し)でも「生きている」判定は有効
+        return (True, pid)
+    except Exception:
+        return (False, 0)
+
+
+def _lab_owner_pid():
+    """研究室(main)セッションのPID。inbox_waiter が武装時に1行だけ残す。無ければ 0。"""
+    try:
+        return int(open(os.path.join(LOCAL, "llm", "lab_owner_pid.txt"),
+                        encoding="utf-8").read().strip() or 0)
+    except Exception:
+        return 0
+
+
+def dupe_post_block_reason(dept, persona):
+    """測った二重投稿事故の署名に一致する時だけ理由文字列を返す。不一致/判定不能は None(=素通し)。"""
+    if not dept:
+        return None
+    live, room_pid = _room_live_owner(dept)
+    if not live:
+        return None                    # (1)不成立: 部屋の担当が働いていない
+    lab = _lab_owner_pid()
+    if not lab:
+        return None                    # 研究室pid不明= 判定材料なし= 素通し(fail-open)
+    try:
+        from session_rooms import proc_table
+        procs = proc_table()
+    except Exception:
+        procs = {}
+    if not procs:
+        return None                    # プロセス表が取れない= 判定不能= 素通し(fail-open)
+    if lab not in _ancestry_pids(procs):
+        return None                    # (2)不成立: この送信は研究室(main)の子ではない(部屋本人/デーモン)
+    if room_pid and room_pid == lab:
+        return None                    # (3)不成立: 研究室自身がこの部屋の担当= 正規の返信
+    return (f"研究室(main pid={lab})が、担当セッション(pid={room_pid or '?'})の生きている部屋"
+            f"[{dept}]へ persona『{persona}』名義で投稿しようとした= 二重投稿")
 
 
 def main():
@@ -858,6 +964,17 @@ def main():
         print(f"チャンネル未登録: {key}")
         sys.exit(2)
     persona = resolve_persona(persona)  # QA D1: ames→アメス等の別名解決+未登録は大声警告
+    # ★二重投稿ガード(2026-09-13)。ch解決後=宛先deptは ch['dept'] が正本(--channel指定でも引ける)。
+    #   resolve_persona の後= 正式名で理由文へ出すため。掛かるのは測った事故の署名のみ(上の説明)。
+    _dupe = dupe_post_block_reason(str(ch.get("dept") or dept or ""), persona)
+    if _dupe:
+        _audit_send(body=body, event="blocked", status="dupe_guard",
+                    channel=str(ch.get("name") or channel or ""),
+                    dept=str(ch.get("dept") or dept or ""), persona=str(persona))
+        print("二重投稿ガード: " + _dupe + "\n"
+              "  この部屋は担当セッション本人が答える。研究室(main)からの代弁は出さない"
+              "(共通規律§3=心がけに任せず機構で止める)。", file=sys.stderr)
+        sys.exit(5)
     # ★口調の合流点ゲート(2026-09-01)。英語は上で塞いだが口調は支流(dept_daemon)だけだった=
     #   代打/直送の男口調「俺」等が素通りしていた(DEF-99f9503e37 の構造的真因)。resolve_persona の
     #   後=正式名で口調ルールを引くため。機械置換のみ・fail-open=送信は殺さない。

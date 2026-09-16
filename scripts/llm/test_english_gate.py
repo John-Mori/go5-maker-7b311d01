@@ -305,8 +305,23 @@ def test_mixed_dump():
         #   「本番で保留が起きた」行と見分けられない(検査が台帳を汚さないこと)。
         _check("D-4 ★合流点(persona_send)が実物を保留する",
                ps.english_backstop(MIXED_DUMP, "テスト(test_english_gate)", "test") is None)
-        _check("D-4 ★合流点は正当な混在返信を素通しする(誤保留ゼロ)",
-               ps.english_backstop(LEGIT_MIXED, "テスト(test_english_gate)", "test") == LEGIT_MIXED)
+        # D-4 ★「素通し=誤保留ゼロ」の芯は**握り潰さないこと**。2026-09-16 に合流点へ
+        #     strip_english_paragraphs を配線したので、この実物は末尾の作業ナレーション
+        #     `Everything is confirmed. Reporting to Chami now.`(日本語0字・英字40・7語)
+        #     **1段落だけ**が剥がれる。Chami msg 1549527667571818507「末尾の英文いらんて」
+        #     (恒久+再発)が指しているのがまさにこの形で、enjoh 経路では 09-11 から既に
+        #     剥がれていた= persona_send だけが素通ししていた(経路差=ORG-11のドリフト)。
+        #     よって期待値を「完全不変」から**意図そのもの**へ精密化する:
+        #       保留しない(None でない)/ 日本語本文と名乗りは1文字も欠けない /
+        #       剥がれるのは英語ナレーション1段落だけ。
+        _lm = ps.english_backstop(LEGIT_MIXED, "テスト(test_english_gate)", "test")
+        _check("D-4 ★合流点は正当な混在返信を保留しない(誤保留ゼロ)", _lm is not None)
+        _check("D-4 日本語本文・コード識別子・名乗りは1文字も落ちない",
+               bool(_lm) and "据え置き" in _lm and "呼称ルール.json" in _lm
+               and "`yobisute:true`" in _lm and _lm.rstrip().endswith("[オタコン"))
+        _check("D-4 落ちるのは末尾の英語ナレーション1段落だけ",
+               bool(_lm) and "Everything is confirmed" not in _lm
+               and "Reporting to Chami now" not in _lm)
         _check("D-4 ミラー名義(Chami)は英語でも触らない",
                ps.english_backstop(MIXED_DUMP, "Chami(ミラー)", "1") == MIXED_DUMP)
     except Exception as _e:                                 # noqa: BLE001
