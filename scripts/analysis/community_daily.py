@@ -45,29 +45,38 @@ SRC = os.path.join(ROOT, "local", "consult_intel", "competitor_community.jsonl")
 OUT_DIR = os.path.join(ROOT, "local", "consult_intel")
 BASE_MODEL = "gemini-flash-latest"   # comp_frames と同じ基準 (無料枠が広くバッチ向き)
 
-# ── 凍結/落とし対象は毎朝のブリーフから除外する ────────────────────────
-# 背景= Chami 2026-09-12「5秒動画は凍結=その分析は不要」(msg 1548116830244175893)。
-#   同人系(凍結5秒動画側の偵察)と きらきら1番劇場 は朝の共有から落とす、と裁定済
-#   (docs/departments/shorts-analyst/STATUS.md の振替行)。だが本スクリプトは収集した全chを
-#   票順に並べて上位を出すだけで除外が無く、2026-09-13の朝便に「今宵のバズ同人」が混入し
-#   Chami「これ凍結せえいうたがな」(msg 1548831183713083535)。→ 報告側で除外する。
-#   ★収集(community_scrape.py/seeds)自体は止めない=STATUS「収集継続・報告だけ絞る」。
-#     収集停止は事業中身の改修=5chシステム改修部門αの領域(Chami未指示なので回さない)。
-DROP_CHANNEL_IDS = {
-    "UCHNVvzUatXbtEVP6csVX9Hg",  # 今宵のバズ同人
-    "UC_upg7O4JOd81TafJpX7a6Q",  # アニメ同人祭り
-    "UCYU3uiLk9GBCsHwxaK4ZHcg",  # オカズ系(doujin-somurie・okazu_booksと同Bsky)
-}
-# ハンドル運用 chは収集時にUCへ解決されるので、名前(channel_name)側でも落とす二重の網。
-DROP_NAME_KEYWORDS = ("同人", "オカズ", "きらきら")
+# ── 毎朝のブリーフは「Chami承認の漫画訴求競合」だけを出す(ホワイトリスト) ──────────
+# 背景= Chami 2026-09-12「5秒動画は凍結=その分析は不要」(msg 1548116830244175893)で
+#   競合ウォッチを現優先(1分50秒Shorts・漫画訴求)へ振替。残す8ch/落とす同人系はSTATUS.md
+#   (docs/departments/shorts-analyst/STATUS.md の振替行)に裁定済。
+# ★なぜブラックリスト→ホワイトリストに反転したか=
+#   最初はブラックリスト(同人系だけ落とす=DROP)で塞いだが、今宵のバズ同人を弾いた翌朝、
+#   票順で繰り上がった「ぼくちゃんの1コマ漫画」(keepにもdropにも名指しの無いきわどい系)が
+#   混入しChami再指摘(2026-09-16 msg 1549595498376204421「これ凍結せえいうたがな(2回目)」)。
+#   ブラックリストは"列挙し損ねた新規"を毎回取りこぼす=同じ穴を二度(C-038)。
+#   → 既定を「出さない」に反転し、Chami承認の漫画訴求8chだけを通す。これで未承認・新規・
+#     同人系は名指し不要で自動的に朝便から落ちる。
+# ★収集(community_scrape.py/seeds)自体は止めない=STATUS「収集継続・報告だけ絞る」。
+#   収集停止は事業中身の改修=5chシステム改修部門αの領域(Chami未指示なので回さない)。
+# keep判定は channel_name の識別語で行う(ハンドルはUCへ解決され収集時に名前が入る)。
+#   「漫画」「1コマ」等の共通語は使わない=ぼくちゃんの1コマ漫画/1コマの魅力を誤って通すため。
+KEEP_NAME_KEYWORDS = (
+    "座談会",        # オタクの漫画座談会(5ch風会話に最も近い=核心)
+    "漫画ライク",
+    "俺のひとコマ",
+    "深夜のマン",    # 深夜のマン×アニ
+    "グッとくる",    # グッとくる1コマ
+    "漫画ストック",  # あにめ漫画ストック
+    "バズタイム",    # アニメ漫画のバズタイム
+    "夜のひと",      # 夜のひと漫画
+)
 
 
-def is_dropped(post):
-    """凍結/落とし対象(同人系・きらきら)なら True。channel_id と channel_name の両方で判定。"""
-    if post.get("channel_id", "") in DROP_CHANNEL_IDS:
-        return True
+def is_kept(post):
+    """Chami承認の漫画訴求競合(KEEP_NAME_KEYWORDS)に一致する時だけ True。
+    既定は出さない=未承認・新規・同人系は名指し不要で朝便から落ちる。"""
     name = post.get("channel_name", "") or ""
-    return any(k in name for k in DROP_NAME_KEYWORDS)
+    return any(k in name for k in KEEP_NAME_KEYWORDS)
 
 VISION_PROMPT = (
     "この画像はYouTubeショート系チャンネルのコミュニティ投稿に使われた1枚 (多くは1コマ漫画) です。"
@@ -97,7 +106,7 @@ def vote_num(s):
 
 def load_posts():
     posts = []
-    dropped = 0
+    excluded = 0
     with open(SRC, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -107,12 +116,12 @@ def load_posts():
                 p = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if is_dropped(p):   # 凍結/落とし対象は読み込み時点で除外(以後の集計・ランキング・emit全てに効く)
-                dropped += 1
+            if not is_kept(p):   # 承認済み漫画訴求競合以外は読み込み時点で除外(集計・ランキング・emit全てに効く)
+                excluded += 1
                 continue
             posts.append(p)
-    if dropped:
-        print("凍結/落とし対象を%d件 除外した(同人系・きらきら=朝の共有から落とす裁定)" % dropped)
+    if excluded:
+        print("承認外(未承認・新規・同人系)を%d件 除外した(朝便はChami承認の漫画訴求競合だけ)" % excluded)
     return posts
 
 
@@ -326,6 +335,17 @@ def _run_scrape():
         print("収集の更新に失敗(既存データで続ける): " + str(e)[:80])
 
 
+def emit_empty_brief():
+    """承認済み漫画訴求競合の新規コミュニティ投稿がゼロの朝に出す正直なブリーフ。
+    「おはよう、Chami」で始めて押し出し器の本文抽出に乗せる=黙って失敗経路に落とさない。"""
+    return (
+        "おはよう、Chami。今朝は承認済みの漫画訴求競合(座談会・漫画ライク・俺のひとコマ 等)の"
+        "新規コミュニティ投稿が集まっていなかったの。だから今日は挙げる投稿が無いわ。"
+        "収集側に承認競合のデータが届いていない可能性があるから、そこは別便で見ておくわね。\n\n"
+        "動画の日次はまだ止まってるから、戻り次第そちらも一行だけ足すわね。"
+    )
+
+
 def emit_brief(posts, medians, do_vision, top):
     """毎朝の押し出し用: 相対で強い上位 top 件だけを、記号ゼロの短い日本語ブリーフにして返す。
     アーモンドアイ名義で配送される前提の文体(わたし/〜わ/〜のよ)。"""
@@ -359,7 +379,11 @@ def main():
         return 2
     posts = load_posts()
     if not posts:
-        print("ABORT: 投稿が0件。収集(community_scrape.py)を先に回す。")
+        if args.emit:
+            # 承認済み競合の新規投稿ゼロ=材料異常ではない。正直に1本出す(押し出しの失敗経路に落とさない)。
+            print(emit_empty_brief())
+            return 0
+        print("ABORT: 承認済み漫画訴求競合の投稿が0件(収集側に承認競合のデータが来ていない)。")
         return 2
 
     # 収集の鮮度を正直に見せる (一度きりの古いデータで語らないため)
