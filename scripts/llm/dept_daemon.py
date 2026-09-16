@@ -4486,7 +4486,17 @@ DEPT_CONF = {
         "port": 18840,          # 18839(local-lab)まで使用済=2026-09-16 実測(DEPT_CONFを読んで数えた)
         "session_relay": True,
         "conversation_only": True,
-        "forward_all": True,
+        # ★2026-09-16 夕方 `"forward_all": True` を**外した**(同日朝に自分で置いた行の撤回)。
+        #   置いた意図=「消費者不在で沈黙させない」。だが回送の関所は
+        #   `if _forward and not self._member and not conv_only:` で、**conversation_only が勝つ**。
+        #   実測= dept_daemon_astro-room.log に「回送しない= 会話専用の部屋」が**19行**。
+        #   つまりこの旗は一度も効いていない=「回送される」と読める嘘だけが残っていた。
+        #   ★外しても失うものは無い: 作業申告(`<<WORK>>`)は is_work=True で _forward が立つので
+        #     ログの警告行は従来どおり出る。消えるのはChamiの雑談1件ごとの同じ19行の方だ
+        #     (本物の申告漏れがその中に埋もれていた)。
+        #   ★沈黙の穴そのものは残っている= conversation_only の部屋は回送しない(Chami 2026-07-22
+        #     「絶対やめてくれ」)。塞ぎ方は専任セッションを立てて conversation_only を外すこと。
+        #     旗を2枚立てて塞いだことにしない。
         "boot_note": (
             "■この部屋の性格(必ず守る)\n"
             "- ここは **西洋占星術サイトを作る班**の部屋(Chami直令 2026-09-16)。"

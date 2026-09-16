@@ -81,7 +81,17 @@ relay = sorted(k for k, v in D.DEPT_CONF.items() if v.get("forward_all"))
 #   残す2室の理由:
 #     hq            研究室HQセッションがmain箱を読む本来の宛先
 #     research-room 事業層(ad研究室 Vol.9セッションが受ける)=**他オーナーにつき変更しない**
-eq(relay, ["hq", "research-room"],
+# ★2026-09-16(イージス研究室)この期待値を書いた頃と **forward_all の意味が変わっている**。
+#   当時= 差出人を見ずに全便を複製(だから「HQを汚す」)。
+#   いま= forward_after_reply が `"chami" in author` だけに絞っている(同関数の注記)。
+#   つまり組織層に付けても部門間便は1通も上がらない。**禁止の理由の半分は消えている**ので、
+#   下の local-lab は「汚す側」ではない。ただし**登録制は維持する**= 増やすなら理由を書く。
+#     local-lab 2026-09-16 新設(commit 651bd72・Chami直令 msg 1549479044096196639)。
+#               GLが**仮**(カスミ)で専任の対話セッションが居ない部屋。
+#               head_of('local-lab')=None(自身が4室の部門長)なので、回送先は main箱。
+#               = **Chamiがこの部屋に書いた便だけ**HQの箱にも残す、が付けた理由。
+#               ★GLが本決まりになって専任セッションが立ったら、この行ごと見直す。
+eq(relay, ["hq", "local-lab", "research-room"],
    "★forward_allはmain箱を読む対話セッションが居る部屋のみ(組織層の部門には付けない)")
 # ★talk は 2026-08-18 まで literal 一致の期待値だった(下の履歴コメントはその時代のもの=消さない)。
 #   いまは下の WORK_ROOMS / UNDECLARED_TALK による判定に置き換わっている。参考値として残す。
@@ -160,12 +170,39 @@ WORK_ROOMS = sorted([  # A= work_scope を持つ部屋。増減はどちらも�
     #   のを A へ上げた(AnimeGameGoodsAFI 配下のみ。公開・課金・申請は範囲外のまま)。
     "goods-afi",
     "hq", "hr-context", "hr-room", "imagegen", "kaizen-analyst", "learning-coach",
+    # ★2026-09-16(イージス研究室)以下3室を**追記**。どれも権限を新しく与えたのではない=
+    #   部屋を作った手番で work_scope が付いており、**この名簿だけが追いついていなかった**
+    #   (manga-shorts 8/5・kukuru-nakama 8/13・gunji 8/16 と同じ形の追従漏れ。
+    #    この赤を残すと隣に並ぶ本物の退行が埋もれる= HQ指摘 2026-08-13)。
+    #   learning-coach-2 2026-07-17 commit 19651f6。学習ルーム2を persona_send の誤配送
+    #                    (ルーム2の返信がルーム1へ出る)解消のため dept として分離したもの。
+    #                    元の learning-coach と**同じ部屋の複製**なので設定も同形。
+    "learning-coach-2",
     "llm-edu", "platform-se", "product-scout", "qa-reviewer", "research-room",
-    "shorts-analyst", "system-engineer",
+    "shorts-analyst",
+    #   someday-room 2026-09-02 commit 6f8af66(Chami直接指示 msg 1544463960810725416)。
+    #                work_scope の範囲は**調査と台帳追記まで**(実装はしない)。
+    "someday-room",
+    "system-engineer",
+    #   web-research 2026-09-03 commit ad06e59(Chami直接指示 msg 1544985861702295583)。
+    #                5ch動画のネタ集め=スクレイピングが主たる職務でファイル作業を伴う。
+    "web-research",
 ])
 UNDECLARED_TALK = sorted([  # C= 権限も宣言も無い部屋。**増やすな**(aegis-gl 8/5 と同型になる)
     "incident",          # 切り分けと引き渡しが仕事。復旧の実作業は担当部門が持つ
     "keiei-kikaku",      # 部門の設立・改廃は台帳と艦隊を触る=対話セッションが責任を持つ
+    # ★2026-09-16(イージス研究室)以下2室を追記。**Cへ足すのは権限を与えないという宣言**で、
+    #   Aへ足すのとは向きが逆だ。ただし C は事故の形(aegis-gl 8/5)でもあるので、
+    #   「誰が受け取るのか」を実測してから置く= 2室とも消費者が居ることを確かめた。
+    "local-lab",         # GLが「仮」(Chami原文「仮で一旦カスミを配置」)=配線の実作業は持たせない。
+                         #   上の relay に居るので Chami便は main箱にも残る。
+    "otacon-radio",      # コンテキスト整理の会話部屋(2026-09-05 commit dd2d63b・Chami直接指示)。
+                         #   ★実測= dept_daemon_otacon-radio.log に「回送=」26行。全て
+                         #   「部門長が引けずmain箱へ」= head_of('otacon-radio') が None。
+                         #   落ちてはいないが**部門長を経由していない**(ORG-36の裏返し)。
+                         #   親カテゴリ表にこの部屋が無いのが理由で、someday-room が 9/2 に
+                         #   _NAMED_HEAD で塞いだのと同じ穴。★配線の付け替えは回送先の変更=
+                         #   人事・経営企画の手番なので、ここでは**状態の登録だけ**にする。
     "system-engineer-b",  # 改修βに実装権は与えない(2026-07-21 ORG-32)
 ])
 eq(sorted(k for k, v in D.DEPT_CONF.items() if v.get("work_scope")), WORK_ROOMS,
@@ -177,8 +214,13 @@ eq(sorted(k for k, v in D.DEPT_CONF.items()
 # ただし**宣言と権限の同居**は意味が衝突するので、既知の1件以外は許さない。
 #   learning-coach だけは両方持つ(work_scope は起動文の capability note として使い、
 #   回送は conversation_only で止めている。dept_daemon.py:5163 が conversation_only を優先)。
+# ★2026-09-16(イージス研究室)learning-coach-2 を追記。取り違えではなく**同じ部屋の複製**だ=
+#   2026-07-17 commit 19651f6 で「学習ルーム2」を dept として切り出した時に設定ごと写している。
+#   意味も learning-coach と同じ(work_scope は起動文の capability note・回送は宣言で止める)。
+#   ★ここを「2件まで可」のような数え方にはしない= 同居は**名指しで1室ずつ**通す。
 eq(sorted(k for k, v in D.DEPT_CONF.items()
-          if v.get("work_scope") and v.get("conversation_only")), ["learning-coach"],
+          if v.get("work_scope") and v.get("conversation_only")),
+   ["learning-coach", "learning-coach-2"],
    "work_scopeと conversation_only の同居は learning-coach のみ(他は設定の取り違え)")
 # forward_all 持ちは main箱を読む対話セッションが居る部屋=上の relay 検査で固定済み。
 for name, conf in D.DEPT_CONF.items():
