@@ -5745,6 +5745,31 @@ def strip_meta(dept, rec, reply):
                 reply = _b2
         except Exception:
             pass             # 切り落としで転んでも以降の剥ぎは当てる
+        # ★出力ゲートE-3(孤立コードフェンス切り・2026-09-17 プラットフォームSE)。
+        #   実物= imagegen-fusoh-v0/カスミ msg 1549651824397778945 の末尾に開始の無い ``` が残った。
+        #   ミラー経路(output_gates)と同じ純関数を当てる= OUT口は2つとも同時に塞ぐ(C-064)。
+        try:
+            _b3, _h3 = _meta_strip.strip_orphan_fence(reply)
+            if _h3:
+                log(dept, f"★出力ゲートE-3(孤立フェンス): 末尾の {_h3[0].get('line')} を除去 "
+                          f"残り本文={len(str(_b3 or ''))}字 msg={str((rec or {}).get('msg_id', ''))}")
+                try:
+                    os.makedirs(os.path.dirname(META_AUDIT), exist_ok=True)
+                    with open(META_AUDIT, "a", encoding="utf-8") as f:
+                        f.write(json.dumps({
+                            "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                            "dept": dept,
+                            "event": "orphan_fence",
+                            "source": "daemon",
+                            "msg_id": str((rec or {}).get("msg_id", "")),
+                            "stripped": [h.get("line") for h in _h3],
+                            "before": str(reply or "")[:400],
+                        }, ensure_ascii=False) + "\n")
+                except Exception:
+                    pass
+                reply = _b3
+        except Exception:
+            pass             # 切り落としで転んでも以降の剥ぎは当てる
         body, hits = _meta_strip.strip_meta_tail(reply)
         if not hits:
             return reply

@@ -93,6 +93,7 @@ def main():
            meta_strip.strip_meta_tail(None)[0] in ("", None))
 
     _narration_tests()
+    _orphan_fence_tests()
 
     print("\n%d PASS / %d FAIL" % (_PASS, _FAIL))
     return 1 if _FAIL else 0
@@ -206,6 +207,80 @@ def _narration_tests():
               if alt_detect_no_voice_condition(t) is not None]
     _check("[must-fail] ③(声の不在)を外すと正常便3件を突き返す=この条件が効いている",
            len(broken) == 3)
+
+
+# ============================================================================
+# 孤立コードフェンス切り(2026-09-17・プラットフォームSE)
+# ----------------------------------------------------------------------------
+# 陽性の入力は**実物のコピー**= imagegen-fusoh-v0/カスミ msg 1549651824397778945。
+#   本文の末尾に、対になる開始フェンスの無い ``` が1行だけ残っていた。
+# ============================================================================
+
+# 検体の形(本文の後に開始フェンスの無い ``` が1行)。
+ORPHAN = ("そのとおりだ、ちゃみくん。この部屋は fusoh_v0 のLoRAを0.8で抱えて描く作りだ。\n"
+          "だから注文に「手描き」と書き添える必要はない。放っておいても画風は乗る。\n"
+          "```")
+ORPHAN_BODY = ("そのとおりだ、ちゃみくん。この部屋は fusoh_v0 のLoRAを0.8で抱えて描く作りだ。\n"
+               "だから注文に「手描き」と書き添える必要はない。放っておいても画風は乗る。")
+
+
+def _orphan_fence_tests():
+    # --- 陽性: 孤立した末尾フェンスを剥ぐ --------------------------------
+    body, hits = meta_strip.strip_orphan_fence(ORPHAN)
+    _check("実物の孤立フェンスが剥がれる", body == ORPHAN_BODY and len(hits) == 1)
+    _check("剥いだ理由が記録に残る", hits and hits[0]["marker"] == "orphan_fence")
+
+    b, h = meta_strip.strip_orphan_fence(ORPHAN_BODY + "\n```\n\n")
+    _check("末尾に空行が続いても剥ぐ", b == ORPHAN_BODY and len(h) == 1)
+
+    b, h = meta_strip.strip_orphan_fence(ORPHAN_BODY + "\n```python")
+    _check("裸の開始フェンス(```lang だけ)も孤立なら剥ぐ", b == ORPHAN_BODY and len(h) == 1)
+
+    # --- 陰性: 剥いではいけないもの(誤爆=本文欠け) ---------------------
+    balanced = "結果はこうだ。\n```\ncode line\n```"
+    _check("均衡したコードブロック(偶数個)は1文字も変えない",
+           meta_strip.strip_orphan_fence(balanced) == (balanced, []))
+
+    open_with_body = "手順を貼る。\n```\nstill inside the block"
+    _check("フェンスの後ろに本文が続くなら切らない(中身を消さない)",
+           meta_strip.strip_orphan_fence(open_with_body)[0] == open_with_body)
+
+    no_fence = "了解した。手は空いてる。```を含まない本文。"
+    _check("フェンス行が無ければ1文字も変えない",
+           meta_strip.strip_orphan_fence(no_fence) == (no_fence, []))
+
+    two_blocks = "A\n```\nx\n```\nB\n```\ny\n```"        # フェンス4個=均衡
+    _check("複数の均衡ブロックは触らない",
+           meta_strip.strip_orphan_fence(two_blocks) == (two_blocks, []))
+
+    tail_content = "```\ncode\n```\n続きの本文"           # 末尾のフェンスの後ろに本文
+    _check("均衡+末尾に本文がある形は触らない",
+           meta_strip.strip_orphan_fence(tail_content) == (tail_content, []))
+
+    # --- fail-open: どんな入力でも例外を投げない --------------------------
+    ok = True
+    for bad in (None, 123, {"a": 1}, [], "", "   \n  "):
+        try:
+            meta_strip.strip_orphan_fence(bad)
+        except Exception:                                  # noqa: BLE001
+            ok = False
+    _check("壊れた入力でも例外を投げない", ok)
+
+    # --- must-fail(C-053): **動く別実装**を当てて、壊れる側を1つ固定する ---
+    #   別実装= 均衡(奇数/偶数)を見ずに「末尾が裸フェンスなら常に剥ぐ」。
+    #   これは検体をちゃんと剥ぐ=「動く」。だが**均衡したコードブロック**の閉じフェンスまで
+    #   剥いでしまう、という差だけを出す(=奇数個ガードが効いている証拠)。
+    def alt_strip_no_balance_check(text):
+        s = str(text or "")
+        lines = s.splitlines()
+        if lines and meta_strip._BARE_FENCE_RE.match(lines[-1]):
+            return "\n".join(lines[:-1]).rstrip(), [{"marker": "alt", "line": lines[-1]}]
+        return s, []
+
+    _check("[must-fail] 別実装も検体は剥げる(=動く実装である)",
+           alt_strip_no_balance_check(ORPHAN)[0] == ORPHAN_BODY)
+    _check("[must-fail] 均衡ガードを外すと正しいコードブロックの閉じ ``` まで剥ぐ=このガードが効いている",
+           alt_strip_no_balance_check(balanced)[0] != balanced)
 
 
 if __name__ == "__main__":

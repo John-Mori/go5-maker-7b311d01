@@ -363,7 +363,7 @@ def apply_gates(dept, persona, text, source="mirror", msg_id="", fix=None, ask=N
     summary = {"naming_fix": 0, "naming_warn": 0, "tone_fix": 0, "tone_warn": 0,
                "tone_rewrite": 0,
                "meta_strip": 0, "meta_emptied": False, "narration_leak": 0,
-               "envelope_echo": 0,
+               "envelope_echo": 0, "orphan_fence": 0,
                "kana_choice_fix": 0, "kana_choice_warn": 0,
                "dept_ref_fix": 0, "dept_ref_warn": 0}
     s = str(text or "")
@@ -415,6 +415,23 @@ def apply_gates(dept, persona, text, source="mirror", msg_id="", fix=None, ask=N
                 s = stripped
     except Exception:
         pass            # 剥ぎで転んでも以降のゲートは当てる(本文は直前の状態のまま)
+
+    # --- ゲートE-3(孤立コードフェンス切り)= 2026-09-17 プラットフォームSE -----
+    #   実物= imagegen-fusoh-v0/カスミ msg 1549651824397778945。常駐(経路①)と同じ純関数。
+    #   開始の無い末尾 ``` を落とす。OUT口は常駐とミラーの2つ=同時に塞ぐ(C-064)。
+    try:
+        if _meta_strip is not None:
+            fcut, fhits = _meta_strip.strip_orphan_fence(s)
+            if fhits:
+                summary["orphan_fence"] = len(fhits)
+                _append(META_AUDIT, [{
+                    "ts": ts, "dept": dept, "event": "orphan_fence", "source": source,
+                    "persona": str(persona or ""), "msg_id": str(msg_id or ""),
+                    "stripped": [h.get("line") for h in fhits],
+                    "before": excerpt_before}])
+                s = fcut
+    except Exception:
+        pass            # 切り落としで転んでも以降のゲートは当てる
 
     # --- 実況漏れ(名乗りも声も無い生ログ)= **警告のみ** ------------------
     # ★2026-09-01 イージス研究室。常駐(経路①)と**同じ検知器**(meta_strip.detect_narration_leak)。
