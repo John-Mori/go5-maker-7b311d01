@@ -199,10 +199,16 @@ UNDECLARED_TALK = sorted([  # C= 権限も宣言も無い部屋。**増やすな
     "otacon-radio",      # コンテキスト整理の会話部屋(2026-09-05 commit dd2d63b・Chami直接指示)。
                          #   ★実測= dept_daemon_otacon-radio.log に「回送=」26行。全て
                          #   「部門長が引けずmain箱へ」= head_of('otacon-radio') が None。
-                         #   落ちてはいないが**部門長を経由していない**(ORG-36の裏返し)。
-                         #   親カテゴリ表にこの部屋が無いのが理由で、someday-room が 9/2 に
-                         #   _NAMED_HEAD で塞いだのと同じ穴。★配線の付け替えは回送先の変更=
-                         #   人事・経営企画の手番なので、ここでは**状態の登録だけ**にする。
+                         #   ★★2026-09-16 経営企画の裁定(DISPATCH-aegis-gl-1789543694036)=
+                         #   **これは設計どおりで、穴ではない**。head=None は Chami直接指示
+                         #   (ESC-hr-context-1545568554550689962)による設計で、親カテゴリ
+                         #   「パーソナル Personal」(1527482687408046160)は**意図的に**カテゴリ表外。
+                         #   隣室 kukuru-nakama と同じ headless 扱い= dept_daemon.py L2443-2454 に
+                         #   「_NAMED_HEAD には足さない」と明記されている。
+                         #   ★実測 2026-09-16= dispatch.head_of は otacon-radio / kukuru-nakama とも
+                         #   None、someday-room は hq(正本= org_registry.yml managed_by)。
+                         #   ★**_NAMED_HEAD / org_registry.yml へ足すな**。someday-room の穴と
+                         #   同型に見えるが向きが逆で、塞ごうとする方が誤りだ。
     "system-engineer-b",  # 改修βに実装権は与えない(2026-07-21 ORG-32)
 ])
 eq(sorted(k for k, v in D.DEPT_CONF.items() if v.get("work_scope")), WORK_ROOMS,
