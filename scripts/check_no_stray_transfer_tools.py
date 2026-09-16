@@ -114,6 +114,15 @@ def check_tree(target, apply_skips):
     return hits
 
 
+def check_root(target):
+    """後方互換API。呼び手= scripts/hooks/stray_transfer_guard.decide_stray()(SessionStart/
+    UserPromptSubmit相乗り)。旧版は「ルート直下(非再帰)」だったが、炎上の実物は
+    local\\file_transfer\\ の中だった(モドリッチ訂正 msg 1549587672538939464)ため、
+    この版は既定除外つきの再帰検査へ委譲する。判定は1本(ORG-11)=あちらを直せば
+    commit経路(main)も起動側hookも同時に直る。戻り= [(相対パス, 理由), ...] / None(検査不能)。"""
+    return check_tree(target, apply_skips=True)
+
+
 def main():
     args = sys.argv[1:]
     if args:
