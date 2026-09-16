@@ -104,15 +104,18 @@ if (uniq.length > 1) {
 //   参照アセット(src/href の ?v= 付きパス)が変更されていないかを見る。
 //   混在チェック(uniq.length>1)と違い、揃っていても常に効く=検出力が0にならない。
 const STATE_PATH = join(ROOT, ".bump_state.json");
+// ★戻り値は { stale, reason }。stale=配列なら判定が実際に走った(空配列=問題なし)。
+//   stale=null は「判定材料が無くfail-openで倒した」=reasonに理由が必ず入る
+//   (2026-09-16 AD研究室モドリッチのmust-fail指摘: 健全な緑と検出が無効な緑が出力上区別できなかった)。
 function detectStaleAssets() {
-  if (!existsSync(STATE_PATH)) return null; // 初回導入前=判定材料なし(赤にしない)
+  if (!existsSync(STATE_PATH)) return { stale: null, reason: ".bump_state.json が無い(未導入 or 未追跡)" };
   let state;
   try {
     state = JSON.parse(readFileSync(STATE_PATH, "utf8"));
   } catch {
-    return null; // 壊れたstateで検査を止めない(fail-open)
+    return { stale: null, reason: ".bump_state.json の内容が壊れている(JSON parse失敗)" };
   }
-  if (!state.base_commit) return null;
+  if (!state.base_commit) return { stale: null, reason: ".bump_state.json に base_commit が無い" };
 
   const ASSET_RE = /(?:src|href)="([^"?]+)\?v=\d+"/g;
   const assetPaths = new Set();
@@ -123,19 +126,24 @@ function detectStaleAssets() {
   }
 
   const diff = spawnSync("git", ["diff", "--name-only", state.base_commit, "HEAD"], { cwd: ROOT, encoding: "utf8" });
-  if (diff.status !== 0) return null; // 起点commitがもう無い(履歴書き換え等)=fail-open、混在チェックに任せる
+  if (diff.status !== 0) {
+    return { stale: null, reason: `起点commit ${state.base_commit.slice(0, 7)} をgitが解決できない(rebase/squash/浅いcloneで履歴から消えた疑い)` };
+  }
   const changed = new Set(diff.stdout.split("\n").map((s) => s.trim()).filter(Boolean));
 
-  return [...assetPaths].filter((p) => changed.has(p)).sort();
+  return { stale: [...assetPaths].filter((p) => changed.has(p)).sort(), reason: null };
 }
 
 if (check) {
   console.log(`現在 v=${cur} / 参照 ${found.length} 箇所 / ${files.length} ファイル / 混在 ${uniq.length > 1 ? "あり:" + uniq.join(",") : "なし"}`);
-  const stale = detectStaleAssets();
+  const { stale, reason } = detectStaleAssets();
   if (stale && stale.length) {
     console.error(`⚠ 中身が変わったのに ?v= が据え置きの疑い= ${stale.length}件: ${stale.join(", ")}`);
     console.error("  直近バンプの起点以降にこれらが変更された。node scripts/bump.mjs でバンプすること。");
     process.exit(9);
+  }
+  if (reason) {
+    console.log(`（据え置き検出= 判定材料なしのため無効: ${reason}）`);
   }
   console.log("V=" + cur);
   process.exit(0);
