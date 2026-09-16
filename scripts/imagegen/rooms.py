@@ -74,7 +74,14 @@ ROOMS = {
 }
 
 # LoRAを当てる部屋だけ(既存の imagegen は素のまま=挙動を1文字も変えない)
-LORA_DEPTS = tuple(d for d, v in ROOMS.items() if v.get("lora_hint"))
+def lora_depts():
+    """LoRAを当てる部屋の一覧。★ROOMSを**その場で**読む=部屋を1件足したら即座に効く。"""
+    return tuple(d for d, v in ROOMS.items() if v.get("lora_hint"))
+
+
+# ★これは「今の一覧」のスナップショットだ(表示・報告用)。**判定に使うな**=
+#   判定は下の cue_required() / lora_depts() がROOMSを読み直す形に寄せてある。
+LORA_DEPTS = lora_depts()
 
 # ============================================================================
 # 合図(雑談と画像注文の線引き)  2026-09-16 イージス研究室
@@ -100,7 +107,15 @@ LORA_DEPTS = tuple(d for d, v in ROOMS.items() if v.get("lora_hint"))
 #   ★中野五月便(llm-qa)の「LoRA名(fusoh_v0/fusoh_v2)をトリガーに」は**Chami本人のこの決定で
 #     置き換わった**= LoRA名は引き金にしない(部屋がどちらのLoRAを使うかは ROOMS が持つ)。
 #   ★Chamiが自分で打った「生成’依頼」(間に ‘ )は**当たらないのが正解**= 完全一致の頭合わせ。
-CUE_REQUIRED_DEPTS = ("imagegen-fusoh-v0", "imagegen-fusoh-v2")
+# ★2026-09-16 13:25 Chami直で**部屋の建て方そのものが決まった**。原文=
+#     msg 1549637220883759176「今後も1LoRAにつき1部屋を立てる。」
+#     msg 1549637278559895655「ルールは統一。」
+#   → 合図が要る部屋は**LoRAを持つ部屋すべて**。直書きの名簿をやめ、ROOMS から導出する。
+#   理由(§3)= 直書きだと3つ目のLoRA部屋を建てた時、**誰かが手でここへ足さない限り**
+#   合図が効かない=人手の入口。人手を要件にした機構は実測0件になる型だ。
+#   ★今日の値は直書きの時と**同じ2件**= imagegen-fusoh-v0 / v2。挙動は1文字も変わらない。
+#   ★既存の imagegen 室は lora_hint=None なので従来どおり素通し(C-035)。
+CUE_REQUIRED_DEPTS = LORA_DEPTS
 
 # 引き金はこの1語だけ。★増やす時はChamiの言葉を待つ(勝手に印を足すと誤発火の口が増える)。
 #   ★改行を挟んで本文が来る書き方(「生成依頼\n\n銀髪ロング…」)なので、語を剥がす時に改行も落とす
@@ -110,8 +125,13 @@ _CUE_SORTED = tuple(sorted(CUE_PREFIXES, key=len, reverse=True))
 
 
 def cue_required(dept):
-    """その部屋は合図が要るか。"""
-    return dept in CUE_REQUIRED_DEPTS
+    """その部屋は合図が要るか。
+
+    ★**LoRAを持つ部屋なら要る**、が唯一の条件(2026-09-16 Chami「ルールは統一。」)。
+      ROOMS をその場で読むので、**新しいLoRA部屋を ROOMS に1件足すだけ**で合図が継がれる
+      =ここへ名前を書き足す手番は、もう存在しない。
+    """
+    return bool((ROOMS.get(dept) or {}).get("lora_hint"))
 
 
 def order_of(dept, text, natural=None):

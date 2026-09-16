@@ -107,6 +107,14 @@ class TestCueTable(unittest.TestCase):
         self.assertTrue(rooms.cue_required("imagegen-fusoh-v2"))
         self.assertFalse(rooms.cue_required("imagegen"))   # 既存室は変えない(C-035)
 
+    def test_the_table_is_derived_from_the_lora_rooms(self):
+        """★2026-09-16 13:25 Chami「今後も1LoRAにつき1部屋を立てる。ルールは統一。」
+        合図の要る部屋= LoRAを持つ部屋。名簿を別に持たない(=二重管理を作らない)。
+        今日の値は直書き時代と同じ2件であることも、ここで固定しておく。"""
+        self.assertEqual(rooms.CUE_REQUIRED_DEPTS, rooms.lora_depts())
+        self.assertEqual(set(rooms.CUE_REQUIRED_DEPTS),
+                         {"imagegen-fusoh-v0", "imagegen-fusoh-v2"})
+
     def test_the_cue_is_exactly_one_word(self):
         """★2026-09-16 Chami直「1。でも印はいらんかな」= 引き金は「生成依頼」1本だけ。"""
         self.assertEqual(rooms.CUE_PREFIXES, ("生成依頼",))
@@ -325,6 +333,64 @@ class TestReplayOfRealChamiMessages(unittest.TestCase):
                 self.assertEqual(h.spawned, [], "描かないはずが描いた: %r" % (text[:24],))
                 self.assertEqual(h.sent, [], "黙るはずが喋った: %r" % (text[:24],))
                 self.assertIn("image_no_cue", h.modes(), text[:24])
+
+
+class TestNewLoraRoomInheritsTheCue(unittest.TestCase):
+    """★3つ目のLoRA部屋を建てた時、**誰も手を動かさずに**合図ルールが継がれるか。
+
+    依頼= カスミ便 DISPATCH-aegis-gl-1789532909454(依頼元 imagegen-fusoh-v0)。
+    Chami原文=「今後も1LoRAにつき1部屋を立てる。」「ルールは統一。」
+      (msg 1549637220883759176 / 1549637278559895655・2026-09-16 13:25 JST)
+
+    ★この検査は**判定と分岐を本物のまま**通す。偽物にするのは外へ出る手だけ(Harness)。
+    ★旧コード(scripts/imagegen/rooms.py.bak_20260916_cue_auto=直書きの名簿)に当てると
+      test_a_brand_new_lora_room_requires_the_cue が落ちる=直る前に落ちる検査だ。
+      (旧 cue_required は `dept in CUE_REQUIRED_DEPTS` の名簿一致なので、
+       ROOMSへ足しただけの新室は合図なしで素通し=雑談で絵が走る側へ倒れる)
+    """
+
+    DEPT = "imagegen-fusoh-v9"      # ★架空の3室目。テストの中だけで建てて、必ず畳む。
+
+    def setUp(self):
+        rooms.ROOMS[self.DEPT] = {
+            "channel_id": "000000000000000000",
+            "lora_hint": "fusoh_v9",
+            "lora_strength": 0.8,
+            "ckpt": rooms.ROOMS["imagegen-fusoh-v0"]["ckpt"],
+            "persona": "優依",
+            "label": "fusoh_v9(検査用の架空室)",
+        }
+
+    def tearDown(self):
+        rooms.ROOMS.pop(self.DEPT, None)
+
+    def test_a_brand_new_lora_room_requires_the_cue(self):
+        """ROOMSへ1件足しただけ。合図の名簿には**何も書いていない**。"""
+        self.assertTrue(rooms.cue_required(self.DEPT),
+                        "新しいLoRA部屋が合図ルールを継がなかった(手で足す必要が残っている)")
+        self.assertIn(self.DEPT, rooms.lora_depts())
+
+    def test_chitchat_in_the_new_room_is_not_drawn(self):
+        """統一の中身=雑談で絵が走らない。実害の文(アメス便の実例)をそのまま通す。"""
+        h = deliver(CHITCHAT, self.DEPT, channel="検査用-架空のLoRA部屋")
+        self.assertEqual(h.spawned, [], "新室で雑談を描いた")
+        self.assertEqual(h.sent, [], "新室で雑談に返事をした")
+        self.assertIn("image_no_cue", h.modes())
+
+    def test_cue_order_in_the_new_room_is_drawn_once(self):
+        h = deliver("生成依頼 銀髪ロング 制服 桜", self.DEPT, channel="検査用-架空のLoRA部屋")
+        self.assertEqual(len(h.spawned), 1, "新室で合図付きの注文が走らなかった: %r" % (h.spawned,))
+        self.assertNotIn("生成依頼", " ".join(h.spawned[0]))
+
+    def test_a_new_room_without_a_lora_is_still_untouched(self):
+        """★LoRA無しの部屋を建てた場合は従来どおり素通し(C-035の線はそのまま)。"""
+        rooms.ROOMS["imagegen-plain-test"] = {"lora_hint": None, "persona": "優依",
+                                              "ckpt": rooms.ROOMS["imagegen"]["ckpt"],
+                                              "label": "検査用(LoRA無し)"}
+        try:
+            self.assertFalse(rooms.cue_required("imagegen-plain-test"))
+        finally:
+            rooms.ROOMS.pop("imagegen-plain-test", None)
 
 
 class TestExistingRoomUnchanged(unittest.TestCase):
