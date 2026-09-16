@@ -26,17 +26,12 @@ ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 API = "http://127.0.0.1:8188"
 CKPT = "waiIllustriousSDXL_v170.safetensors"
 
-#: 1回の注文で描く枚数。★2026-09-16 Chami直令 msg 1549785270683967662=
-#  「画像生成する際は4枚生成するようにしてよ。」= 1回で複数案を並べて選ぶため。
-#  ★★実測してから入れた(C-058=デスクトップの取り分を潰さない)。2026-09-16 23:2x・
-#    RTX 5070 Ti(16,303MiB)・Illustrious-XL-v2.0・832x1216・steps 26 で
-#    **4枚・27.1秒・VRAMピーク 14,118MiB**(残り約2.2GB)。1枚のときのピークと秒数は
-#    同じ計測器 local/_work/measure_batch4.py で並べて測ってある。
-#  ★ここは**画像生成する全室に効く**(素モデル室 imagegen / LoRA室 fusoh_v0・fusoh_v2・
-#    itsumono は全部この1本を subprocess で呼ぶ)= 部屋ごとに書かない(二重管理を作らない)。
-#  ★環境変数 IMAGEGEN_BATCH で上書きできる= VRAMの細い機械へ移った時に
-#    コードを書き換えずに落とせるようにしてある。
-BATCH_DEFAULT = int(os.environ.get("IMAGEGEN_BATCH") or 4)
+# ★2026-09-16 23:2x 研究室HQ: 4枚化(Chami直令)を**ローカル研究室(カスミ)が同じ時刻に
+#   このファイルへ実装していた**。HQ側で足しかけた定数はここで引いて、実装はカスミの1本に寄せた
+#   = 同じ値の置き場を2つ作らない。HQが持ち込んだのは実測の方だけ(C-058の確認)=
+#     RTX 5070 Ti(16,303MiB)・Illustrious-XL-v2.0・832x1216・steps 26 で
+#     **4枚= 27.1秒 / VRAMピーク 14,118MiB**、**1枚= 9.0秒 / 8,071MiB**。
+#     残り約2.2GB=デスクトップの取り分を潰さずに乗る。計測器= local/_work/measure_batch4.py。
 NEG_DEFAULT = "lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, jpeg artifacts, signature, watermark, username, blurry"
 
 
