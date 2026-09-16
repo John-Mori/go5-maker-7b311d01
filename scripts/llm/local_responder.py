@@ -790,6 +790,26 @@ def handle_image_request(rec, raw_line, content, channel, dept=None):
         log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "lora_missing", "channel": channel,
              "dept": dept, "q": content[:200], "image": True, "err": why[:300]})
         print(f"  画像生成不可(LoRA未設置) [{channel}] {why[:80]!r}")
+    elif rc == 5 and image_rooms is not None:
+        # ★2026-09-16 イージス研究室: タグ変換段(gemma)の時間切れ(DISPATCH-aegis-gl-1789567116980)。
+        #   これを rc=3 と同じ型で分けたのは、**描画が壊れたのと原因が違う**から=
+        #   絵の側を疑って時間を溶かさないよう、部屋の文面で先に言い切る。
+        why = ""
+        for ln in (out or "").splitlines():
+            if ln.startswith("TAG_TIMEOUT"):
+                why = ln[len("TAG_TIMEOUT"):].strip()
+        send_as(channel,
+                "日本語を英語のタグに直す係(ローカルのLLM)が時間内に返してこなかったから、"
+                "絵まで行けなかった。\n"
+                + (why or "理由が取れなかった。local/llm/responder_log.jsonl を見て。")
+                + "\n描く側(ComfyUI)は無罪よ。たいていはVRAMの取り合い="
+                  "ComfyUIが前の絵のモデルを抱えたままだと、この係が前に進めなくなるの。"
+                  "もう一度同じ言葉で頼んでくれれば、空けてから引き直すようにしてあるわ。",
+                image_rooms.TROUBLE_PERSONA, image_rooms.TROUBLE_SUFFIX)
+        log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "tag_timeout", "channel": channel,
+             "dept": dept, "q": content[:200], "image": True,
+             "reason": "local_chain_rc5", "err": (why or err or out)[:300]})
+        print(f"  タグ変換timeout [{channel}] {why[:80]!r}")
     else:
         # ローカルが通らなかった=Chamiの言う「うまくいくまでのClaude支援」に回す。黙って消さない。
         append_line(FOR_CLAUDE, raw_line)

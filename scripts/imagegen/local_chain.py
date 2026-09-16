@@ -21,13 +21,21 @@ Claude / ChatGPT / Gemini(ホイミン・ベホップ)を一切通さない。�
             (どちらも reasoning_tokens=1497 で打ち切り・content 0字)。思考は止められない。
     罠2 LLM常駐 + SDXL同時ロードの瞬間が 15,416MiB / 16,303MiB(残り0.9GB)。
         既定で画像生成の前にLLMを降ろす(C-058)。降ろしたくない時は --keep-model。
+        ★2026-09-16 追記(イージス研究室・実測)= **逆向きも詰まる**。ComfyUIが描き終えた後も
+          SDXLを抱えたままだと(実測 15,757MiB/16,303MiB・GPU 100%)、次の注文のタグ変換が
+          前に進まず **382.8秒たっても返らない**。/free でVRAMを返させた瞬間に完了し、
+          続く2回は 59.3秒 → 6.2秒。だから TAG_TIMEOUT(既定180秒)で早く諦め、
+          1回目の時間切れでは free_comfy_vram() を叩いてから1回だけ引き直す。
+          二度とも駄目なら rc=5(TAG_TIMEOUT)で親へ返す。
 """
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 
 try:
@@ -41,9 +49,25 @@ except Exception:
 LMS_API ="http://127.0.0.1:1234/v1/chat/completions"
 LMS_EXE = os.path.expandvars(r"%USERPROFILE%\.lmstudio\bin\lms.exe")
 CHAT_MODEL = "gemma-4-12b-it"
+COMFY_API = "http://127.0.0.1:8188"
 CKPT = "Illustrious-XL-v2.0.safetensors"
 _HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(_HERE))
+
+#: タグ変換1回あたりのハード上限(秒)。★推測で置いた数字ではない。2026-09-16 実測=
+#    ComfyUIがVRAMを掴んだまま(15,757MiB / 16,303MiB・GPU 100%)だと **382.8秒たっても
+#    返ってこない**。ComfyUIに /free でVRAMを返させた直後に同じ呼び出しが完了し、
+#    続く2回は **59.3秒 → 6.2秒**。つまり空きがあれば10秒未満、冷えていても1分で返る。
+#    180秒 = 実測最悪(59.3秒)の3倍。ここを超えたら「返ってこない側」に入っている。
+#  ★旧既定は900秒だった= 事故当日(22:39:51起動→22:55:00死亡・約909秒)の待ち時間そのもの。
+TAG_TIMEOUT = float(os.environ.get("IMAGEGEN_TAG_TIMEOUT") or 180)
+
+
+class TagTimeout(RuntimeError):
+    """タグ変換段(gemma)が制限時間内に返さなかった。
+
+    ★描画段(ComfyUI)の失敗とは別物として扱う= 部屋に出す文面も分ける。
+    """
 
 SYSTEM = (
     "あなたは日本語の指示をSDXL(Illustrious系)向けの英語プロンプトへ変換する係です。\n"
@@ -52,11 +76,50 @@ SYSTEM = (
 )
 
 
-def _post(url, payload, timeout=900):
+def _post(url, payload, timeout=None):
+    """LM Studioへ1発投げる。★時間切れは TagTimeout に化かして上へ返す。
+
+    ★socket の読み取り待ちは `socket.timeout` でも `URLError(reason=timeout)` でも
+      上がってくる(どちらで来るかは接続段か読み取り段かで変わる)。両方を同じ口で受ける
+      = 片方だけ拾う実装は「たまに素の例外が漏れる」という分かりにくい壊れ方になる。
+    """
+    timeout = TAG_TIMEOUT if timeout is None else timeout
     req = urllib.request.Request(
         url, json.dumps(payload).encode("utf-8"), {"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read())
+    t0 = time.time()
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read())
+    except socket.timeout:
+        raise TagTimeout("%.0f秒たっても応答が無かった" % (time.time() - t0))
+    except urllib.error.URLError as e:
+        if isinstance(e.reason, (socket.timeout, TimeoutError)):
+            raise TagTimeout("%.0f秒たっても応答が無かった" % (time.time() - t0))
+        raise
+    except TimeoutError:
+        raise TagTimeout("%.0f秒たっても応答が無かった" % (time.time() - t0))
+
+
+def free_comfy_vram():
+    """ComfyUIが遊んでいるならVRAMを返させる(戻り値= 返させたか)。
+
+    ★2026-09-16 実測でここが16分ハングの正体だった= ComfyUIがSDXLを抱えたまま
+      15,757MiB/16,303MiB を占め、gemma が前に進めない。/free を叩いたら 9,197MiB まで
+      落ち、その瞬間に止まっていた呼び出しが完了した。
+    ★描画待ちの列がある時は触らない(人の絵を巻き添えにしない)。失敗しても止めない。
+    """
+    try:
+        q = json.loads(urllib.request.urlopen(COMFY_API + "/queue", timeout=10).read())
+        if q.get("queue_running") or q.get("queue_pending"):
+            return False
+        req = urllib.request.Request(
+            COMFY_API + "/free",
+            json.dumps({"unload_models": True, "free_memory": True}).encode("utf-8"),
+            {"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=30).read()
+        return True
+    except Exception:
+        return False
 
 
 def ensure_server():
@@ -144,11 +207,24 @@ def to_tags(text, max_tokens=4000):
     tried = []
     for attempt in (1, 2):
         budget = max_tokens * attempt
-        d = _post(LMS_API, {
-            "model": CHAT_MODEL, "temperature": 0.4, "max_tokens": budget,
-            "messages": [{"role": "system", "content": SYSTEM},
-                         {"role": "user", "content": text}],
-        })
+        try:
+            d = _post(LMS_API, {
+                "model": CHAT_MODEL, "temperature": 0.4, "max_tokens": budget,
+                "messages": [{"role": "system", "content": SYSTEM},
+                             {"role": "user", "content": text}],
+            })
+        except TagTimeout as e:
+            tried.append("%s回目: %s" % (attempt, e))
+            if attempt == 2:
+                raise TagTimeout(
+                    "タグ変換が %.0f秒×2回とも返らなかった(%s)。"
+                    % (TAG_TIMEOUT, " / ".join(tried)))
+            # ★1回目の時間切れは、たいてい VRAM の食い合いだ(上の実測)。
+            #   空けてから1回だけ引き直す。空けられなければそのまま引き直す。
+            freed = free_comfy_vram()
+            print("  タグ変換が時間切れ(%s)。ComfyUIのVRAM解放=%s。もう1回だけ引く…"
+                  % (e, "した" if freed else "できなかった"))
+            continue
         msg = d["choices"][0]["message"]
         det = d.get("usage", {}).get("completion_tokens_details", {})
         tried.append("%s回目: reasoning_tokens=%s / max_tokens=%s"
@@ -237,7 +313,13 @@ def main():
         sys.exit(2)
 
     t0 = time.time()
-    tags = to_tags(text)
+    try:
+        tags = to_tags(text)
+    except TagTimeout as e:
+        # ★ここで黙って落ちない= 親(local_responder)は rc だけを見る。rc=5 を
+        #   「タグ変換の時間切れ」専用にして、部屋に読める文面を出させる(rc=3 の LORA_MISSING と同じ型)。
+        print("TAG_TIMEOUT %s" % e)
+        sys.exit(5)
     t1 = time.time()
     print("タグ列(%.1f秒): %s" % (t1 - t0, tags))
 
