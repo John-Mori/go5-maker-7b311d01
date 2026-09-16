@@ -1,6 +1,6 @@
 #!/bin/sh
 # go5 pre-commit フック。設置: bash scripts/hooks/install.sh
-#   ① 転送/受信系の手道具がルート直下に混入していないか (2026-09-16 aegis-gl・ケヴィン・デブライネ)
+#   ① 転送/受信系の手道具がこの運営runtimeの中に混入していないか (2026-09-16 aegis-gl・ケヴィン・デブライネ)
 #   ② ステージ済みの .md の表記チェック (記載ミスの根治・Chami承認2026-07-15)
 # 回避: 意図的な例示などで通したい時は git commit --no-verify。
 

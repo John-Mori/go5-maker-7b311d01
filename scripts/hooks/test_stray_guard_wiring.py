@@ -62,6 +62,51 @@ INNOCENT = {
 }
 
 
+def _installed_hook_path():
+    """実際に走る pre-commit の在りかを返す(無ければ None)。
+
+    ★`ROOT/.git/hooks/` を直に決め打ちしない= worktree では `.git` がファイル、
+      `core.hooksPath` を設定していれば置き場ごと変わる。git 本人に聞くのが唯一正しい。
+    """
+    try:
+        import subprocess
+        out = subprocess.run(
+            ["git", "rev-parse", "--git-path", "hooks/pre-commit"],
+            cwd=ROOT, capture_output=True, text=True, timeout=20,
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            p = out.stdout.strip()
+            if not os.path.isabs(p):
+                p = os.path.join(ROOT, p)
+            return p if os.path.exists(p) else None
+    except Exception:                                # noqa: BLE001
+        pass
+    p = os.path.join(ROOT, ".git", "hooks", "pre-commit")
+    return p if os.path.exists(p) else None
+
+
+def _read_bytes(path):
+    try:
+        with open(path, "rb") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def _print_first_diff(a, b):
+    """どこがズレたかを1行だけ見せる(赤の時に install.sh を叩けばいいと分かる形で)。"""
+    la = (a or b"").decode("utf-8", "replace").splitlines()
+    lb = (b or b"").decode("utf-8", "replace").splitlines()
+    for i in range(max(len(la), len(lb))):
+        x = la[i] if i < len(la) else "(無し)"
+        y = lb[i] if i < len(lb) else "(無し)"
+        if x != y:
+            print(f"    L{i + 1} 配布元= {x}")
+            print(f"    L{i + 1} 設置面= {y}")
+            print("    → bash scripts/hooks/install.sh を叩け(配布元を設置面へ配り直す)")
+            return
+
+
 def _build(base, files):
     for rel, body in files.items():
         p = os.path.join(base, rel.replace("/", os.sep))
@@ -146,6 +191,21 @@ def main():
     _check("⑤ pre-commit がガードを叩く", i_guard >= 0)
     _check("⑤ ガードは .md 無しコミットの早期exitより前に在る(順序に意味がある)",
            i_guard >= 0 and i_exit >= 0 and i_guard < i_exit)
+
+    # ⑥ **設置面**の一致。⑤までは全部「配布元」しか見ていない。
+    #   2026-09-16 に実際に起きた事故= 10:19 に配布元を直し、10:27 に install.sh が叩かれるまでの
+    #   8分間、走るのは古い版だった。その窓でAD研究室が誤った案内を2通運んでいる。
+    #   install.sh は**人が手で1回叩く入口**で、配布元を直しても実物は自動で追随しない(§3)。
+    #   → ズレたらここで赤くする。窓が在ること自体が検知対象だ。
+    installed = _installed_hook_path()
+    dist_b = _read_bytes(pc)
+    inst_b = _read_bytes(installed) if installed else None
+    _check("⑥ 設置面 .git/hooks/pre-commit が在る(install.sh が叩かれている)",
+           inst_b is not None)
+    same = dist_b is not None and inst_b is not None and dist_b == inst_b
+    if not same and inst_b is not None:
+        _print_first_diff(dist_b, inst_b)
+    _check("⑥ 設置面の中身が配布元と一致する(配布元だけ直しても実物は追随しない)", same)
 
     print(f"\n{PASS} PASS / {FAIL} FAIL")
     return 1 if FAIL else 0
