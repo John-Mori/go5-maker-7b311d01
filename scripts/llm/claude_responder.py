@@ -1,27 +1,12 @@
 #!/usr/bin/env python3
-"""無人時のClaude応答係 (研究室が死んでいる間、main箱を claude --print で処理する常駐)。
+"""研究室セッション不在時の、AIを使わない機械受付係。
 
-なぜ要るか(2026-07-17に判明した真因):
-  Discordの配達(鳩)は常駐で生きているが、**返すのは開いたClaudeセッションだけ**。全セッションが
-  死ぬと、送信スタンプは付くのに反応が無い(Chamiの「大至急」が3時間放置=INC-98)。
-  台本で対話セッションを復活させる案は認証(未ログイン)と対話プロンプトの無人実行で行き詰まった。
-  → 解決: **`claude --print` は無人でツール実行まで完走する**(認証はCLAUDE_CODE_OAUTH_TOKEN・
-    信頼/MCP/権限で止まらない・実測でDiscord自律投稿まで成功)。対話セッションを生かし続ける
-    代わりに、新着1件ごとに使い捨ての --print を回す。止まる所が無い=死なない。
+main箱を研究室セッションが処理できない間だけ見張り、既読印と固定の受領文を
+PythonからDiscordへ送る。本対応用のfollowupは従来どおりmain箱へ残す。
 
-責任範囲(1つだけ):
-  **main箱(local/discord_inbox.jsonl)を、研究室セッションが死んでいる時だけ**処理する。
-  研究室が生きている時は触らない(本人が応対する)。=最後の受け皿。
-
-ガード(安全のため):
-  - 研究室が生存(claude_active.txt が新しい)なら何もしない=多重応答を防ぐ。
-  - 機微部屋(dream-care/past-room/health-log)の**内容には触らない**(privacy)。無人シグナルは
-    absence_watchdog が別途出す。ここではprocessed送りにせず残す(本人/研究室が後で応対)。
-  - 処理済み台帳(discord_processed.jsonl)で二重処理を防ぐ。
-  - 1巡回あたりの上限(暴走・費用の歯止め)。
-  - Chamiのサブスクを使うため呼び出しは最小限に。
-
-前提: local/cli_auth_token.txt (claude setup-token のOAuthトークン・gitignore済)。
+以前はこの固定文1通のために毎回 ``claude --print`` を起動していたが、文章判断も
+実作業もさせていなかった。現在はClaude/OpenAI/Geminiを一切呼ばない。
+機微部屋・セッション専有部屋・専任デーモンのガード、重複防止、巡回上限は維持する。
 
 使い方:
   python scripts/llm/claude_responder.py --once   # 1巡回で終了(点検/テスト)
@@ -43,8 +28,10 @@ ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 LOCAL = os.path.join(ROOT, "local")
 INBOX = os.path.join(LOCAL, "discord_inbox.jsonl")
 PROCESSED = os.path.join(LOCAL, "discord_processed.jsonl")
-TOKEN_FILE = os.path.join(LOCAL, "cli_auth_token.txt")
-CLAUDE = r"C:\Users\chami\.local\bin\claude.exe"
+PERSONA_SEND = os.path.join(ROOT, "scripts", "discord", "persona_send.py")
+REACT = os.path.join(ROOT, "scripts", "discord", "react.py")
+PERSONA = "研究室(無人代打)"
+ACK_TEXT = "受領。本対応は担当セッションへ引き継ぎます。"
 
 POLL_SEC = 20
 # ★生存判定(2信号)は共有ヘルパ scripts/llm/presence.py へ一本化(2026-07-18 INC対策)。
@@ -52,14 +39,6 @@ POLL_SEC = 20
 #   以前はここに実装があり、local/gemini responderへ横展開されず drift → 代打暴発を招いた。
 MAX_PER_CYCLE = 3              # 1巡回で処理する上限(暴走と費用の歯止め)
 SENSITIVE_DEPTS = ("dream-care", "past-room", "health-log")
-
-
-def read_token():
-    try:
-        with open(TOKEN_FILE, "r", encoding="utf-8") as f:
-            return f.read().strip()
-    except OSError:
-        return ""
 
 
 sys.path.insert(0, HERE)
@@ -79,7 +58,12 @@ from presence import lab_alive  # noqa: E402  生存判定(2信号)は全respond
 #   実際にログへ痕跡が残っていた= `応答 [改善提案部門-アスナ•トトリ] rc=1 "You've hit your weekly limit"`。
 #   **ORG-12(代打が本人セッション向けの便を食う)と同じ形が、別の部屋で再生していた。**
 #   ★「精霊が居ない」と「担当が居ない」は別。**セッションが担当している部屋は、精霊の有無に関わらず代打が触らない。**
-SESSION_OWNED_DEPTS = ("hq", "aegis-gl", "research-room", "keiei-kikaku", "kaizen-analyst")
+# ★2026-09-16 hr-room を追加(Chami直・msg 1549628315248230543「引き継ぐなほんで」)。
+#   実害= 研究室(無人代打)が hr-room の便へ「受領。本対応は担当セッションへ引き継ぎます。」を投稿していた。
+#   hr-room の担当は対話セッション(ククール/アメス)本人=「引き継ぐ」先の別担当は存在しない
+#   → 上の ORG-04 と寸分違わぬ嘘。session-owned として一次ackを打たない(便はfollowupで残り本人が処理)。
+#   ★名指し1件に留める(C-035)= 他室へは広げない。
+SESSION_OWNED_DEPTS = ("hq", "aegis-gl", "research-room", "keiei-kikaku", "kaizen-analyst", "hr-room")
 
 
 def room_is_session_owned(dept):
@@ -150,63 +134,51 @@ def processed_ids():
     return ids
 
 
-def build_prompt(rec):
-    """研究室の代打として1件を処理させる指示。Claudeがrepoを読んで適切な人格で応対する。"""
-    ch = rec.get("channel", "")
-    dept = rec.get("dept", "router")
-    author = rec.get("author", "")
-    content = rec.get("content", "")
-    return (
-        "あなたは go5-maker AI組織の『研究室』の無人代打です(claude --print・使い捨て起動)。"
-        "全セッションが落ちている間、Chamiのメッセージ1件を処理して応答するのが仕事です。\n\n"
-        f"■受信: チャンネル『{ch}』(部門 {dept})・送信者 {author}\n"
-        f"■本文:\n{content}\n\n"
-        "■やること\n"
-        "1. まず既読を押す: python scripts/discord/react.py --channel " + json.dumps(ch, ensure_ascii=False) + " --msg " + str(rec.get("msg_id", "")) + " --emoji 既読\n"
-        "2. 内容を判断し、Discordへ短く返信する。返信は必ず本文をファイルに書いてから "
-        "python scripts/discord/persona_send.py --channel <ch名かID> --persona '研究室(無人代打)' --body-file <path> で送る。\n"
-        "   ★あなたは使い捨ての無人代打で、アメス/ククール等の作り込まれたリッチ人格を演じ切れない="
-        "無理に演じると口調が崩れ『キャラ設定が壊れた』という誤認を生む(実害・QA確認2026-07-18・D2)。"
-        "だから演技も気の利いた文章も一切しない。名乗りは『研究室(無人代打)』。"
-        "★中身は"
-        "**機械的に極めて短く**返す(Chami指定2026-07-18『もっと機械的に』)。原則この定型のみ: "
-        "『受領。担当の起床後に返答。』。案件の一言要約を足すなら『受領(＜3〜10字の用件＞)。担当の起床後に返答。』まで。"
-        "挨拶・気遣い・説明・敬語での長文は付けない。\n"
-        "3. コード実装や横断の重い依頼なら、その場で全部やろうとせず『無人代打が受領。担当セッションが起きたら本対応する』旨を短く返す"
-        "(あなたは使い捨てなので長い作業は残さない)。\n"
-        "4. 秘密(トークン/アプリPW/af_id)は出力しない。断定できない数字は調べてから。\n"
-        "完了したら done とだけ返してください。"
-    )
+def _channel_name(rec):
+    """現在のchannel_idから最新の表示名を引く。旧便だけ記録済み名称へ戻る。"""
+    channel_id = str(rec.get("channel_id") or "").strip()
+    if channel_id.isdigit():
+        try:
+            path = os.path.join(LOCAL, "discord_channels.json")
+            for row in json.load(open(path, encoding="utf-8")):
+                if str(row.get("id") or "") == channel_id:
+                    return str(row.get("name") or "").strip()
+        except Exception:
+            pass
+    return str(rec.get("channel") or "").strip()
 
 
-def handle(rec, token):
-    env = dict(os.environ)
-    env["CLAUDE_CODE_OAUTH_TOKEN"] = token
-    prompt = build_prompt(rec)
-    try:
-        # ★2026-08-24 promptを**stdin**で渡す(argv末尾に置かない・イージス研究室)。
-        #   argvに置くとWindowsのコマンドライン上限(32,767字)を超えた便で CreateProcess が
-        #   WinError 206 を返し、Pythonは**FileNotFoundError**として投げる=「ファイルが無い」に
-        #   見える起動失敗で便が握り潰される(実障害= DISPATCH-system-engineer-1786575652694・
-        #   8/13 08:08〜08:29に5回連続で失敗し、その依頼は最後まで完了しなかった)。
-        #   session_relay/dept_daemon/persona_render は同日に stdin 化済み(commit 3f5ac58 ほか)。
-        #   ここだけ argv のまま残っていた= 今のところ prompt は定型+Discord本文(上限2,000字)で
-        #   上限に届かないが、**届かないのは入力の都合であって機構の保証ではない**。同じ穴を
-        #   1箇所に残さない。claude --print は positional prompt が無ければ stdin を prompt として読む。
-        p = subprocess.run(
-            [CLAUDE, "--print", "--permission-mode", "bypassPermissions"],
-            input=prompt, cwd=ROOT, env=env, capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=300,
-        )
-        ok = (p.returncode == 0)
-        tail = (p.stdout or "")[-200:]
-        print(f"  応答 [{rec.get('channel')}] rc={p.returncode} {tail!r}")
-        return ok
-    except subprocess.TimeoutExpired:
-        print(f"  タイムアウト [{rec.get('channel')}]")
+def handle(rec, token=None):
+    """既読印と固定受領文をPythonで送る。token引数は旧呼び出し互換で未使用。"""
+    channel = _channel_name(rec)
+    reaction_target = str(rec.get("channel_id") or channel).strip()
+    msg_id = str(rec.get("msg_id") or "").strip()
+
+    if reaction_target and msg_id:
+        try:
+            subprocess.run(
+                [sys.executable, REACT, "--channel", reaction_target,
+                 "--msg", msg_id, "--emoji", "既読"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=30,
+            )
+        except Exception:
+            pass  # 印の失敗で受領本文まで止めない
+
+    if not channel:
+        print("  機械受付失敗 [チャンネル不明]")
         return False
+    try:
+        p = subprocess.run(
+            [sys.executable, PERSONA_SEND, "--channel", channel,
+             "--persona", PERSONA, "--body", ACK_TEXT],
+            cwd=ROOT, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=60,
+        )
+        print(f"  Python機械受付 [{channel}] rc={p.returncode}")
+        return p.returncode == 0
     except Exception as e:
-        print(f"  失敗 [{rec.get('channel')}] {type(e).__name__}")
+        print(f"  機械受付失敗 [{channel}] {type(e).__name__}")
         return False
 
 
@@ -224,7 +196,7 @@ QUEUE_DB = os.path.join(LOCAL, "queue", "inbox.db")
 QUEUE_DEPTS = ("router", "main")  # main宛て=waiterデュアル監視と同じ
 
 
-def cycle_queue(token):
+def cycle_queue(token=None):
     """段階2(2026-07-18): queue経路の代打。研究室死亡時にLeaseQueueのmain系宛てをclaim→処理→ack。
 
     切替後はjsonlに新着が来ないため、これが無いと「絶対応対の最後の受け皿」が盲目になる
@@ -268,7 +240,7 @@ def cycle_queue(token):
                     q.ack(c["id"], result="一次ack省略(部屋の専任デーモンが応答済み)")
                     print(f"{time.strftime('%H:%M:%S')} 一次ack省略: {rec.get('dept')} は専任デーモン稼働中")
                 else:
-                    ok = handle(rec, token)
+                    ok = handle(rec)
                     q.ack(c["id"], result="代打応答" if ok else "代打失敗(再試行なし)")
                 append_processed(json.dumps(rec, ensure_ascii=False))
                 sent += 1
@@ -289,11 +261,11 @@ def cycle_queue(token):
         q.close()
 
 
-def cycle(token):
+def cycle(token=None):
     if lab_alive():
         print("研究室が生存=代打しない(多重応答防止)")
         return
-    cycle_queue(token)  # 段階2: queue経路(jsonlと並行して見る。切替後はこちらが主)
+    cycle_queue()  # 段階2: queue経路(jsonlと並行して見る。切替後はこちらが主)
     if not os.path.exists(INBOX) or os.path.getsize(INBOX) == 0:
         return
     done = processed_ids()
@@ -333,7 +305,7 @@ def cycle(token):
             # 部屋の専任デーモンが既に応答済み=一次ackは二重応答にしかならない(下でfollowupは残す)。
             print(f"{time.strftime('%H:%M:%S')} 一次ack省略: {rec.get('dept')} は専任デーモン稼働中")
         else:
-            handle(rec, token)
+            handle(rec)
         append_processed(line)  # 成否に関わらず台帳へ(暴走・無限再試行を防ぐ)
         sent += 1
         # ★followup投函(2026-07-18: 「担当の起床後に返答」が構造的に嘘だった穴の修正。
@@ -358,14 +330,10 @@ def cycle(token):
 
 def main():
     once = "--once" in sys.argv
-    token = read_token()
-    if not token:
-        print("cli_auth_token.txt が無い=無人代打は不可(claude setup-token を実行し保存)")
-        return 2
-    print(f"claude無人応答係 起動 ({'--once' if once else f'{POLL_SEC}秒間隔'}・研究室が死んでいる間のみ動く)")
+    print(f"AI不使用の機械受付 起動 ({'--once' if once else f'{POLL_SEC}秒間隔'}・研究室が死んでいる間のみ動く)")
     while True:
         try:
-            cycle(read_token() or token)  # ★2026-07-20(裁4): トークン都度読み=更新が再起動なしで反映
+            cycle()
         except Exception as e:
             print(f"巡回失敗: {type(e).__name__}")
         if once:
