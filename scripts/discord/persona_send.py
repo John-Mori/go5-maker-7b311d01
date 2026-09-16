@@ -517,6 +517,35 @@ def _audit_tone_rewrite(persona, dept, before, res):
         pass
 
 
+def _audit_structure(persona, dept, body, tag):
+    """★軸②(構造)と軸③(他人格の混入)を**数えて置くだけ**の一段(2026-09-16・AD研究室 msg
+    1549597333283676171 便6で owner=イージス研究室・可否は人事部門と改修αが既に出している)。
+
+    ★閾値を置かない・何も書き換えない・何も落とさない。理由はAD研究室の corpus 実測=
+      崩れた便の bold は 3、平時の中央値 1・最大 5 で**分離しない**。ここで線を引くと
+      正当な技術説明を殴る。分布が溜まるまでは数えるだけ= 軸②が通った順番(検知先行)。
+    ★数えるのは **200字の抜粋ではなく本文全体**(モドリッチの注文)。崩れは後半に出る=
+      抜粋で数えると見えない。台帳は既存の tone_audit.jsonl 1本(記録先を2つ持たない§4)。
+    ★例外は全部飲む= この監査で送信を殺さない(他の sink と同じ fail-safe)。
+    """
+    try:
+        _llm = os.path.join(ROOT, "scripts", "llm")
+        if _llm not in sys.path:
+            sys.path.insert(0, _llm)
+        from tone_structure import count_structure
+        row = count_structure(body, persona=persona)
+        row.update({
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "dept": dept, "event": "tone_structure", "src": tag or "persona_send",
+            "persona": str(persona or ""),
+        })
+        os.makedirs(os.path.dirname(TONE_AUDIT), exist_ok=True)
+        with open(TONE_AUDIT, "a", encoding="utf-8") as f:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
 def tone_rewrite_backstop(body, persona, dept, rules, remaining, audit=True, ask=None):
     """出力ゲート**D-2**(案F)を合流点にも当てる(2026-09-11・Chami「寝る前Go」)。
 
@@ -699,6 +728,10 @@ def apply_text_gates(body, persona=None, dept=None, tag="persona_send", audit=Tr
     body = tone_backstop(body, persona, dept, audit=audit)
     body = enjoh_backstop(body, quiet=not audit)
     body = _homo_gate(body, persona=persona, dept=dept, tag=tag, audit=audit)
+    # ★構造監査(軸②/軸③)は**3ゲートの後**= 実際に投稿される文字列をそのまま数える。
+    #   audit=False(突合の再現)では書かない= 同じ便を2行数えたら分布が歪む。
+    if audit:
+        _audit_structure(persona, dept, body, tag)
     return body
 
 
