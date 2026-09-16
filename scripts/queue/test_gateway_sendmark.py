@@ -46,6 +46,8 @@ GW_SRC = os.path.join(HERE, "discord_gateway.py")
 
 CH_ID = "900000000000000001"      # 台帳に載っている部屋
 CH_OUT = "900000000000000002"     # 台帳外の部屋 (押してはいけない)
+CH_YUI = "900000000000000003"     # 優依の自室 (llm-growth)= 印を押してはいけない部屋
+CH_IMG = "900000000000000004"     # LoRA画像部屋 (imagegen-fusoh-v0)= 「生成依頼」便だけ押さない
 
 # --- 変異 (must-fail 用。実ファイルは書き換えない=常駐へ触れない) ------------------
 MUTATIONS = {
@@ -69,11 +71,35 @@ MUTATIONS = {
                  '            except Exception:\n'
                  '                raise  # MUTANT'),
     # Codexの撃ち分けを殺す (2026-09-07 追加。再発時にここが赤くなる)
-    "codex": ('emoji = sent_mark_for(m.guild, rec["dept"])',
-              'emoji = sent_mark_for(m.guild, "")  # MUTANT'),
+    # ★2026-09-16 引数が1つ増えた(content)ので狙いを「dept を渡す所」だけへ縮めた=
+    #   以後も引数が増減して当たらなくなることがない。
+    "codex": ('sent_mark_for(m.guild, rec["dept"], ',
+              'sent_mark_for(m.guild, "",  # MUTANT\n                                      '),
     # ミラー便のCodex判定を殺す
-    "codexmirror": ('and is_codex_mentioned(m.content or "")) else "")',
-                    'and False) else "")  # MUTANT'),
+    "codexmirror": ('and is_codex_mentioned(m.content or ""))\n'
+                    '                              else str((chan_map.get(str(m.channel.id))',
+                    'and False)  # MUTANT\n'
+                    '                              else str((chan_map.get(str(m.channel.id))'),
+    # ★2026-09-12 追加: 優依の部屋を「押さない側」から外す(=Claude印が優依へ付く再発)
+    # ★2026-09-16 表の**中身**まで一致させていたので、imagetag が足された日に変異が当たらなく
+    #   なっていた(実測: `--mutate yui` が「一致 0件」で rc=2)。must-fail の見張りが黙る型だ。
+    #   → 変数名の頭だけを狙う= 部屋が増減しても当たり続ける(残りは MUTANT のコメントへ落ちる)。
+    "yui": ('NO_SENT_MARK_DEPTS = ("llm-growth"',
+            'NO_SENT_MARK_DEPTS = ()  # MUTANT ("llm-growth"'),
+    # ミラー便だけ押さない判定を殺す (押下点が2つある型の再発。C-064=OUT口は全数同時)
+    "yuimirror": ('                    if emoji is None:\n'
+                  '                        return          # ★押さない部屋',
+                  '                    if False:\n'
+                  '                        return          # MUTANT ★押さない部屋'),
+    # ★2026-09-16 追加: 「生成依頼」便の非押下を殺す(Chami直令 msg 1549650439178428447)
+    "cue": ('    if _local_pipeline_order(dept, content):',
+            '    if False:  # MUTANT'),
+    # 生便の押下点が本文を渡さなくなる(dept しか見ない旧形へ戻る型の再発)
+    "cuebody": ('emoji = sent_mark_for(m.guild, rec["dept"], rec.get("content") or "")',
+                'emoji = sent_mark_for(m.guild, rec["dept"])  # MUTANT'),
+    # ミラー便の押下点が本文を渡さなくなる (押下点が2つある型の再発。C-064)
+    "cuemirror": ('emoji = sent_mark_for(m.guild, _mdept, m.content or "")',
+                  'emoji = sent_mark_for(m.guild, _mdept)  # MUTANT'),
 }
 
 PASS = FAIL = 0
@@ -160,7 +186,9 @@ def build_local(tmp):
     # ★ゲートも本物の経路で読ませる (ACTIVE_JOBS を手で True にしない)
     json.dump({"gateway_jobs": "1", "gateway_jobs_depts": ""},
               open(os.path.join(loc, "queue", "cutover.json"), "w", encoding="utf-8"))
-    json.dump([{"id": CH_ID, "name": "イージス研究室", "dept": "aegis-gl"}],
+    json.dump([{"id": CH_ID, "name": "イージス研究室", "dept": "aegis-gl"},
+               {"id": CH_YUI, "name": "ローカルllm成長進捗", "dept": "llm-growth"},
+               {"id": CH_IMG, "name": "画像生成-fusoh-v0", "dept": "imagegen-fusoh-v0"}],
               open(os.path.join(loc, "discord_channels.json"), "w", encoding="utf-8"))
     open(os.path.join(loc, "discord_bot_token.txt"), "w", encoding="utf-8").write("DUMMY")
     # ★@ボス召喚を本物の経路で有効にする (2026-09-07)。手でフラグ変数を立てない=
@@ -312,6 +340,67 @@ def main(argv):
         asyncio.run(on_message(mmc))
         check("6 ミラー便のCodex召喚にも uptsukiyomi", mmc.pushed[:1] == [upt],
               "-> %r" % (mmc.pushed,))
+
+        # ---- [7] 優依の部屋= 送信印を押さない (Chami直接指示 2026-09-12) ----
+        # ★原文=「優依に送った時には <:sendms:…> の絵文字スタンプつけないようにしてよ、
+        #   あれClaude専用の処理だから」(llm-edu msg 1548006584809168931 01:25:30)。
+        #   sendms は「司令塔の処理系に乗った」印で、優依はその処理系に乗らない=
+        #   押すと**乗っていない経路に乗った印**という嘘が Chami の画面に残る。
+        #   押下点は2つ(生便・Chamiミラー)。C-064=OUT口は全数同時に見る。
+        print("[7] 優依の部屋 (llm-growth)= 印を押さない")
+        chy = FakeChannel(int(CH_YUI), "ローカルllm成長進捗")
+        m12 = FakeMsg(12, "優依、元気?", chami, chy, guild)
+        asyncio.run(on_message(m12))
+        check("7 優依への生便には印を押さない", m12.pushed == [], "-> %r" % (m12.pushed,))
+        check("7 印は押さなくても便は queue に入っている", "12" in queued(loc))
+        check("7 便は dept=llm-growth で入っている", queued_dept(loc, "12") == "llm-growth",
+              "-> %r" % (queued_dept(loc, "12"),))
+
+        m13 = FakeMsg(13, "優依へのミラー", FakeAuthor("Chami(main)", 222, bot=True), chy, guild,
+                      webhook_id=777)
+        asyncio.run(on_message(m13))
+        check("7 優依へのミラー便にも印を押さない", m13.pushed == [], "-> %r" % (m13.pushed,))
+
+        # 他の部屋は今までどおり= 「押さない」が全部屋へ漏れていないこと (C-035)
+        m14 = FakeMsg(14, "こっちは普通の部屋", chami, ch, guild)
+        asyncio.run(on_message(m14))
+        check("7 他の部屋は従来どおり sendms", m14.pushed[:1] == [sendms], "-> %r" % (m14.pushed,))
+        m15 = FakeMsg(15, "他部屋のミラー", FakeAuthor("Chami(main)", 222, bot=True), ch, guild,
+                      webhook_id=777)
+        asyncio.run(on_message(m15))
+        check("7 他の部屋のミラーも従来どおり sendms", m15.pushed[:1] == [sendms],
+              "-> %r" % (m15.pushed,))
+
+        # ---- [8] 「生成依頼」便= 印を押さない (Chami直接指示 2026-09-16) ----
+        # ★原文=「生成依頼 から始まった時は画像生成だから、Claud送信用の各種スタンプを
+        #   押さないで」(hq msg 1549650439178428447)。LoRA部屋の絵を描くのは優依の
+        #   ローカル経路で、Claudeはその処理系に乗らない= [7]と同じ嘘になる。
+        #   ★違いは**部屋ごとではなく便ごと**だという点。同じ部屋の雑談には従来どおり押す。
+        print("[8] 「生成依頼」便 (LoRA部屋)= 印を押さない")
+        chi = FakeChannel(int(CH_IMG), "画像生成-fusoh-v0")
+        m16 = FakeMsg(16, "生成依頼 銀髪ロング 制服 桜", chami, chi, guild)
+        asyncio.run(on_message(m16))
+        check("8 「生成依頼」で始まる便には印を押さない", m16.pushed == [], "-> %r" % (m16.pushed,))
+        check("8 印は押さなくても便は queue に入っている", "16" in queued(loc))
+        check("8 便は dept=imagegen-fusoh-v0 で入っている",
+              queued_dept(loc, "16") == "imagegen-fusoh-v0", "-> %r" % (queued_dept(loc, "16"),))
+
+        m17 = FakeMsg(17, "生成依頼\n\n猫耳", FakeAuthor("Chami(main)", 222, bot=True), chi, guild,
+                      webhook_id=777)
+        asyncio.run(on_message(m17))
+        check("8 ミラー便の「生成依頼」にも押さない", m17.pushed == [], "-> %r" % (m17.pushed,))
+
+        # 同じ部屋の雑談は従来どおり押す (「部屋ごと」へ広がっていないこと)
+        m18 = FakeMsg(18, "この絵いいね", chami, chi, guild)
+        asyncio.run(on_message(m18))
+        check("8 同じ部屋でも雑談には従来どおり sendms", m18.pushed[:1] == [sendms],
+              "-> %r" % (m18.pushed,))
+
+        # 合図の要らない部屋へ漏れていないこと (C-035)
+        m19 = FakeMsg(19, "生成依頼 これは画像部屋ではない", chami, ch, guild)
+        asyncio.run(on_message(m19))
+        check("8 LoRA部屋以外では合図語があっても従来どおり sendms",
+              m19.pushed[:1] == [sendms], "-> %r" % (m19.pushed,))
 
         print("\n%d PASS / %d FAIL" % (PASS, FAIL))
         return 1 if FAIL else 0

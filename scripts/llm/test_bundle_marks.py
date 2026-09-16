@@ -160,9 +160,30 @@ FAKE.calls = []
 dm._mark_bundled("ch", ["a", "b"], "通常")
 check("2件×2印=4回押す", len(FAKE.marks()) == 4)
 
+# ★2026-09-16 Chami直令(hq msg 1549650439178428447)=「生成依頼 から始まった時は画像生成
+#   だから、Claud送信用の各種スタンプを押さないで」。束ね印もその口の1つ(C-064=全数同時)。
+#   判定は rooms.local_pipeline_order(=正本)を引く `is_local_pipeline_order` 1本。
+print("[3b] 「生成依頼」便には束ね印も押さない")
+_IMG = "imagegen-fusoh-v0"
+FAKE.calls = []
+dm._mark_bundled("ch", ["a", "b"], "生成依頼混在",
+                 recs=[{"msg_id": "a", "dept": _IMG, "content": "生成依頼 銀髪ロング"},
+                       {"msg_id": "b", "dept": _IMG, "content": "この絵いいね"}])
+check("「生成依頼」便だけ外れ、雑談便には押す(1件×2印)", len(FAKE.marks()) == 2)
+check("外れたのは a の方だ(押したのは b だけ)",
+      sorted({m for m, _ in FAKE.marks()}) == ["b"])
+FAKE.calls = []
+dm._mark_bundled("ch", ["a"], "合図の要らない部屋",
+                 recs=[{"msg_id": "a", "dept": "copy-director",
+                        "content": "生成依頼 これは画像部屋ではない"}])
+check("LoRA部屋以外では合図語があっても従来どおり押す(C-035)", len(FAKE.marks()) == 2)
+FAKE.calls = []
+dm._mark_bundled("ch", ["a", "b"], "recsを渡さない従来の呼び方")
+check("recsを渡さなければ挙動は従来どおり", len(FAKE.marks()) == 4)
+
 print("[4] ★変異検査= 印の実装を無効化したら[1]は落ちる(空PASSでない証明)")
 _keep = d.Daemon._mark_bundled
-d.Daemon._mark_bundled = lambda self, ch, ids, why: None
+d.Daemon._mark_bundled = lambda self, ch, ids, why, recs=None: None
 db = _tmpdb()
 q = LeaseQueue(db)
 q.enqueue(_body("m1", "続き"), msg_id="m1", dept="copy-director")

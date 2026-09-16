@@ -80,10 +80,12 @@ class _FakeSub:
         return out
 
 
-def _body(mid, content="補足だけど", author="chami_fusoh", ch=CH, test=False):
+def _body(mid, content="補足だけど", author="chami_fusoh", ch=CH, test=False, dept=None):
     b = {"msg_id": mid, "author": author, "content": content, "channel": ch}
     if test:
         b["test"] = True
+    if dept:
+        b["dept"] = dept        # ★2026-09-16 「生成依頼」便の判定が部屋の札を見るので足せる形に
     return b
 
 
@@ -151,6 +153,26 @@ check("Chamiの便には押す(この検査が空でない証明)", got)
 check("他部門(AI)の便には押さない", not any(m == "1545000000000000004" for m, _ in FAKE.marks()))
 check("別の部屋の便には押さない", not any(m == "1545000000000000005" for m, _ in FAKE.marks()))
 check("検証便には押さない(本番の部屋を汚さない)", not any(m == "1545000000000000006" for m, _ in FAKE.marks()))
+stop.set()
+q.close()
+
+# ★2026-09-16 Chami直令(hq msg 1549650439178428447)=「生成依頼 から始まった時は画像生成
+#   だから、Claud送信用の各種スタンプを押さないで」。走行中の既読もその口の1つ(C-064)。
+#   LoRA部屋の絵を描くのは優依のローカル経路= Claudeの印は「乗っていない経路に乗った」嘘になる。
+print("[2b] 「生成依頼」便には走行中の既読も押さない")
+_IMG = "imagegen-fusoh-v0"
+q = _q()
+dm = _daemon(dept=_IMG)
+FAKE.calls = []
+stop = dm._start_live_mark(_body("1545000000000000101", "本便", dept=_IMG))
+q.enqueue(_body("1545000000000000102", "生成依頼 銀髪ロング 制服", dept=_IMG),
+          msg_id="1545000000000000102", dept=_IMG)
+q.enqueue(_body("1545000000000000103", "この絵いいね", dept=_IMG),
+          msg_id="1545000000000000103", dept=_IMG)
+got = _until(lambda: ("1545000000000000103", "既読") in FAKE.marks())
+check("同じ部屋の雑談には押す(この検査が空でない証明)", got)
+check("★「生成依頼」で始まる便には押さない",
+      not any(m == "1545000000000000102" for m, _ in FAKE.marks()))
 stop.set()
 q.close()
 

@@ -1070,6 +1070,30 @@ def forward_after_reply(rec, is_work=False, forward_all=False):
     return "chami" in str(rec.get("author") or "").lower()
 
 
+def is_local_pipeline_order(rec):
+    """この便は「生成依頼」で始まる画像注文か(=描くのはローカル・Claude印を押さない)。
+
+    ★2026-09-16 Chami直令(hq msg 1549650439178428447)=
+      「生成依頼 から始まった時は画像生成だから、Claud送信用の各種スタンプを押さないで」。
+      LoRA部屋(imagegen-fusoh-v0/v2)の絵を描くのは優依のローカル経路で、Claudeは
+      conversation_only= 出てきた絵を見て話すだけ。その便へ既読/着手を押すと
+      「Claudeがこれをやっている」という嘘がChamiの画面に残る。
+    ★判定の正本は scripts/imagegen/rooms.py。**ここへ写経しない**(合図語も対象部屋もあちら)。
+    ★fail-open= 読めなければ False(=従来どおり押す)。印の都合で本走を巻き込まない。
+    """
+    try:
+        if not isinstance(rec, dict):
+            return False
+        text = str(rec.get("content") or "")
+        if not text:
+            return False
+        sys.path.insert(0, os.path.join(ROOT, "scripts", "imagegen"))
+        import rooms                       # noqa: E402
+        return bool(rooms.local_pipeline_order(str(rec.get("dept") or ""), text))
+    except Exception:
+        return False
+
+
 def marks_ok(rec, ch, mid, dry_run=False):
     """この便へDiscordの進捗印(既読✅/着手👀)を押してよいか。
 
@@ -1081,11 +1105,15 @@ def marks_ok(rec, ch, mid, dry_run=False):
       =機械の側に無い安全網(§3)。channel を持った検証便が1本来ればChamiの画面に印が付く。
     ★走行中の既読(`_start_live_mark` / `_live_mark_loop`)と束ね印(`_mark_bundled` の呼び側)は
       以前から test を見ている= 抜けていたのはこの2口だけ、というのが実測。
+    ★2026-09-16「生成依頼」便の非押下は `is_local_pipeline_order` 1本で見る。この2口の他に
+      走行中の既読・束ね印にも同じ関数を置いた(C-064= OUT口は全数同時に塞ぐ)。
     """
     if dry_run:
         return False
     if isinstance(rec, dict) and rec.get("test"):
         return False
+    if is_local_pipeline_order(rec):
+        return False        # ★2026-09-16 「生成依頼」便=Claudeは描かない(上の関数を読め)
     return bool(ch and mid)
 
 
@@ -9404,7 +9432,7 @@ class Daemon:
         text = (text or "").strip()
         return text or None
 
-    def _mark_bundled(self, ch, msg_ids, why):
+    def _mark_bundled(self, ch, msg_ids, why, recs=None):
         """束ねて取り込んだ便へ「既読✅/着手👀」を押す(2026-08-18・イージス研究室)。
 
         ★塞ぐ穴(REQ-aegis-gl-13fcea00f4「反応がない」の実体):
@@ -9422,8 +9450,16 @@ class Daemon:
         ★押すのは既読と着手の両方= この便はもう「読まれ、いま処理されている」からだ。
           react.py は同じ印を二度押しても害が無い(既に在れば Discord 側が無視する)。
         ★fail-open: 何が失敗しても配送を巻き込まない(印は表示であって応答ではない)。
+        ★recs= 束ねた元の便(あれば)。**便ごと**に押さない条件(2026-09-16の「生成依頼」便=
+          描くのはローカル)を見るために受ける。渡さない呼び側の挙動は1つも変わらない。
         """
         ids = [str(m) for m in (msg_ids or []) if str(m or "").strip()]
+        skip = {str(r.get("msg_id") or "") for r in (recs or [])
+                if isinstance(r, dict) and is_local_pipeline_order(r)}
+        if skip:
+            ids = [m for m in ids if m not in skip]
+            log(self.dept, "束ね印=「生成依頼」便には押さない(%d件) msg=%s"
+                           % (len(skip), ",".join(sorted(skip))))
         if self.dry_run or not ch or not ids:
             return
         done = 0
@@ -9507,6 +9543,8 @@ class Daemon:
                 seen.add(m)
                 if not self._is_from_chami(b) or b.get("test"):
                     continue            # 他部門の便・検証便には押さない(Chamiの画面を汚さない)
+                if is_local_pipeline_order(b):
+                    continue            # ★2026-09-16 「生成依頼」便=描くのはローカル(印を押さない)
                 if str(b.get("channel") or "") != ch:
                     continue            # いま走っている便と同じ部屋の分だけ
                 # ★2026-09-06(aegis-gl)Discordのメッセージ IDでない便には押さない。
@@ -10818,7 +10856,8 @@ class Daemon:
         #   検証便(test)はChamiの部屋を汚さないので押さない(ORG-25)。
         if not rec.get("test"):
             self._mark_bundled(rec.get("channel", ""),
-                               [n.get("msg_id") for _, n in taken], "返す直前の覗き")
+                               [n.get("msg_id") for _, n in taken], "返す直前の覗き",
+                               recs=[n for _, n in taken])
         # ★リースを張り直す対象へ足す(本走が続いている扱い。1本でも落ちると無言で消える)
         self._lease_qids = list(getattr(self, "_lease_qids", None) or []) + [t[0]["id"] for t in taken]
         merged = dict(taken[-1][1])
@@ -11026,7 +11065,8 @@ class Daemon:
                     #   土台の便にしか押さないので、ここが無いと断片は無印のまま残る。
                     if not rec.get("test"):
                         self._mark_bundled(rec.get("channel", ""),
-                                           rec.get("coalesced_from") or [], "走る前の集約")
+                                           rec.get("coalesced_from") or [], "走る前の集約",
+                                           recs=recs)
                     # ★実物確認を「誰かがログを見張る」に任せない(規律§3=機構に載せる)。
                     #   .log は keeper の標準出力リダイレクトなので流れて消える/手動実行では
                     #   残らない(8/8にHQから指摘された穴)。→ **耐久台帳へ1行**残し、
