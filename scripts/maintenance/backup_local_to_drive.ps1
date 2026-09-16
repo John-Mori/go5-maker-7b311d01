@@ -59,7 +59,10 @@ if ($free -lt $MinFreeGB) {
 # Config keeps its historical form (ends with '\local'). Derive the base so both
 # sources land side by side: <base>\local\YYYY-MM-DD and <base>\00_AI-HQ\YYYY-MM-DD.
 $destBase = Join-Path $driveRoot.FullName (Split-Path $rel -Parent)
-$keepRoot = Join-Path $driveRoot.FullName 'go5-backup-keep'
+# Monthly keep must live under $destBase (the strategy backup folder), NOT directly
+# under My Drive. Chami 2026-09-16: do not put backups at <MyDrive>\go5-backup-keep;
+# use <MyDrive>\...\001_system-backup\go5-backup-keep instead.
+$keepRoot = Join-Path $destBase 'go5-backup-keep'
 $stamp    = Get-Date -Format 'yyyy-MM-dd'
 $month    = Get-Date -Format 'yyyy-MM'
 
