@@ -1,0 +1,7 @@
+# このrepoは core.autocrlf=true。チェックアウト時に LF → CRLF へ書き換えられる。
+# シェルスクリプトにそれをやられると `\r': command not found` で死ぬ=
+# 新しいクローンでは pre-commit フックも install.sh も起動しない、という形で静かに壊れる。
+# フックは「壊れたら止める」ための物なので、壊れて黙るのが一番まずい。LFで固定する。
+# (2026-09-16 aegis-gl・ケヴィン・デブライネ)
+scripts/hooks/pre-commit text eol=lf
+scripts/hooks/install.sh  text eol=lf
