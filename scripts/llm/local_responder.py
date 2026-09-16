@@ -724,6 +724,34 @@ def send_as(channel, text, persona, suffix=""):
     return r.returncode == 0
 
 
+def image_spec_attachments(rec, limit=8000):
+    """この便に付いている**テキスト添付**(.txt/.md)の中身を返す。無ければ空文字。
+
+    ★2026-09-17 ローカル研究室(カスミ): 注文の中身を .txt で送る使い方を拾うために足した。
+      きっかけ= 画像生成ローカル-fusoh_v2-漫画 の msg 1549784942123163829。本文は
+      「生成依頼 生成依頼テキストを読んで画像生成して」で**絵の中身がゼロ**、髪・瞳・服・
+      ポーズ等はすべて添付 1549784942123163829_0.txt(4308字)に在った。旧実装は本文だけを
+      local_chain へ渡していたので、to_tags は中身の無い指示を忠実に変換して品質タグ
+      (masterpiece, best quality, highres)だけを返した= 「注文の絵」にならなかった。
+      → 変換段(to_tags)は壊れていない。**注文文が変換段まで届いていなかった**。
+    ★画像・音声の添付は対象外(絵の中身は文章で来る)。読めない添付は黙って飛ばす(止めない)。
+    """
+    out = []
+    for p in (rec.get("attachments_local") or []):
+        ap = p if os.path.isabs(p) else os.path.join(ROOT, p)
+        if os.path.splitext(ap)[1].lower() not in (".txt", ".md"):
+            continue
+        try:
+            with open(ap, encoding="utf-8", errors="replace") as f:
+                t = f.read().strip()
+        except Exception as e:
+            print(f"  注文テキスト添付を読めなかった: {os.path.basename(ap)} {type(e).__name__}")
+            continue
+        if t:
+            out.append(t)
+    return "\n\n".join(out)[:limit]
+
+
 def handle_image_request(rec, raw_line, content, channel, dept=None):
     """優依が絵を描く。研究室HQのローカル経路(local_chain.py=Gemmaタグ→ComfyUI)で生成し、
     画像生成ルームへ届ける。外部AI(Claude/ChatGPT/Gemini)を通さない。
@@ -747,10 +775,16 @@ def handle_image_request(rec, raw_line, content, channel, dept=None):
     #   ★絵が**この部屋に出る**なら、絵そのものが返事だ。言葉が要るのは
     #     **絵が別の部屋へ行く時**(ここで黙ると、どこへ出たのか誰にも分からない)だけ。
     #   ★失敗の報せ(下の rc!=0)は残す=合図を出したChamiに何も返さないのは沈黙の事故。
+    # ★2026-09-17 ローカル研究室(カスミ): 注文の中身が .txt 添付に在る便を拾う
+    #   (msg 1549784942123163829= 本文は指示だけ・絵の中身は添付)。添付の注文文が有れば
+    #   本文の前に畳んで**中身の乗った文**を変換段(local_chain.to_tags)へ渡す。情報は捨てない
+    #   =添付が主・本文を後ろに残す(本文が「生成依頼テキストを読んで…」の指示語でも害は無い)。
+    spec = image_spec_attachments(rec)
+    prompt = "\n\n".join(x for x in (spec, content.strip()) if x)
     if target != channel:
-        send(channel, "「" + content.strip()[:40] + "」の絵は " + target
+        send(channel, "「" + (content.strip() or spec)[:40] + "」の絵は " + target
                       + " に出すね。私のPCの中だけで描くよ。")
-    args = [sys.executable, LOCAL_CHAIN, content.strip(),
+    args = [sys.executable, LOCAL_CHAIN, prompt,
             "--discord", target, "--persona", persona]
     if dept:
         args += ["--dept", dept]        # ← この部屋のLoRAとckptは local_chain が rooms.py から引く
