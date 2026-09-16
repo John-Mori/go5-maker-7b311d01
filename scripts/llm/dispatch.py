@@ -38,6 +38,7 @@
   → 心がけでは再発する。**癖でばら撒けないように機械で止める。**
 """
 import argparse
+import hashlib          # ★口調ゲートDの body_key(同報を読む側で畳むための本文鍵)
 import json
 import os
 import re
@@ -527,6 +528,31 @@ def post_work_to_channel(dept, persona, post_body, timeout=90):
 #     だからピン(呼称ルール.json / characterfile)がどれだけ正しくても、便には効かない。
 #   ★ここが合流点だ= キュー投函も表投稿も `--also-post` の写しも、下の1本を通ってから出る。
 #   ★当てるのは呼称だけ・呼びかけ位置だけ(理由= output_gates.apply_naming_gate_only の説明)。
+def tone_gate_pass(sender, from_dept, body, msg_id="", write=True):
+    """投函する本文へゲートD(口調)を**警告のみ**で当てる。返り値=(直した件数, 警告件数)。
+
+    ★本文は返さない= ここでは書き換えないと決めたから(理由= output_gates.apply_tone_gate_only)。
+      「呼ばれていなかった」を「数えられている」に変えるのが今回の目的だ。
+    ★`already_gated` の外に置く= 呼称ゲートCと違って**ここが唯一の呼び口**だ。
+      main() は全部門へ `already_gated=True` で入るので、Cと同じ場所に置くと
+      実運用(CLI)では**一度も鳴らない**。それは今回直している欠陥そのものだ。
+      同報の水増しは `body_key`(本文sha1)で読む側が畳む= 行は便ごとに残す。
+    fail-open: 何が起きても例外を出さない(便は止めない)。
+    """
+    try:
+        if HERE not in sys.path:
+            sys.path.insert(0, HERE)
+        import output_gates as og
+        persona = str(sender or "").split("(")[0].strip()
+        key = hashlib.sha1(str(body or "").encode("utf-8", "replace")).hexdigest()[:12]
+        _out, summary = og.apply_tone_gate_only(from_dept or "", persona, body,
+                                                source="dispatch", msg_id=msg_id,
+                                                fix=False, body_key=key, write=write)
+        return summary.get("tone_fix", 0), summary.get("tone_warn", 0)
+    except Exception:
+        return 0, 0
+
+
 def naming_gate_pass(sender, from_dept, body):
     """投函する本文へ呼称ゲートCを当てる。返り値=(本文, 直した件数, 警告のみの件数)。
 
@@ -622,6 +648,18 @@ def dispatch(dept, sender, body, also_post=False, dry_run=False, work="", audien
     # ★炎上表記ゲート。**already_gated に関係なく必ず通す**= 呼称ゲートCと違ってこちらは
     #   「直す」だけで台帳へ書かないので、2度通っても水増しが起きない(2回目は不一致で素通し)。
     body = enjoh_gate_pass(body, dept)
+
+    # ★ゲートD(口調)= **警告のみ・本文は変えない**(2026-09-16・AD研究室 msg 1549614905580068977)。
+    #   `already_gated` の**外**に置く= main() は全部門を already_gated=True で回すので、
+    #   呼称ゲートCと同じ枠に入れると CLI では一度も鳴らない(それが今回の欠陥だ)。
+    #   同報の重複は台帳へ載る body_sha1 で読む側が畳める= 記録は便ごとに1本残す。
+    #   dry-run では**数えるが書かない**= 出ていない便の行で台帳を汚さない。
+    _tfix, _twarn = tone_gate_pass(sender, from_dept, body, msg_id=synthetic,
+                                   write=not dry_run)
+    if _tfix or _twarn:
+        print(f"  [{dept}] 口調ゲートD= 警告のみ(直せたはず {_tfix}件 / 残り {_twarn}件・"
+              f"本文は変えていない・"
+              f"{'dry-run=台帳へは書かない' if dry_run else f'msg_id={synthetic} で記録'})")
 
     if dry_run:
         if is_work:

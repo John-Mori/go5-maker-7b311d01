@@ -18,6 +18,7 @@ username/avatar_url上書きで送信する。Webhook URLは local/discord_webho
 """
 import json
 import os
+import random          # ★口調監査の突合キー audit_id を作るため(2026-09-16)
 import re
 import sys
 import time
@@ -469,6 +470,41 @@ TONE_AUDIT = os.path.join(LOCAL, "llm", "tone_audit.jsonl")
 # 口調ルールの正本=研究室HQ(ORG-11)。dept_daemon の TONE_RULES_PATH と同じ1本。
 TONE_RULES_PATH = os.path.join(_HQ_ROOT, "departments", "hr", "personas", "口調ルール.json")
 
+# ==== 突合キー audit_id(2026-09-16・AD研究室 msg 1549614905580068977 ④)==============
+#   ★実測= tone_audit.jsonl の event=tone_fix 173行のうち **24行に msg_id が無い**(13.9%)。
+#     全部この persona_send が書いた行だ。理由は単純で、**ゲートを当てる時点では
+#     DiscordのIDがまだ存在しない**(IDは投稿のレスポンスで初めて返る)。
+#   ★だから「後から入れる」のではなく、**先に自分で鍵を作る**=
+#     ゲートを当てた瞬間に audit_id を1つ発行して全行に載せ、投稿が成功したら
+#     `event=audit_link` で audit_id ↔ msg_id を1行残す。2本を鍵で繋ぐ。
+#   ★分割連投(1本の本文が2通に割れる)では audit_link が2行出る= それが実態だ。
+#     1つの audit_id に msg_id が複数ぶら下がる形を潰さない(潰すと片方が辿れなくなる)。
+#   ★記録先は既存の tone_audit.jsonl 1本のまま(§4= 置き場を2つ持たない)。
+_AUDIT_ID = ""
+
+
+def _new_audit_id():
+    """ゲート通過1回ぶんの突合キーを作る。衝突しなければ形は何でもいい= 時刻+乱数。"""
+    return "PS-%d-%04d" % (int(time.time() * 1000), random.randint(0, 9999))
+
+
+def _audit_link(msg_id, channel="", persona="", dept=""):
+    """audit_id ↔ 実msg_id を1行で繋ぐ。投稿が**成功した時だけ**書く(出ていない便を繋がない)。"""
+    try:
+        if not _AUDIT_ID or not str(msg_id or ""):
+            return
+        os.makedirs(os.path.dirname(TONE_AUDIT), exist_ok=True)
+        with open(TONE_AUDIT, "a", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "event": "audit_link", "src": "persona_send",
+                "audit_id": _AUDIT_ID, "msg_id": str(msg_id),
+                "persona": str(persona or ""), "dept": str(dept or ""),
+                "channel": str(channel or ""),
+            }, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
 
 def _audit_tone(persona, dept, applied, remaining):
     """口調の機械修正/警告を dept_daemon と同じ tone_audit.jsonl へ残す(src=persona_send・記録先を2つ持たない§4)。
@@ -483,12 +519,14 @@ def _audit_tone(persona, dept, applied, remaining):
                     "persona": str(persona or ""), "marker": a.get("marker", ""),
                     "to": a.get("to", ""), "count": a.get("count", 1),
                     "reason": a.get("reason", "tone_rewrite"),
+                    "audit_id": _AUDIT_ID,        # ★投稿後の audit_link 行と繋ぐ鍵
                 }, ensure_ascii=False) + "\n")
             for v in (remaining or ()):
                 f.write(json.dumps({
                     "ts": ts, "dept": dept, "event": "tone", "src": "persona_send",
                     "persona": str(persona or ""), "marker": v.get("marker", ""),
                     "reason": v.get("reason", ""),
+                    "audit_id": _AUDIT_ID,
                 }, ensure_ascii=False) + "\n")
     except Exception:
         pass
@@ -512,6 +550,7 @@ def _audit_tone_rewrite(persona, dept, before, res):
                 "engine": res.get("engine") or "",
                 "excerpt": str(before or "")[:200],          # ★書き直し**前**
                 "excerpt_after": str(res.get("text") or "")[:200],
+                "audit_id": _AUDIT_ID,
             }, ensure_ascii=False) + "\n")
     except Exception:
         pass
@@ -538,6 +577,7 @@ def _audit_structure(persona, dept, body, tag):
             "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "dept": dept, "event": "tone_structure", "src": tag or "persona_send",
             "persona": str(persona or ""),
+            "audit_id": _AUDIT_ID,
         })
         os.makedirs(os.path.dirname(TONE_AUDIT), exist_ok=True)
         with open(TONE_AUDIT, "a", encoding="utf-8") as f:
@@ -724,7 +764,14 @@ def apply_text_gates(body, persona=None, dept=None, tag="persona_send", audit=Tr
       返す関門で、判定の意味が違う(突合の再現に使うと、送らない便を再現できなくなる)。
     ★audit=False= 変換は同じまま台帳とstderrへ出さない。突合の再現で二重記帳しないため。
     ★fail-open= 3ゲートはいずれも例外を自分で飲んで素通しする(送信を殺さない)。
+    ★audit=True の入口で突合キー audit_id を1つ発行する= ここが「1便ぶんのゲート通過」の
+      境目だからだ(3つの監査は別々の関数から書かれるが、同じ1便を指している)。
+      audit=False(突合の再現)では**発行しない**= 書かない行に鍵は要らないし、
+      直前の実便の鍵を踏み潰すと投稿後の audit_link が別の便へ繋がる。
     """
+    global _AUDIT_ID
+    if audit:
+        _AUDIT_ID = _new_audit_id()
     body = tone_backstop(body, persona, dept, audit=audit)
     body = enjoh_backstop(body, quiet=not audit)
     body = _homo_gate(body, persona=persona, dept=dept, tag=tag, audit=audit)
@@ -1140,6 +1187,10 @@ def main():
                 _audit_send(body=_sent, status=str(r.status), channel_id=str(ch.get("id", "")),
                             channel=str(ch.get("name", "")), dept=str(ch.get("dept", "")),
                             persona=str(persona), msg_id=mid)
+                # ★ゲート時に発行した audit_id と、今返ってきた実msg_id を繋ぐ1行。
+                #   ここが実IDを知る**唯一の点**だ(HTTPを撃つ口はこの post() だけ)。
+                _audit_link(mid, channel=str(ch.get("name", "")), persona=str(persona),
+                            dept=str(ch.get("dept", "")))
                 return r.status, mid
         except Exception as e:
             _audit_send(body=_sent, status="ERR:" + type(e).__name__,

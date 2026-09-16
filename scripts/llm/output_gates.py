@@ -278,6 +278,75 @@ def apply_naming_gate_only(dept, persona, text, source="dispatch", msg_id="",
         return text, summary
 
 
+def apply_tone_gate_only(dept, persona, text, source="dispatch", msg_id="",
+                         fix=False, body_key="", write=True):
+    """★投函経路(dispatch)用= **ゲートD(口調)だけ**を、既定で**警告のみ**当てる。
+
+    なぜ足したか(2026-09-16 AD研究室 msg 1549614905580068977 の実証):
+      オタコンの「俺→僕」は3層とも揃っていて(otacon.md:16 / 口調ルール.json:250 /
+      tone_gate.py:24)、機構も同じ日に2回発火している。それでも 10:22 の実便
+      `DISPATCH-research-room-1789521766461` は監査にヒット0行だった=
+      **直せなかったのではない。呼ばれていなかった。**投函経路はゲートDを通っていない。
+      → 原典を何行足しても、ゲートを呼ばない口から出れば素通しだ(層(c)の実証)。
+
+    ★既定 fix=False= **本文を書き換えない。**便は表とちがって書式そのものが情報で、
+      封筒には**他部屋の本文がそのまま引用**される。そこで一人称を機械置換すると
+      引用が化ける= 証拠を壊す方が事故として重い(apply_naming_gate_only と同じ理由)。
+      まず**数えられる状態**にする。実物が溜まってから切りへ上げるかを決める(§4.55)。
+    ★msg_id= dispatch は enqueue 前に合成id(`DISPATCH-<部門>-<ミリ秒>`)を持っている=
+      ここで渡せば台帳の行が**後から実便へ突き合わせられる**(監査の13.9%が照合不能
+      だった件の裏返し。記録が在ることと検証できることは別だ)。
+    ★write=False= **数えるが台帳へ書かない。**--dry-run 用だ= 出ない便の行を台帳へ残すと
+      「いつ送られたか」が混ざって分布が読めなくなる(tone_structure_report の live/backfill を
+      分けている理由と同じ)。確認したい人が数字を見られる状態は保つ。
+    ★何が起きても例外を外へ出さない(fail-open)= 便を止めない。
+    """
+    summary = {"tone_fix": 0, "tone_warn": 0}
+    s = str(text or "")
+    if not s.strip() or not str(persona or "").strip():
+        return text, summary
+    persona, persona_raw = canon_persona(persona)
+    try:
+        rules = _rules("tone")
+        if _tone_gate is None or not rules:
+            return text, summary
+        res = _tone_gate.tone_corrections(persona, dept, s, rules) or {}
+        applied = res.get("applied") or []
+        remaining = res.get("remaining") or []
+        ts = time.strftime("%Y-%m-%dT%H:%M:%S")
+        excerpt_before = s[:200]
+        rows = []
+        for a in applied:
+            rows.append({"ts": ts, "dept": dept,
+                         "event": "tone_fix" if fix else "tone_fix_skipped",
+                         "persona": str(persona or ""), "source": source,
+                         "marker": a.get("marker", ""), "to": a.get("to", ""),
+                         "count": a.get("count", 0), "reason": a.get("reason", ""),
+                         "msg_id": str(msg_id or ""), "excerpt": excerpt_before})
+        for v in remaining:
+            rows.append({"ts": ts, "dept": dept, "event": "tone",
+                         "persona": str(persona or ""), "source": source,
+                         "marker": v.get("marker", ""),
+                         "own_first_person": v.get("own_first_person", []),
+                         "index": v.get("index", -1), "reason": v.get("reason", ""),
+                         "msg_id": str(msg_id or ""), "excerpt": excerpt_before})
+        # ★body_key= 同報(1本の本文を N部門へ)で**同じ違反が部門数ぶん並ぶ**のを、
+        #   読む側が潰せるようにする鍵(本文のsha1先頭12桁)。行は便ごとに残す=
+        #   便ごとに msg_id が違い、突き合わせに要るから。数える時は body_key で畳め。
+        for r in rows:
+            if body_key:
+                r.setdefault("body_sha1", str(body_key))
+            if persona_raw:
+                r.setdefault("persona_raw", persona_raw)
+        if write:
+            _append(TONE_AUDIT, rows)
+        summary["tone_fix"] = len(applied)
+        summary["tone_warn"] = len(remaining)
+        return ((res.get("fixed", s) or s) if fix else text), summary
+    except Exception:
+        return text, summary
+
+
 def apply_gates(dept, persona, text, source="mirror", msg_id="", fix=None, ask=None):
     """本文にゲートC(呼称)→D(口調)→D-2(書き直し)を当て、監査へ残す。既定は**警告のみ**。
 

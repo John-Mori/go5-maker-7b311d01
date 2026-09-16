@@ -12,6 +12,7 @@
   python scripts/llm/tone_structure_report.py                 # live の分布
   python scripts/llm/tone_structure_report.py --backfill      # 過去便から分布を作る
   python scripts/llm/tone_structure_report.py --backfill --persona 花海咲季
+  python scripts/llm/tone_structure_report.py --leaks         # 軸③が0でない便を人格名付きで一覧
 """
 import glob
 import json
@@ -73,6 +74,68 @@ def _summarize(label, rows):
     if tally:
         top = sorted(tally.items(), key=lambda kv: -kv[1])[:10]
         print("  軸③ 内訳(上位): " + " / ".join(f"{k}×{c}" for k, c in top))
+
+
+def _audit_links():
+    """audit_id → 実msg_id の対応を tone_audit.jsonl から拾う(persona_send が投稿後に書く行)。
+
+    ★なぜ要るか= 構造監査の行は**投稿より前**に書かれるので msg_id をまだ持てない
+      (2026-09-16・AD研究室 msg 1549614905580068977 ④= tone_fix 173行中24行が照合不能)。
+      ゲート時に発行した audit_id を、投稿後の `event=audit_link` 行で実IDへ繋ぐ。
+    ★1つの audit_id に複数の msg_id が付き得る(分割連投)= 全部返す。
+    """
+    out = {}
+    try:
+        with open(TONE_AUDIT, encoding="utf-8") as f:
+            for ln in f:
+                if '"audit_link"' not in ln:
+                    continue
+                try:
+                    d = json.loads(ln)
+                except Exception:                        # noqa: BLE001
+                    continue
+                if d.get("event") != "audit_link":
+                    continue
+                a, m = str(d.get("audit_id") or ""), str(d.get("msg_id") or "")
+                if a and m:
+                    out.setdefault(a, []).append(m)
+    except OSError:
+        pass
+    return out
+
+
+def _leaks(label, rows, links=None):
+    """★軸③(他人格の一人称が混ざった便)を**人格名付きで一覧する**。
+
+    注文の出所= 2026-09-16 AD研究室 msg 1549614905580068977 ⑤
+      「当室の目視を要件にするな」「機械が切り、人事部門が読む」。
+      共通規律§3「人手の入口を要件にした機構は実測0件になる」と同じ型だ=
+      人がログを目で追わないと出てこない一覧は、担当が代わった日に消える。
+    ★ここでも**判定しない**= 「混ざっている」と書くだけで「崩れている」とは言わない。
+      部門間の報告では他人格の名前も一人称も正当に出る(引用・伝言)。切るのは読む側の仕事だ。
+    """
+    links = links or {}
+    hit = [r for r in rows if int(r.get("other_first_person_total") or 0) > 0]
+    print(f"\n== {label}: 軸③(他人格の一人称)が0でない便 {len(hit)}/{len(rows)} ==")
+    if not hit:
+        print("  (0件。混入が無いのか、まだ数えた便が少ないのかは分布の行数で見ろ)")
+        return
+    print(f"  {'ts':<20} {'人格':<14} {'混入':>4}  {'内訳':<28} msg_id")
+    for r in sorted(hit, key=lambda x: str(x.get("ts") or "")):
+        fp = r.get("other_first_person") or {}
+        detail = " ".join(f"{k}×{v}" for k, v in sorted(fp.items(), key=lambda kv: -kv[1]))
+        mid = str(r.get("msg_id") or "")
+        if not mid:
+            mid = ",".join(links.get(str(r.get("audit_id") or ""), [])) or \
+                  (f"(audit_id={r.get('audit_id')} 未投稿/未突合)" if r.get("audit_id")
+                   else "(鍵なし= 突合できない行)")
+        print(f"  {str(r.get('ts') or '')[:19]:<20} {str(r.get('persona') or ''):<14} "
+              f"{r.get('other_first_person_total'):>4}  {detail:<28} {mid}")
+    # ★名前(固有名詞)の混入は**別に出す**= 一人称の混入とは重さが違う。
+    #   他部門の人格名を書くのは普通の業務連絡だ。同じ表に混ぜたら一人称の方が埋もれる。
+    nm = [r for r in rows if int(r.get("other_names_total") or 0) > 0]
+    print(f"  (参考: 他人格の**名前**が出る便は {len(nm)}/{len(rows)}。"
+          f"これは伝言・引用で正当に出る= 一覧の対象にしない)")
 
 
 def _one_msg(msg_id):
@@ -154,7 +217,10 @@ def main():
                 live.append(d)
     except OSError:
         pass
+    want_leaks = "--leaks" in sys.argv
     _summarize("live(合流点の実測)" + (f" persona={persona}" if persona else ""), live)
+    if want_leaks:
+        _leaks("live" + (f" persona={persona}" if persona else ""), live, _audit_links())
 
     if "--backfill" in sys.argv:
         # ★母集団を人格の便だけに絞る(2026-09-16 AD研究室 msg 1549612208940654593 の
@@ -185,6 +251,9 @@ def main():
                             continue
                         r = count_structure(b, persona=a)
                         r["persona"] = a
+                        # ★一覧(--leaks)で辿れるように出所を載せる= 過去便には実IDが在る。
+                        r["msg_id"] = str(d.get("msg_id") or "")
+                        r["ts"] = str(d.get("ts") or d.get("created_at") or "")
                         rows.append(r)
             except OSError:
                 continue
@@ -197,6 +266,8 @@ def main():
         cut = sum(1 for r in rows if r.get("chars", 0) >= 700)
         if cut:
             print(f"  ★注意: {cut}/{len(rows)} 便が700字で切られた本文だ= この分布は**下限**。")
+        if want_leaks:
+            _leaks("backfill" + (f" persona={persona}" if persona else ""), rows)
     return 0
 
 
