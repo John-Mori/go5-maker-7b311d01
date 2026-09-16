@@ -27,8 +27,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
-from tone_structure import (COMPOSITE_KEYS, composite_score,   # noqa: E402
-                            count_structure)
+from tone_structure import (COMPOSITE_KEYS, _load_rules,      # noqa: E402
+                            composite_score, count_structure)
 
 TONE_AUDIT = os.path.join(ROOT, "local", "llm", "tone_audit.jsonl")
 RECENT = os.path.join(ROOT, "local", "llm", "recent_*.jsonl")
@@ -157,6 +157,14 @@ def main():
     _summarize("live(合流点の実測)" + (f" persona={persona}" if persona else ""), live)
 
     if "--backfill" in sys.argv:
+        # ★母集団を人格の便だけに絞る(2026-09-16 AD研究室 msg 1549612208940654593 の
+        #   「分母の取り方を1行で聞かせてくれ」で数え直して判った欠陥)=
+        #   recent_*.jsonl の 195便のうち **103便が chami_fusoh 本人**、他に完遂通知・
+        #   定刻トリガー等の自動便が混ざっていた。Chamiが人格名を呼ぶのは正常なので、
+        #   軸③(他人格の引っ張り)の分母にそれを入れると数字が意味を失う。
+        #   ★口調ルール.json に載っている人格だけを母集団にする。--all で従来どおり全部。
+        known = set((_load_rules().get("personas") or {}).keys())
+        only_personas = "--all" not in sys.argv and bool(known)
         rows = []
         for p in sorted(glob.glob(RECENT)):
             try:
@@ -172,13 +180,17 @@ def main():
                             continue
                         if persona and a != persona:
                             continue
+                        if only_personas and not any(
+                                a == k or a.startswith(k) for k in known):
+                            continue
                         r = count_structure(b, persona=a)
                         r["persona"] = a
                         rows.append(r)
             except OSError:
                 continue
-        _summarize("backfill(過去便・台帳へは書かない)"
-                   + (f" persona={persona}" if persona else ""), rows)
+        _summarize("backfill(過去便・台帳へは書かない"
+                   + ("・人格の便だけ" if only_personas else "・--all=全便")
+                   + ")" + (f" persona={persona}" if persona else ""), rows)
         # ★下振れの注意。recent_*.jsonl の body は700字で切られている(2026-09-16 実測=
         #   195便中59便が700字ちょうど)。切られた後ろに在る区切り線・番号ラベルは数えられない=
         #   backfill の数字は**下限**だ。閾値をこの母集団だけで決めるな。live が溜まるのを待て。
