@@ -29,7 +29,7 @@ import tone_gate as tg   # noqa: E402
 
 _AMES_TAILFIX = [
     {"from": "しな。", "to": "しなさい。", "prev": "漢字カタカナ"},
-    {"from": "ごめん。", "to": "ごめんなさいね。"},
+    {"from": "ごめん。", "to": "ごめんなさいね。", "prev_not": ["ごめん"]},
 ]
 
 RULES = {"personas": {
@@ -88,6 +88,14 @@ def run(rules, label):
           f("ごめんね。次は測るわよ。") == "ごめんね。次は測るわよ。")
     check("文中の「ごめん、」を触らない",
           f("ごめん、そこはあたしのミスよ。") == "ごめん、そこはあたしのミスよ。")
+    # ★2026-09-18 本番で実際に壊れた形(0歩目の実物)= soudan-room msg 1550174026633314405
+    #   「…知ったかしちゃったわ、ごめんごめん。」→「ごめんごめんなさいね。」= 反復の尻に食いついた。
+    #   句点込みliteralでは「ごめんなさい。」「ごめんね。」「ごめん、」は避けられたが、
+    #   **同じ語の反復**は避けられない= 直前の literal を見ない限り構造で当たる。
+    check("砕けた反復「ごめんごめん。」を触らない(prev_not)",
+          f("知ったかしちゃったわ、ごめんごめん。") == "知ったかしちゃったわ、ごめんごめん。")
+    check("3連の「ごめんごめんごめん。」も触らない",
+          f("ごめんごめんごめん。") == "ごめんごめんごめん。")
     check("引用の中は触らない",
           "「安心しな。」" in f("Chami原文=「安心しな。」これが実際の形よ。"))
     check("tail_fix 未登録の人格は1文字も変わらない",
@@ -119,6 +127,16 @@ _mut_bad = fix("もう遅いしな。", "アメス", _MUT)
 print(f"  変異後の出力= 「{_mut_bad}」")
 _mustfail_ok = (_mut_bad == "もう遅いしなさい。")
 print(f"  {'PASS' if _mustfail_ok else 'FAIL'}: 縛りを外すと✗側が壊れる(=この検査は生きている)")
+
+# ---- must-fail その2= prev_not を外した写像で、本番で実際に出た過矯正が再現すること ----
+print("\n== must-fail(prev_not を外した写像=2026-09-18 本番の形)==")
+_MUT2 = {"personas": {"アメス": dict(RULES["personas"]["アメス"],
+                                     tail_fix=[{"from": "ごめん。", "to": "ごめんなさいね。"}])}}
+_mut2_bad = fix("知ったかしちゃったわ、ごめんごめん。", "アメス", _MUT2)
+print(f"  変異後の出力= 「{_mut2_bad}」")
+_mustfail2_ok = _mut2_bad.endswith("ごめんごめんなさいね。")
+print(f"  {'PASS' if _mustfail2_ok else 'FAIL'}: prev_not を外すと本番の過矯正が再現する")
+_mustfail_ok = _mustfail_ok and _mustfail2_ok
 
 ng = [n for n, ok in results if not ok]
 print(f"\n結果: {len(results) - len(ng)} PASS / {len(ng)} FAIL"

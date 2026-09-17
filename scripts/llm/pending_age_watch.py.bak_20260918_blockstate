@@ -67,29 +67,6 @@ PENDING = re.compile(r"(?<!「)入れた\(確認待ち[^)）\n]*[)）]")
 #   ★閉じ扱いにするのは打ち消し線だけ。「札の後ろに直った/効いたが在る」は使わない=
 #     実測21行が該当し、その多くは本文で経緯を喋っているだけで閉じていない(取りこぼす)。
 STRUCK = re.compile(r"~~.+?~~", re.S)
-# ★★ブロックで開閉する台帳を、行で読んでいた(2026-09-18・AD研究室の実測返しで判明)。
-#   書き手 `scripts/_daemons/teian_echo_poll.py` の `note_open_item()` は**追記のみ**で、
-#   見出し行には二度と触らない(C-003= HQが並行して書くファイルを壊さない)。復旧時は
-#     `<!-- teian-echo:read-fail RESOLVED 2026-09-15 01:12 -->` と `✅` を**下に足すだけ**。
-#   = 見出し行の打ち消しは構造上いつまでも起きない → こちらからは**永久に開いて見える**。
-#   実物= `hq_open_items.md:984-989`。01:02→01:12 の**10分**で閉じていた仕事を 3.2日の滞留として
-#   鳴らし、しかも持ち主(次行に `platform-se` と書いてある)を見出しの機能名から「軍議」と当てた
-#   =**閉じた仕事を、持っていない部門へ督促する**便(ORG-04の形)。§3「常に誤発火する安全網は
-#   無視される」に当たるので、読み手のこちらを直す(書き手の追記のみは正しい設計だ)。
-# ★閉じ判定は1つだけ= **同じ札の RESOLVED 印が、その見出しより下に在るか。**
-#   書き手が `last == "OPEN"` の間は二度と開かない=OPENとRESOLVEDは必ず交互に並ぶので、
-#   下に RESOLVED が在る見出しは、その時点で閉じている(次のOPENは別の見出しを連れてくる)。
-# ★印が無い行は**何も変えない**= 判定不能なら鳴らす側へ倒す(fail-open・§3)。
-# ★札を見るのは**ブロックの見出し行だけ**= 書き手の形は
-#     `## <stamp> 提案決定→軍議エコー(経路B) = 入れた(確認待ち) [teian-echo:<kind>]`
-#   で、`#`見出し + **行末の札**に固定されている(teian_echo_poll.py:400)。
-#   ここを「行のどこかに札の形が在れば」で見ると、**札を本文で引用しただけの普通の行**まで
-#   閉じ扱いで飲み込む。2026-09-18 に実際に起きた= この穴を直した時の台帳追記そのものが
-#   `[teian-echo:read-fail]` を引用しており、hq_open_items.md:35(日齢0日・自分の案件)が
-#   scan() から消えた。**沈黙は最悪の事故**(§3)なので、飲み込む側の条件はきつく縛る。
-BLOCK_TAG = re.compile(r"\[([A-Za-z][\w\-]*:[\w\-]+)\]")
-BLOCK_HEAD = re.compile(r"^\s*#{1,6}\s.*\[([A-Za-z][\w\-]*:[\w\-]+)\]\s*$")
-RESOLVED_MARK = re.compile(r"<!--\s*([A-Za-z][\w\-]*:[\w\-]+)\s+RESOLVED\b")
 # ★所有部門の明示。札の直後の部門名を当てに行く前に、**書いてあるならそれを採る**(C-072)。
 OWNER_MARK = re.compile(r"所有\s*[=＝]\s*([A-Za-z0-9_\-]+|[^\s)）、。,]+)")
 STAR_DATE = re.compile(r"★\s*(\d{4})-(\d{2})-(\d{2})")
@@ -266,36 +243,12 @@ def ledger_files(status=STATUS):
     return [p for p in out if os.path.exists(p)]
 
 
-def resolved_marks(lines):
-    """札 → その札の `RESOLVED` 印が出る**最後の行番号**(1始まり)。印が無い札は入らない。"""
-    out = {}
-    for no, raw in enumerate(lines, 1):
-        m = RESOLVED_MARK.search(raw)
-        if m:
-            out[m.group(1)] = no
-    return out
-
-
-def block_closed(text, no, marks):
-    """その行が**ブロックの見出し**で、かつ下に同じ札の RESOLVED 印が在るか。
-
-    ★見出しの形(`#`+行末の札)でない行は**絶対に飲み込まない**= 本文で札を引用しただけの
-      普通の案件行を消さないため(2026-09-18 の実物= hq_open_items.md:35)。
-    """
-    m = BLOCK_HEAD.match(text)
-    if not m:
-        return False
-    return marks.get(m.group(1), 0) > no
-
-
 def scan(now, files=None, alias=None):
     """台帳を1周して「入れた(確認待ち)」行を全部拾う。**判定はしない**(数えるだけ)。"""
     alias = alias if alias is not None else dept_aliases()
     items = []
     for path in (files if files is not None else ledger_files()):
-        lines = io.open(path, encoding="utf-8", errors="replace").read().splitlines()
-        marks = resolved_marks(lines)          # ★ブロックの状態印は行より先に1周して集める
-        for no, raw in enumerate(lines, 1):
+        for no, raw in enumerate(io.open(path, encoding="utf-8", errors="replace"), 1):
             text = raw.rstrip("\n")
             live = STRUCK.sub("  ", text)      # 取り消した札は「もう無い字」として扱う
             if not PENDING.search(live):
@@ -303,8 +256,6 @@ def scan(now, files=None, alias=None):
             cb = CHECKBOX.match(text)
             if cb and cb.group(1).lower() == "x":
                 continue                       # 閉じ済みのチェックボックスは対象外
-            if block_closed(text, no, marks):
-                continue                       # ★ブロックの状態印で閉じている(見出しは触られない)
             date, src, owner, req = parse_line(live, alias)
             mid = item_id(text)
             key = mid or "L" + hashlib.sha1(

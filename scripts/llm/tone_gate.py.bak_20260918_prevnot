@@ -1282,11 +1282,6 @@ def _canonical(words):
 #   ★偽陽性の殺し方= 直前1字の字種で縛る。「〜だしな。」「もう遅いしな。」は同じ4字に当たるが、
 #     ここへ「さい」を足すと日本語が壊れる(「遅いしなさい。」)。サ変名詞の尻(漢字/カタカナ)の
 #     時だけ当てれば、この型は構造で当たらない= 検査 test_tone_tailfix.py の✗側がこれ。
-#   ★2026-09-18 追加= **字種では殺せない偽陽性が本番で出た**。soudan-room msg 1550174026633314405
-#     「…知ったかしちゃったわ、ごめんごめん。」→「ごめんごめんなさいね。」= 砕けた**反復**の
-#     尻に食いついた。句点込みliteralで「ごめんなさい。」「ごめんね。」「ごめん、」は避けられるが、
-#     **同じ語が2つ並ぶ形**は直前1字(ひらがな「ん」)を見ても区別できない= `prev_not` で
-#     「直前がその語そのものなら当てない」と literal で縛る。これも当てない側へ倒す縛りだ。
 _TAILFIX_PREV = {
     "漢字カタカナ": re.compile(r"[一-鿿ァ-ヴー]"),
 }
@@ -1300,8 +1295,6 @@ def tail_fix_entries(ent):
       prev       … 任意。直前1字の字種の縛り。★**知らない字種名は行ごと捨てる**
                    (綴りを間違えた時に「縛り無し」へ倒れると偽陽性が野に出るから=
                     fail-safe は『当てない側』へ倒す)。
-      prev_not   … 任意。直前に**この literal が並んでいたら当てない**(配列/文字列)。
-                   ★2026-09-18 追加= 字種では殺せない偽陽性が1つ実物で出た(下の注)。
     """
     out = []
     for e in ((ent or {}).get("tail_fix") or []):
@@ -1312,11 +1305,7 @@ def tail_fix_entries(ent):
             continue
         if prev and prev not in _TAILFIX_PREV:
             continue
-        pn = e.get("prev_not") or []
-        if isinstance(pn, str):
-            pn = [pn]
-        pn = [str(x) for x in pn if isinstance(x, (str, int)) and str(x)]
-        out.append({"from": frm, "to": to, "prev": prev, "prev_not": pn})
+        out.append({"from": frm, "to": to, "prev": prev})
     return out
 
 
@@ -1339,8 +1328,6 @@ def tail_fix_spans(text, ent, rules=None):
             if e["prev"]:
                 if i == 0 or not _TAILFIX_PREV[e["prev"]].match(text[i - 1]):
                     continue              # 字種の縛りに合わない=別の語
-            if any(i >= len(w) and text[i - len(w):i] == w for w in e.get("prev_not") or ()):
-                continue                  # 直前に同じ語が並んでいる=反復(「ごめんごめん。」)
             hit = e
             break
         if hit:
