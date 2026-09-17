@@ -10,6 +10,12 @@
 止血(commit e560673): SESSION_OWNED_DEPTS へ hr-room を追加。cycle() 292行の
   `room_is_session_owned` が真になり、便は箱に残り handle() は呼ばれない=一次ackが出ない。
 
+再発した別形(2026-09-17 ククール転送=Chami直「受領すんな、そして預けるな」
+  msg 1549968086147530833): astro-room は専任デーモン(port 18840)が居るのに、
+  _daemon_keeper.py の再起動と便の到着が接近し `room_has_own_responder()` が
+  瞬断でFalseを返す窓に代打が便を掴み ACK_TEXT を投稿していた(msg 1549966975546167388)。
+止血: SESSION_OWNED_DEPTS へ astro-room を追加(デーモンの生死に関わらず一次ackを打たない)。
+
 この試験が在る理由(改悪の恒久対策=C-038/C-056):
   Codex側の口は test_codex_chami_summon.py Test B が握っているが、無人代打側の口は
   どのテストも握っていなかった。SESSION_OWNED_DEPTS から hr-room を戻した日に、この行が赤で拾う。
@@ -65,17 +71,23 @@ def main():
     assert "hr-room" not in cr.SENSITIVE_DEPTS, "前提が崩れた: hr-roomが機微指定に入った(この試験は別経路を守る)"
     if not cr.room_is_session_owned("hr-room"):
         fails.append("hr-room が SESSION_OWNED_DEPTS から外れている(止血が戻された)")
+    if not cr.room_is_session_owned("astro-room"):
+        fails.append("astro-room が SESSION_OWNED_DEPTS から外れている(止血が戻された)")
     assert not cr.room_is_session_owned(CTRL_DEPT), f"前提が崩れた: 対照 {CTRL_DEPT} がセッション所有になった"
 
     hr = {"dept": "hr-room", "channel": "👤人事部門", "msg_id": "1549628315248230543",
           "author": "chami_fusoh", "content": "引き継ぐなほんで"}
+    astro = {"dept": "astro-room", "channel": "秘境占星術-for-chami", "msg_id": "1549966975546167388",
+             "author": "chami_fusoh", "content": "ちょっと口調が邪魔してよくわからんから..."}
     ctrl = {"dept": CTRL_DEPT, "channel": "kaizen", "msg_id": "9000000000000000001",
             "author": "someone", "content": "対照便"}
-    handled = run_cycle([hr, ctrl])
+    handled = run_cycle([hr, astro, ctrl])
     print(f"[cycle] handle が呼ばれた dept={handled}")
 
     if "hr-room" in handled:
         fails.append("hr-room便で handle()=一次ack を打った(ORG-04の嘘の復活・NG)")
+    if "astro-room" in handled:
+        fails.append("astro-room便で handle()=一次ack を打った(受領すんな・預けるな違反・NG)")
     if CTRL_DEPT not in handled:
         fails.append(f"対照 {CTRL_DEPT} で handle() が呼ばれていない(全部抑止=偽緑・試験が壊れている)")
 

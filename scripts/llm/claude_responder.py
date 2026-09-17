@@ -63,7 +63,18 @@ from presence import lab_alive  # noqa: E402  生存判定(2信号)は全respond
 #   hr-room の担当は対話セッション(ククール/アメス)本人=「引き継ぐ」先の別担当は存在しない
 #   → 上の ORG-04 と寸分違わぬ嘘。session-owned として一次ackを打たない(便はfollowupで残り本人が処理)。
 #   ★名指し1件に留める(C-035)= 他室へは広げない。
-SESSION_OWNED_DEPTS = ("hq", "aegis-gl", "research-room", "keiei-kikaku", "kaizen-analyst", "hr-room")
+# ★2026-09-17 astro-room を追加(ククール転送=Chami直「受領すんな、そして預けるな」
+#   msg 1549968086147530833 / 転送 msg 1549968759593111633)。
+#   実害= 研究室(無人代打)が astro-room の便(msg 1549966975546167388)へ
+#   「受領。本対応は担当セッションへ引き継ぎます。」(msg 1549967780088905799)を投稿。
+#   astro-roomは上のhr-room/kaizen-analystと違い**専任デーモン(ククール・port 18840)は居る**が、
+#   _daemon_keeper.py の再起動(11:18:25 JST spawn)と便の到着(11:15:23 JST)が接近し、
+#   `room_has_own_responder()` がTCP接続不能でFalseを返す瞬断の窓に代打が便を掴んだ
+#   (デーモン不在ではなく**再起動中の瞬断**=別形の同じ穴)。引き継ぐ「別担当」は存在しない
+#   →ORG-04と同型の嘘。session-ownedとして一次ackを打たない(便はfollowupで残り、
+#   専任デーモン復帰後に自分のqueueで拾う=実測11:19:52claim→11:22:42返信済み)。
+#   ★名指し1件に留める(C-035)= 他室へは広げない。
+SESSION_OWNED_DEPTS = ("hq", "aegis-gl", "research-room", "keiei-kikaku", "kaizen-analyst", "hr-room", "astro-room")
 
 
 def room_is_session_owned(dept):
