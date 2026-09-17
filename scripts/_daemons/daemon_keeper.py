@@ -87,7 +87,11 @@ DAEMON = os.path.join(ROOT, "scripts", "llm", "dept_daemon.py")
 # ★2026-09-17 imagegen-itsumono を追加(41→42体)。Chami直令「なるほど。カスミにやってもらおう。
 #   回しといて」の回送(中野五月[llm-qa] DISPATCH-aegis-gl-1789630298503)。部屋は2026-09-16から
 #   在ったが常駐が1体も立っていなかった=会話の席が無い状態だった。DEPT_CONF・rooms.py と対で足した。
-DEPTS = ["hq","research-room", "aegis-gl", "keiei-kikaku", "hr-room", "hr-context", "qa-reviewer", "system-engineer", "product-scout", "shorts-analyst", "copy-director", "learning-coach", "learning-coach-2", "data-org", "frontend", "ai-office", "llm-edu", "llm-qa", "platform-se", "consult-intel", "past-room", "future-room", "kaizen-analyst", "incident", "system-engineer-b", "dream-care", "health-log", "report-notify", "imagegen", "manga-shorts", "kukuru-nakama", "gunji", "soudan-room", "goods-afi", "someday-room", "web-research", "otacon-radio", "imagegen-fusoh-v0", "imagegen-fusoh-v2", "local-lab", "astro-room", "imagegen-itsumono"]
+# ★2026-09-17 hansei-ekurabe(反省会=絵くらべ部屋)を追加(42→43体)。Chami直令「この部屋を反省会の
+#   場所としよう!メンバーは五月とカスミの2人で。トラブル時はカスミ対応で。配線回しといて」の回送
+#   (中野五月[llm-qa]→ローカル研究室→DISPATCH-aegis-gl-1789632995432)。部屋(1550050574886764584)は
+#   Chamiが16:47に自分で作っていて発言0件・常駐0体だった。★会話専用=rooms.py の画像配線は足さない。
+DEPTS = ["hq","research-room", "aegis-gl", "keiei-kikaku", "hr-room", "hr-context", "qa-reviewer", "system-engineer", "product-scout", "shorts-analyst", "copy-director", "learning-coach", "learning-coach-2", "data-org", "frontend", "ai-office", "llm-edu", "llm-qa", "platform-se", "consult-intel", "past-room", "future-room", "kaizen-analyst", "incident", "system-engineer-b", "dream-care", "health-log", "report-notify", "imagegen", "manga-shorts", "kukuru-nakama", "gunji", "soudan-room", "goods-afi", "someday-room", "web-research", "otacon-radio", "imagegen-fusoh-v0", "imagegen-fusoh-v2", "local-lab", "astro-room", "imagegen-itsumono", "hansei-ekurabe"]
 BACKOFF_START = 10
 BACKOFF_CAP = 300
 HEALTHY_SEC = 60               # これ以上生きたら健康=バックオフリセット
