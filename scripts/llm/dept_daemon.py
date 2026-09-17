@@ -10530,7 +10530,20 @@ class Daemon:
                 #   「良い感じだけどやっぱこのシステム廃止で。普通に見たい」)。仕様上どうしても普通の
                 #   embed表示と変わるため。→ learning-coach も他部門と同じ素の返信へ戻す(特別扱いなし)。
                 send_argv += ["--body-file", body]
-                r = subprocess.run(send_argv,
+                # ★2026-09-17 この返信が「どの便への返信で、その便は表裏どちらの宣言だったか」を
+                #   送信台帳(local/llm/send_audit.jsonl)へ刻む。発注= ローカル研究室カスミ
+                #   DISPATCH-aegis-gl-1789632009829(Chami直令 msg 1550050117401313311)
+                #   「裏(--audience ai)で回した通達に表ackが出ると裏の意味が消える」。
+                #   ★ここでしか刻めない= 出口(persona_send)は着信便を知らない。着信の mid と
+                #     declared_audience(rec) を両方持っているのはこの行だけだ。
+                #   ★**記録だけ**で、送るか止めるかの判断には一切使わない。理由はこの上の
+                #     C-050 の設計コメント(L1657-)と同じ= 同じ部屋をChamiとAIが両方読むので、
+                #     「裏便だから表へ出すな」を機械が一律に決めると、Chami宛の返事が黙って消える。
+                #     出したこと自体は正しい場合が多い。**数えられるようにする**のがここの仕事。
+                _env = dict(os.environ)
+                _env["GO5_REPLY_TO"] = str(mid or "")
+                _env["GO5_REPLY_AUDIENCE"] = declared_audience(rec) or ""
+                r = subprocess.run(send_argv, env=_env,
                                    capture_output=True, text=True, encoding="utf-8",
                                    errors="replace", timeout=60)
                 if r.returncode != 0:
