@@ -549,6 +549,36 @@ def format_timeout_result(touched, deliveries=None):
             + nxt)
 
 
+_DL_AUTO = object()   # deliveries を渡されなかった印(None= 「読めなかった」と区別する)
+
+
+def timeout_result_should_post(deliveries, cap=TIMEOUT_MAX_DELIVERIES):
+    """打ち切りの確定結果を**Chamiの面(表)へ出すか**(True=出す / False=裏だけに残す)。
+
+    ★2026-09-17 Chami msg 1549968841197748421(品質管理部門)= 引用されたのは
+      msg 1549967529835761705(09-17 11:17:36・研究室hq・persona=メタルギアMk.II)の
+      **mid-flight枝そのもの**で、言葉は「これめっちゃ多くない?改善できない?」。
+      実測(local/llm/send_audit.jsonl を本文の分岐語で数えた)= 文面改訂(09-13)以降の
+      この通知は **17本**(mid-flight 16 / dead-letter 1)。うち16本は本文自身が
+      「★あんたが言い直す必要はない」と宣言している= **読み手の手番はゼロ**。
+      → 手番ゼロの状態通知は表へ出さない(共通規律§5「行動を求めない状態通知は出さない」)。
+        裏(request_log.jsonl / work_audit.jsonl / queue)には残す= 沈黙にはしない。
+
+    分岐は deliveries だけで決まる(format_timeout_result の末尾と同じ材料=2箇所で数えない):
+      - deliveries >= cap → timeout_should_dead が True= 次は走らない。本文の一手は
+        「続きが要るならもう一度言ってくれ」= **本当に手番がある**→ 出す。
+      - deliveries < cap  → 常駐が自分で拾い直す= 手番ゼロ → 出さない。
+      - deliveries が読めない(None) → **出す側へ倒す**(規律§3 fail-open。判定不能を
+        沈黙の理由にしない)。
+    """
+    if deliveries is None:
+        return True
+    try:
+        return int(deliveries) >= int(cap or TIMEOUT_MAX_DELIVERIES)
+    except (TypeError, ValueError):
+        return True
+
+
 def pick_timeout_touched(entries, msg_id):
     """work_audit の行(dict)群から、その msg_id の**打ち切り監査**の touched を返す。
 
@@ -8309,7 +8339,7 @@ class Daemon:
         except Exception:
             return None
 
-    def _timeout_result_line(self, msg_id):
+    def _timeout_result_line(self, msg_id, deliveries=_DL_AUTO):
         """打ち切った便が**実際に触ったファイル**を work_audit から読み、確定結果を1行にする。
 
         読めない/実体のある変更が無ければ ""(= 黙る)。LLMは呼ばない=トークン0。
@@ -8320,12 +8350,37 @@ class Daemon:
           (読めなければ None= 純関数側が断定しない文へ倒す)。
           ★ここで渡す値は `timeout_should_dead` が見るのと**同じ deliveries**だ=
             通知の予告と実際の挙動がずれない(2箇所で別々に数えない)。
+
+        ★2026-09-17 追加= `deliveries` を外から渡せるようにした。表/裏の振り分け
+          (`_timeout_notice`)も同じ材料で判断するので、**queueを2回読んで別々の数を
+          掴む**形を作らない。既定 `_DL_AUTO` の時だけ自分で読む(従来どおり)。
         """
         try:
+            if deliveries is _DL_AUTO:
+                deliveries = self._delivery_count(msg_id)
             touched = _timeout_touched_from_audit(WORK_AUDIT, str(msg_id))
-            return format_timeout_result(touched, self._delivery_count(msg_id))
+            return format_timeout_result(touched, deliveries)
         except Exception:
             return ""
+
+    def _timeout_notice(self, msg_id):
+        """打ち切りの確定結果を **(表へ出す文, 裏だけに残す文)** に振り分ける。
+
+        どちらか片方だけが非空になる(両方空= 確定した成果が無い= 何もしない)。
+        振り分けの判定は純関数 `timeout_result_should_post` 1つ=
+        「読み手に手番があるか」だけで決める(2026-09-17 Chami「これめっちゃ多くない?」)。
+
+        ★deliveries は**ここで1回だけ**読み、本文の生成にも振り分けにも同じ値を使う=
+          「本文は『言い直さなくていい』と書いてあるのに表へ出ている」というズレを
+          原理的に作らない(2箇所で別々に数えない)。
+        """
+        dl = self._delivery_count(str(msg_id))
+        line = self._timeout_result_line(str(msg_id), dl)
+        if not line:
+            return "", ""
+        if timeout_result_should_post(dl):
+            return line, ""
+        return "", line
 
     def mark_yielded_read(self):
         """対話セッションが在席で箱を譲っている間も、届いた便へ **既読だけ** 押す。
@@ -9874,11 +9929,28 @@ class Daemon:
                             #   ファイル差分=実際に触ったファイル)を自分で読み、実体のある変更が
                             #   あった時だけ1行で出す。無ければ黙ったまま=中身の無い「進んでいる
                             #   可能性」は二度と言わない。★LLMは呼ばない=トークン0。
+                            #   ★2026-09-17 追加(Chami「これめっちゃ多くない?改善できない?」
+                            #     msg=1549968841197748421・引用元は mid-flight枝 msg=1549967529835761705)=
+                            #     確定結果のうち**読み手の手番がゼロの物**(deliveries<cap= 常駐が
+                            #     自分で拾い直す便。本文自身が「言い直す必要はない」と書いている)は
+                            #     表(部屋)へ出さず、裏(request_log)にだけ残す。C-055。
+                            #     出るのは dead-letter枝(「もう一度言ってくれ」=本当に手番がある)だけ。
                             if kind == "timeout":
-                                _line = self._timeout_result_line(mid)
-                                if _line:
-                                    reply = _line
+                                _post, _quiet = self._timeout_notice(mid)
+                                if _post:
+                                    reply = _post
                                     log(self.dept, f"[打ち切りの確定結果を出す] msg={mid}")
+                                elif _quiet:
+                                    log(self.dept,
+                                        f"[打ち切りの確定結果=手番ゼロにつき表へ出さない] msg={mid}")
+                                    # ★.logはkeeperのstdout退避=流れて消える。消えない台帳へ1行残す
+                                    #   (裏に在ることが「沈黙にしていない」の証拠になる)。
+                                    if session_relay is not None:
+                                        try:
+                                            session_relay._record(
+                                                mid, self.dept, "timeout_result_quiet", _quiet)
+                                        except Exception:
+                                            pass
                     except Exception:
                         pass                    # 判定不能なら従来どおり知らせる(黙るより出す)
                     # ★★relay無人時 fail-open(2026-08-02 イージス研究室・HQ裁定 msg=1533226514794025081)。
