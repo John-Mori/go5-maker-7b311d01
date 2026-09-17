@@ -22,6 +22,33 @@ function Write-Log($msg) {
     Write-Output $line
 }
 
+# Is $Root the tree we are allowed to write to, and does the leaf still exist?
+#   'wrong-tree'      -> the destination TREE is absent: refuse (retention must never
+#                        run against a Shared Drive that merely sorted first under G:\).
+#   'no-parent'       -> config has no parent segment; keeps would land at the drive
+#                        root. Refuse (mirrors the keepRoot guard below).
+#   'ok-leaf-missing' -> right tree, but the dated-snapshot folder is gone. PROCEED:
+#                        that folder is something this script creates, so it is
+#                        legitimately absent on a first run, after the destination was
+#                        reorganised, or while Drive has not hydrated it yet.
+#   'ok'              -> both present.
+# Split out as a function so the guard itself can be executed by
+# scripts\maintenance\test_backup_dest_guard.py against real directories.
+function Get-DestState([string]$Root, [string]$Rel) {
+    # Trim: a config like '\local' yields a parent of '\', which would anchor on the
+    # drive root itself and let keeps land there. Treat it as "no parent".
+    $relParent = ([string](Split-Path $Rel -Parent)).Trim('\')
+    if (-not $relParent) { return 'no-parent' }
+    if (-not (Test-Path -LiteralPath (Join-Path $Root $relParent))) { return 'wrong-tree' }
+    if (-not (Test-Path -LiteralPath (Join-Path $Root $Rel)))       { return 'ok-leaf-missing' }
+    return 'ok'
+}
+
+# Self-test hook: dot-source this file to get the functions above WITHOUT running a
+# backup. Nothing that reaches outside (robocopy, Remove-Item, persona_send) is
+# defined or executed past this point when the flag is set.
+if ($env:GO5_BACKUP_LIB_ONLY -eq '1') { return }
+
 # Resolve "My Drive" without hardcoding its localized name (it is Japanese here).
 $driveRoot = Get-ChildItem 'G:\' -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
 if (-not $driveRoot) {
@@ -42,12 +69,26 @@ if (-not $rel) {
     exit 1
 }
 
-# Validate the resolved drive root actually contains our destination path.
+# Validate the resolved drive root actually contains our destination TREE.
 # QA 2026-07-17: if a Shared Drive ever appears first under G:\, blind "first dir"
 # resolution would point retention's Remove-Item at the wrong tree.
-if (-not (Test-Path (Join-Path $driveRoot.FullName $rel))) {
-    Write-Log ("ABORT: resolved drive root '{0}' does not contain the expected destination. Backup skipped." -f $driveRoot.FullName)
+# 2026-09-17 (aegis-gl, from the 04:00 full ABORT): anchor on the PARENT, not on the
+# leaf. The leaf is the folder this script creates; on 2026-09-16 12:12 it vanished at
+# the destination and the leaf-only test read that as "wrong drive root", so the whole
+# run - both sources - was skipped and a full day went unbacked. A missing leaf is not
+# evidence of a wrong tree. The parent still fails on a wrong tree, so the guard holds.
+$destState = Get-DestState $driveRoot.FullName $rel
+if ($destState -eq 'no-parent') {
+    Write-Log ("ABORT: destination config '{0}' has no parent folder; keeps would land at the drive root. Backup skipped." -f $rel)
     exit 1
+}
+if ($destState -eq 'wrong-tree') {
+    Write-Log ("ABORT: resolved drive root '{0}' does not contain the expected destination tree '{1}'. Backup skipped." -f $driveRoot.FullName, (Split-Path $rel -Parent))
+    exit 1
+}
+if ($destState -eq 'ok-leaf-missing') {
+    # Loud, but not fatal: the tree is right, so we recreate the leaf and back up.
+    Write-Log ("WARN: destination leaf missing under a valid tree: {0}. Recreating it. If this was not a first run, the folder was removed or moved AT THE DESTINATION - check it." -f (Join-Path $driveRoot.FullName $rel))
 }
 
 $free = (Get-PSDrive -Name G).Free / 1GB
