@@ -19,7 +19,25 @@ OUT_DIR = os.path.join(ROOT, "local", "llm")
 SOURCES = [
     os.path.join(ROOT, "docs", "departments", "00_common", "system-brief.md"),
     os.path.join(ROOT, "docs", "departments", "00_common", "faq_knowledge.md"),
-    os.path.join(ROOT, "docs", "departments", "personas", "INDEX.md"),
+    # ★ペルソナ台帳は下の persona_ledger_section() でHQ正本から注入する(2026-09-17)。
+    #   旧: docs/departments/personas/INDEX.md は2026-07-18の移転で空(READMEのみ)になり、
+    #   以降ずっと warn だけで台帳が丸ごと抜けていた。公開repoにコピーを置かない方針のため
+    #   SOURCESには載せず、GO5_HQ_DIR経由でgit-ignoreのknowledge.mdにだけ焼く。
+]
+
+# ペルソナ台帳の正本=研究室HQ(2026-07-18移転・persona_send.pyと同じ作法でGO5_HQ_DIR経由)。
+_HQ_ROOT = os.environ.get("GO5_HQ_DIR") or os.path.normpath(
+    os.path.join(os.path.dirname(ROOT), "00_AI-HQ"))
+PERSONA_INDEX = os.path.join(_HQ_ROOT, "departments", "hr", "personas", "INDEX.md")
+
+# ★台帳は「必要な分だけ」注入する(Chami指示2026-09-17 msg1550054931128651909=選択肢1。
+#   うまくいったら五月の判断で柔軟に足す=このリストへ節見出しを足すだけ)。
+#   全35k字(=選択肢2/全部)を丸ごと入れるとMAX_CHARSを超えて直近会話が削られるので、
+#   なりすまし防止・呼称ミス防止に効く芯だけを選ぶ(冒頭のロスター表は常に入れる)。
+PERSONA_NEEDED_SECTIONS = [
+    "呼称マトリクス",        # 誰が誰をどう呼ぶか(呼称ミス=人格崩れの一番の火種)
+    "敬語の扱い",            # 敬語指定(qwenが無視しがち=faqにも実測あり)
+    "呼称・口調ルールの詳細",  # 上表の背景(口調の芯)
 ]
 
 
@@ -70,6 +88,52 @@ def recent_conversation(limit=40):
             + "\n- ".join(lines))
 
 
+def persona_ledger_section(max_chars=20000):
+    """ペルソナ台帳(HQ正本INDEX.md)から、無料応答陣に必要な芯だけを抜いて焼く。
+
+    ★2026-07-18の台帳移転で SOURCES の docs/departments/personas/INDEX.md が空になり、
+      以降 台帳が注入から丸ごと抜けていた(warnのみ)。ここでHQ正本へ繋ぎ直す。
+    ★「必要な分だけ」= 冒頭ロスター表 + PERSONA_NEEDED_SECTIONS。増やすのはリストへ足すだけ。
+    ★fail-safe: 台帳が読めなければ空を返す(壊れない)。
+    ★この芯が効くのは ask_local.py/ask_gemini.py(受付qwen)と採点役。優依の部屋返答(ask_growth)
+      には別配線(yui_persona＋部屋教訓)で届く=knowledge.mdは優依の口には出ない。"""
+    import re
+    if not os.path.exists(PERSONA_INDEX):
+        print(f"warn: ペルソナ台帳が見つからない {PERSONA_INDEX}")
+        return ""
+    try:
+        with open(PERSONA_INDEX, encoding="utf-8") as f:
+            lines = f.read().splitlines(keepends=True)
+    except Exception:
+        return ""
+    heads = [(i, l.rstrip()) for i, l in enumerate(lines) if re.match(r"^#{1,3}\s", l)]
+    # 冒頭〜最初の ### = ロスター表+補足(誰がどの部門かの対応表=常に入れる)
+    first_h3 = next((i for i, l in heads if l.startswith("### ")), len(lines))
+    picks = ["".join(lines[:first_h3]).strip()]
+
+    def _section(sub):
+        idxs = [i for i, l in heads if l.startswith("### ") and sub in l]
+        if not idxs:
+            return None
+        s = idxs[0]
+        nxt = [i for i, l in heads if i > s and (l.startswith("### ") or l.startswith("## "))]
+        e = nxt[0] if nxt else len(lines)
+        return "".join(lines[s:e]).strip()
+
+    for sub in PERSONA_NEEDED_SECTIONS:
+        sec = _section(sub)
+        if sec:
+            picks.append(sec)
+        else:
+            print(f"warn: 台帳の節が見つからない '{sub}'")
+    body = "\n\n".join(picks)
+    if len(body) > max_chars:
+        body = body[:max_chars] + "\n(…以下省略=上限)"
+    return ("## 20_personas ペルソナ台帳(キャラ⇔部門・呼称・口調の芯・正本=HR-HQ)\n"
+            "自分以外の人格を名乗らない/呼称と敬語を下表どおりにするための対応表。\n\n"
+            + body)
+
+
 def lessons_section(limit=20):
     """採点済みの誤答を教訓として焼き込む(L2・設計書§4.2)。
 
@@ -118,8 +182,11 @@ def main():
         else:
             print(f"warn: 見つからない {p}")
 
-    # 層の順序(設計書§4.3): 固定知識 → 教訓 → 直近発言。
+    # 層の順序(設計書§4.3): 固定知識 → ペルソナ台帳(芯) → 教訓 → 直近発言。
     # 教訓を直近発言より前に置くのは、後ろほど埋もれるから(=守ってほしい規則を先に見せる)。
+    personas = persona_ledger_section()
+    if personas:
+        parts.append(personas)
     lessons = lessons_section()
     if lessons:
         parts.append(lessons)
