@@ -509,7 +509,49 @@ def strip_decorative_emoji(text):
     return t if t else text.strip()          # 全部絵文字だった等で空になったら元文へ(沈黙回避)
 
 
-def ask_growth(question, stats_text, extra="", dialog="", req_id=""):
+def room_lessons_block(channel, limit=6):
+    """この部屋(channel)で過去に採点=bad だった事例を、優依の返答プロンプト用に軽くまとめる。
+
+    ★教育部門(中野五月)が ask_growth へ入れた配線(2026-09-17・Chami「教育部門として個々の
+      部屋の仕事として」)。狙い= 知識パック(knowledge.md)は ask_growth に載っておらず、教材が
+      優依の口へ一切届いていなかった(実測: ask_growth は人格＋部屋の目的＋直近会話＋成績だけ)。
+    ★ここでは知識縛り(『知識に無いことは司令塔に回す』)は持ち込まない=会話を殺すため(元設計の意図)。
+      持ち込むのは**この部屋の教訓だけ**を部屋別(channel一致)に絞ったもの。
+    ★gemma対策(実測L579-581=禁止語の直書きは逆効果): 誤答(悪い例)は載せず、
+      『正しい答え』を肯定形の1行にして見せる。空なら何も返さない(後方互換)。
+    """
+    if not channel or not os.path.exists(LESSONS):
+        return ""
+    rows = []
+    try:
+        with open(LESSONS, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    d = json.loads(line)
+                except Exception:
+                    continue
+                if d.get("channel") != channel:
+                    continue
+                if d.get("verdict") != "bad" or not d.get("correction"):
+                    continue
+                rows.append(d)
+    except Exception:
+        return ""
+    rows = rows[-limit:]
+    if not rows:
+        return ""
+    items = []
+    for d in rows:
+        q = (d.get("q") or "").strip().replace("\n", " ")[:80]
+        corr = (d.get("correction") or "").strip().replace("\n", " ")[:160]
+        items.append("- " + (f"「{q}」と聞かれたら、" if q else "") + corr)
+    return "\n".join(items)
+
+
+def ask_growth(question, stats_text, extra="", dialog="", req_id="", channel=""):
     """自室(llm-growth)専用の会話応答。ask_local.ask() は使わない。
 
     ★req_id(2026-09-12): 答えた相手の便のmsg_id。計測台帳の行に載せて**部屋の投稿へ辿れる**
@@ -530,6 +572,7 @@ def ask_growth(question, stats_text, extra="", dialog="", req_id=""):
     import urllib.request
     # ★人格は都度読み(yui.md)。読めない日でも名乗りだけは残す=無人格の別人にならない。
     persona_block = yui_persona()
+    room_lessons = room_lessons_block(channel)
     system = (
         "あなたは『優依(ゆい)』。go5-makerのローカルLLM(" + MODEL + ")だよ。\n\n"
         + ("=== あなたの人格(正本= 00_AI-HQ/departments/hr/characters/yui.md) ===\n"
@@ -574,7 +617,10 @@ def ask_growth(question, stats_text, extra="", dialog="", req_id=""):
         #   読み上げる時に日本語LLMが「報告口調」へ寄る傾向と、このブロック自身の文体が重なった)。
         #   なので削除ではなく、根っこ=規則4の指示と下のstats_textの文体そのものを直した
         #   (ロールバックは .bak_20260909_keigo または .bak_20260909_020926_labwork)。\n"
-        "=== 自分の成績(実データ) ===\n" + stats_text + "\n"
+        + (("=== この部屋で過去に間違えた点(同じ轍を踏まない) ===\n"
+            "同じ質問が来たら、下の『正しい答え』の向きで返す(この部屋だけの教訓)。\n"
+            + room_lessons + "\n\n") if room_lessons else "")
+        + "=== 自分の成績(実データ) ===\n" + stats_text + "\n"
         + (("\n=== この便で追加で守ること ===\n" + extra + "\n") if extra else "")
         # ★2026-09-09 試しに「です/ます/あります/ください」を禁止語として明示的に
         #   再掲する念押しを最後に足してみたが、実測で悪化した(3/3失敗)。
@@ -971,7 +1017,7 @@ def handle_growth(rec, raw_line, content, channel):
         #   (num_ctx 8192 + think:True の余白を残すため。採点役へ渡す12/40件とは別枠)。
         answer = ask_growth(content, growth_stats(channel),
                             dialog=recent_dialog(channel, limit=6, width=220),
-                            req_id=rec.get("msg_id", ""))
+                            req_id=rec.get("msg_id", ""), channel=channel)
     except Exception as e:
         answer = ""
         err = type(e).__name__
@@ -1183,7 +1229,7 @@ def handle_growth_vision(rec, raw_line, content, channel, imgs):
     try:
         answer = ask_growth(question, growth_stats(channel), extra=extra,
                             dialog=recent_dialog(channel, limit=6, width=220),
-                            req_id=rec.get("msg_id", ""))
+                            req_id=rec.get("msg_id", ""), channel=channel)
         err = ""
     except Exception as e:
         answer, err = "", type(e).__name__
