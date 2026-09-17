@@ -697,18 +697,6 @@ def prepare_discord_chunks(text):
         text = enjoh_backstop(text, tag="codex")
     except Exception:
         pass                                        # fail-open= 投稿は殺さない
-    # ★Codex専用Botは persona_send を通らない別OUT口だ。ここにも同じ最終安全網を置く。
-    #   表示名が既に付くため冒頭の自己紹介は落とし、英語ダンプはDiscordへ出さない。
-    try:
-        sys.path.insert(0, os.path.join(ROOT, "scripts", "llm"))
-        from delivery_guard import apply as apply_delivery_guard
-        text, _delivery = apply_delivery_guard(
-            text, CODEX_PERSONA,
-            aliases=("ビッグ・ボス", "ボス", "スネーク", "Snake🐍Codex"))
-        if text is None:
-            return []                               # 英語ダンプ=1通も撃たない
-    except Exception:
-        pass                                        # fail-open= 判定不能なら既存どおり送る
     # ★2026-09-10 定型ack denylist(依頼= 改善提案部門トトリ / 炎上 msg 1547305004069560351)。
     #   炎上の実物「受け取った。処理を開始する。完了結果は保存してから返す。」は
     #   codex_responder.notify_room → dc_send → **この関数**を通っていた= Codex席の唯一の出口。
