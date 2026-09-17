@@ -51,7 +51,6 @@ import re
 import subprocess
 import threading
 import time
-from datetime import datetime, timedelta, timezone
 
 #   ★prompt_spill(長すぎるpromptをargvから逃がす止血)は _run_claude から外した
 #     =promptは stdin で渡すので長さの上限が無い(2026-08-13・詳細は _run_claude 内の注記)。
@@ -1678,120 +1677,6 @@ def _relay_rate_block(dept, path=None, hours=24):
         return ""                                # fail-open= 数え側が落ちても封筒は殺さない
 
 
-HISTORY_PROCESSED = os.path.join(LOCAL, "discord_processed.jsonl")
-HISTORY_MAX_ITEMS = 6            # ★この件数までしか遡らない(床21,573字への影響を見ての初期値)
-HISTORY_MAX_CHARS_PER_ITEM = 220  # ★1件をこの字数で打ち切る(要約はしない・削るだけ)
-HISTORY_MAX_SCAN_BYTES = 2_000_000  # ★ファイル末尾からこのバイト数だけ遡って読む(全読みしない)
-
-
-def _history_tail_records(path, max_scan_bytes=HISTORY_MAX_SCAN_BYTES, chunk=65536):
-    """ファイル末尾から**新しい順**に1行=1レコードで返す(全読みしない・fail-open)。
-
-    ★discord_processed.jsonl は肥大し続ける生ログ(2026-09-17実測 11.9MB/6,902行)。
-      _relay_rate_block は同じ発想の台帳(request_log.jsonl 8.5MB)を**全読み**して
-      0.125秒/回で許容範囲としたが、あちらは24時間分のdept集計で頻度も低い。
-      こちらは**封筒を作るたび毎回**呼ぶので、ファイルが伸びるほど遅くなる全読みは避け、
-      最初からバイト上限で止める(「効いてから直す」を待たない)。
-    """
-    try:
-        out = []
-        with open(path, "rb") as f:
-            f.seek(0, os.SEEK_END)
-            pos = f.tell()
-            scanned = 0
-            buf = b""
-            while pos > 0 and scanned < max_scan_bytes:
-                step = min(chunk, pos)
-                pos -= step
-                f.seek(pos)
-                buf = f.read(step) + buf
-                scanned += step
-            parts = buf.split(b"\n")
-            if pos > 0 and parts:
-                parts = parts[1:]     # ★先頭要素は境界で切れている可能性があるので捨てる
-            for line in reversed(parts):
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    out.append(json.loads(line.decode("utf-8")))
-                except Exception:
-                    continue
-        return out                    # 新しい順
-    except Exception:
-        return []
-
-
-def _history_ts_jst(ts):
-    """ISO(UTC想定)を JST の 'M/D HH:MM' へ(★規律§1「DiscordAPIはUTC。必ず+9する」)。
-
-    パース不能な場合は原文をそのまま返す(fail-open)。
-    """
-    try:
-        s = str(ts or "").strip()
-        if not s:
-            return ""
-        if s.endswith("Z"):
-            s = s[:-1] + "+00:00"
-        dt = datetime.fromisoformat(s)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        dt = dt.astimezone(timezone(timedelta(hours=9)))
-        return dt.strftime("%m/%d %H:%M")
-    except Exception:
-        return str(ts or "")
-
-
-def _recent_history_block(rec, dept, n=HISTORY_MAX_ITEMS):
-    """この部屋の**直近の投稿履歴**(Chami発言/自分の直前返信/他人格発言)を封筒へ機械で載せる。
-
-    ★2026-09-17 ククール転送(msg 1549969753349562382)=Chami直「仕組みで再発防止して。」。
-      実害= astro-room 担当セッションが、Chami が直前に @ボス へ貼った依頼(msg
-      1549967219948265523)を認識できず「まだ貼ってない、そのまま貼れる」と的外れな
-      案内をした。原因= 封筒に「今回の新着1件+目的KPI+規律/裁定の見出し」しか載っておらず、
-      部屋の直近の会話(Chami自身の直前発言・自分の直前返信・他人格の発言)が入っていなかった。
-      「応答前に自分で履歴を確認する」は**心がけ**=全部門共通規律§3「心がけに任せない。
-      機構に載せる」に反する→機構(封筒)へ載せる。
-
-    ★discord_processed.jsonl には Chami の投稿だけでなく、人格自身の返信も
-      (Discord上の実イベントとして)同じ dept で記録されるので、この1本の台帳で
-      「Chami発言/自分の直前返信/他人格発言」の全部が拾える(新しい取得経路は要らない)。
-    ★今回の新着(rec自身)と同じ msg_id は除く(下の「Discord新着」欄と二重に見せない)。
-    ★件数・字数は初期値(6件・1件220字)。増やす時は床21,573字への実測影響を見てから
-      (C-059=感覚で増やさない)。取れない/空なら**空文字**を返す(fail-open・封筒を壊さない)。
-    """
-    try:
-        if not dept:
-            return ""
-        cur_id = str((rec or {}).get("msg_id") or "")
-        items = []
-        for r in _history_tail_records(HISTORY_PROCESSED):
-            if str(r.get("dept") or "") != dept:
-                continue
-            mid = str(r.get("msg_id") or "")
-            if mid and mid == cur_id:
-                continue
-            items.append(r)
-            if len(items) >= n:
-                break
-        if not items:
-            return ""
-        items.reverse()                # ★古→新(会話順)に直す
-        lines = []
-        for r in items:
-            when = _history_ts_jst(r.get("ts"))
-            who = str(r.get("author") or "?")
-            body = str(r.get("content") or "").replace("\n", " ").strip()
-            if len(body) > HISTORY_MAX_CHARS_PER_ITEM:
-                body = body[:HISTORY_MAX_CHARS_PER_ITEM] + "…(以下略)"
-            lines.append(f"[{when}] {who}: {body}")
-        return ("--- この部屋の直近の投稿履歴(古→新・機械取得・下の新着とは別) ---\n"
-                + "\n".join(lines) + "\n"
-                "--- 履歴ここまで ---\n")
-    except Exception:
-        return ""                     # fail-open= 履歴が取れなくても封筒は殺さない
-
-
 def build_envelope(rec, is_work=False, state="", dept="", disc_full=True, disc_fp="",
                    verdict_full=True, verdict_fp="", verdict_added=(), conf=None):
     """新着1件を「原文のまま」の封筒にする(提案書§5.2)。
@@ -1876,9 +1761,6 @@ def build_envelope(rec, is_work=False, state="", dept="", disc_full=True, disc_f
         # ★2026-09-03 相手の方言への同調よけ。**本文の直前**に置く= これは相手の字面の話なので、
         #   その字面を読む直前に居ないと効かない(当たらない便には1文字も足さない=実測1.7%)。
         + mirror_hint
-        # ★2026-09-17 部屋の直近投稿履歴(ククール転送=Chami直「仕組みで再発防止して。」)。
-        #   新着本文の直前に置く= 読む順で新着のすぐ手前に居ないと「直前の文脈」として効かない。
-        + _recent_history_block(rec, dept)
         + "=== Discord新着(原文。要約も改変もしていない) ===\n"
         f"投稿者: {rec.get('author','')}\n"
         f"msg_id: {rec.get('msg_id','')}\n"
