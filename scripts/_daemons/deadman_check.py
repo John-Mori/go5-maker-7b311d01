@@ -85,7 +85,10 @@ ROSTER_OTHER_OWNER = {
     "gemini":      "gemini_responder が所有(ホイミン/ベホップの3人部屋)",
     "llm-growth":  "local_responder(ローカルqwen)が所有=二重claim回避で意図的に外している",
     "meeting-a":   "会議部屋(セッションが直接入る)",
-    "meeting-b":   "会議部屋(セッションが直接入る)",
+    # ★2026-09-12 "meeting-b"(会議室β)を削除。Chami指示 msg 1548010889389678643 で部屋ごと
+    #   消えた(Discord API= 404 Unknown Channel / code 10003・当室で実測)。
+    #   channels.json から消えた以上ここは引かれない= 死に重りだが、除外の理由が書けない行を
+    #   残すと「なぜ除外されているか分からない除外」になる(この表の但し書きそのもの)ので落とす。
 }
 
 
@@ -111,8 +114,14 @@ SPILL_LOG = os.path.join(ROOT, "local", "llm", "prompt_spill.jsonl")
 # ★★無投稿ack(手番ゼロの完遂通知を人格応答にせず畳む)の台帳を読む
 #   (2026-09-05 aegis-gl / DEF-persona-verxina-triage-register-20260905 #2)。
 #   書き手= scripts/llm/dept_daemon.py の quiet_ack_record()。ここが**唯一の読み手**だ。
+#   ★★2026-09-17 ORG-49 で**畳める便が広がった**(dept_daemon.quiet_ack_target から author
+#     ゲートを外し、送り手が立てた `quiet_ack_ok` を読む形にした)。ここを同じ手番で直さないと、
+#     人格名義の裏通達を畳むたびに「送り主が完遂通知(自動)でない」で赤が出て、
+#     **新しい正常が全部アラームになる**(C-044=狼少年を作らない)。
+#     → 鳴らす条件を「送り主が誰か」から「**送り手の宣言と経路が揃っているか**」へ移した。
+#       送り主は内訳表示にだけ使う。
 QUIET_ACK_LOG = os.path.join(ROOT, "local", "llm", "quiet_ack.jsonl")
-QUIET_SENDER = "完遂通知(自動)"   # 畳んでよい唯一の送り主(completion_notify.AUTO_SENDER)
+QUIET_SENDER = "完遂通知(自動)"   # 従来型(auto)の送り主。★もう判定には使わない=表示用
 QUIET_RECENT_H = 24
 BLOAT_RECENT_H = 24      # これより古いイベントは対象にしない(初回導入時に過去分で誤爆しないため)
 BLOAT_WARN_MARGIN = 6000  # prompt_spill.WARN_MARGIN と同値(メッセージ表示用・依存は張らない)
@@ -210,19 +219,24 @@ def _quiet_ack_rows(now=None, hours=None):
 def check_quiet_ack(st, dry_run, now=None):
     """**沈黙の台帳に読み手を付ける**(2026-09-05 aegis-gl / QA=オタコン Release Gate 条件2)。
 
-    dept_daemon は「送り主=完遂通知(自動)・送り手が手番ゼロを宣言・受け手がオプトイン」の
-    3条件が揃った便だけを人格応答にせず畳む(fail-openの唯一の例外)。畳んだ便は
+    dept_daemon は「経路=dispatch・audience=ai・送り手が `quiet_ack_ok` を宣言」の3条件が
+    揃った便だけを人格応答にせず畳む(fail-openの唯一の例外)。畳んだ便は
     local/llm/quiet_ack.jsonl へ1行残る。**残っただけで誰も読まなければ C-054 の再演**だから、
     15分毎に回っているここが読む。
 
-    鳴らすのは**はみ出した時だけ**= 送り主が `完遂通知(自動)` 以外 / 経路が dispatch 以外 /
-    宣言フラグが無いのに畳まれた行が1行でもあれば赤(C-035=名指しを全体へ広げない、の実地監視)。
-    正常な畳みは件数を標準出力へ出すだけで鳴らさない(狼少年を作らない)。
+    ★2026-09-17 ORG-49 で判定を付け替えた。旧= 送り主が `完遂通知(自動)` 以外なら赤。
+      新= **送り手の宣言(`quiet_ack_ok`)か経路(`dispatch`)が欠けている行**だけ赤。
+      理由= 人格名義の裏通達を畳むのが**新しい正常**になったから、送り主で鳴らすと
+      正常が全部アラームになる(C-044)。送り主と型(auto/notice)は内訳表示に回す。
+
+    鳴らすのは**はみ出した時だけ**= 宣言フラグが無い / 経路が dispatch 以外 / audience が
+    ai 以外なのに畳まれた行が1行でもあれば赤(=「本文や気分で黙った」の検出)。
+    正常な畳みは件数と内訳を標準出力へ出すだけで鳴らさない(狼少年を作らない)。
     """
     rows = _quiet_ack_rows(now=now)
     bad = [e for e in rows
-           if str(e.get("author") or "") != QUIET_SENDER
-           or str(e.get("via") or "") != "dispatch"
+           if str(e.get("via") or "") != "dispatch"
+           or (str(e.get("audience") or "") or "ai") != "ai"
            or not e.get("quiet_ack_ok")]
     sig = "|".join(sorted("%s/%s/%s" % (e.get("ts", "?"), e.get("dept", "?"),
                                         e.get("author", "?")) for e in bad))
@@ -231,33 +245,46 @@ def check_quiet_ack(st, dry_run, now=None):
         st["quiet_sig"] = sig
         st["quiet_at"] = _now()
     depts = {}
+    kinds = {}
     for e in rows:
         depts[e.get("dept", "?")] = depts.get(e.get("dept", "?"), 0) + 1
+        # ★ORG-49 の型ラベル。古い行には無いので auto 扱い(送り主で補う)。
+        k = e.get("kind") or ("auto" if str(e.get("author") or "") == QUIET_SENDER
+                              else "notice")
+        kinds[k] = kinds.get(k, 0) + 1
     if not bad:
         if prev:
-            notify("✅ 無投稿ackの逸脱は解消 — 直近%dhの畳みは全て `%s` の手番ゼロ便です。"
-                   % (QUIET_RECENT_H, QUIET_SENDER), dry_run)
+            notify("✅ 無投稿ackの逸脱は解消 — 直近%dhの畳みは全て"
+                   "**送り手が `quiet_ack_ok` を宣言した裏便**です(%s)。"
+                   % (QUIET_RECENT_H,
+                      " ".join("%s=%d" % kv for kv in sorted(kinds.items())) or "-"),
+                   dry_run)
             print("[quiet] 解消を通知")
         else:
-            print("[quiet] 正常(直近%dh 畳み%d件 %s)"
+            print("[quiet] 正常(直近%dh 畳み%d件 型:%s / %s)"
                   % (QUIET_RECENT_H, len(rows),
+                     " ".join("%s=%d" % kv for kv in sorted(kinds.items())) or "-",
                      " ".join("%s=%d" % kv for kv in sorted(depts.items())) or "-"))
         return
     print("[quiet] 逸脱%d件 / 畳み%d件" % (len(bad), len(rows)))
     if sig == prev:
         print("[quiet] 前回と同じなので通知しない(連投回避)")
         return
-    lines = ["・%s dept=%s 送り主=%s via=%s 宣言=%s msg=%s"
+    lines = ["・%s dept=%s 送り主=%s via=%s audience=%s 宣言=%s msg=%s"
              % (e.get("ts", "?"), e.get("dept", "?"), e.get("author", "?"),
-                e.get("via", "?"), e.get("quiet_ack_ok"), e.get("msg_id", "?"))
+                e.get("via", "?"), e.get("audience", "?"),
+                e.get("quiet_ack_ok"), e.get("msg_id", "?"))
              for e in bad[:6]]
-    notify("🚨 **無投稿ackが想定の外へ広がった** — `%s` の手番ゼロ便**以外**が"
-           "人格応答を出さずに畳まれています(直近%dh・逸脱%d件/畳み%d件)。\n"
-           % (QUIET_SENDER, QUIET_RECENT_H, len(bad), len(rows))
+    notify("🚨 **宣言の無い便が黙って畳まれた** — 送り手の `quiet_ack_ok` / 経路 `dispatch` / "
+           "`audience=ai` のどれかが欠けたまま人格応答を出さずに畳まれています"
+           "(直近%dh・逸脱%d件/畳み%d件)。\n"
+           % (QUIET_RECENT_H, len(bad), len(rows))
            + "\n".join(lines)
            + "\n※fail-open(沈黙が最悪の事故)の唯一の例外がここです。範囲が広がる=**便が黙って消える**。"
-             "\n対処: scripts/llm/dept_daemon.py の quiet_ack_target() と "
-             "local/llm/quiet_ack_optin.json を確認。記録: local/llm/quiet_ack.jsonl", dry_run)
+             "\n※畳んでよいのは**送り手が宣言した裏便**だけ(ORG-49)。送り主が人格名義でも"
+             "宣言と経路が揃っていれば正常です。"
+             "\n対処: scripts/llm/dept_daemon.py の quiet_ack_target() を確認。"
+             "記録: local/llm/quiet_ack.jsonl", dry_run)
     print("[quiet] 逸脱を通知した")
 
 

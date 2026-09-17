@@ -1025,23 +1025,57 @@ MARKER_AUDIT = os.path.join(LOCAL, "_marker_audit.jsonl")
 QUIET_ACK_SENDER = "完遂通知(自動)"     # completion_notify.AUTO_SENDER と同値(依存は張らない)
 QUIET_ACK_LOG = os.path.join(LOCAL, "llm", "quiet_ack.jsonl")
 
+# ============================================================================
+# ★★2026-09-17 ORG-49(裏通達への表ack漏れ)。**author ゲートを外し、宣言フラグを読む。**
+#
+# 何が壊れていたか(研究室HQ シャビ・アロンソの指摘・実物):
+#   送信側には既に宣言が在った= `dispatch.py --quiet-ack-ok` が `rec["quiet_ack_ok"]=True`
+#   を便へ載せる。ところが受信側のこの述語が**先に author で落としていた**ので、
+#   人格名義(HQ・司令塔・部門長)の裏通達に付いた宣言は**誰にも読まれずに捨てられていた**。
+#   = 片側だけ在る機構。裏で来た通達へ表で「了解しました」を返す事故が構造的に止まらない。
+#
+# 実測(2026-09-17・イージス研究室。窓= send_audit.jsonl が在る 09-02T20:38〜09-17T18:03):
+#   ・audience=ai でackされた便 1,204本。うち 766本(64%)の処理区間に、その部屋の人格の
+#     表投稿があった。完遂通知(自動)を除いた**人格名義の裏便だけなら 749本中 643本(85%)**。
+#   ・一方 `quiet_ack_ok=True` が立っていた便は 332本で、**326本が author=完遂通知(自動)**=
+#     従来のゲートが拾える型。人格名義で宣言が立っていたのは**6本しかなく、うち5本が表へ出た**。
+#   ★数え方= 「前便のack〜この便のack+60秒」かつ「便の到着後」の区間帰属(自動監視の
+#     メタルギアMk.II の自発投稿は除外)。同じ区間の無関係な投稿を「返した」と数える
+#     誤差を含む**上限値**であって、1通ずつの因果を見た数字ではない。
+#   → つまり穴の芯は2つある。(1) 受信側が宣言を読んでいない(ここで直す)。
+#      (2) **送信側がその宣言をほとんど立てていない**(裏通達の大半に `--quiet-ack-ok` が無い)。
+#      (2)は機構では埋まらない= 通達を出す側の手番。ここでは(1)だけを機構で閉じる。
+#
+# ★ゲートは広げても**本文は一切読まない**(QA条件1は不変)。判定材料は 経路・audience・
+#   送り手が立てた構造フラグの3つ。送り主(author)は**分類のラベルとしてだけ**残し、
+#   判定からは外した。モデルが自分で自分を黙らせられる経路は作らない=
+#   `quiet_ack_ok` を立てるのは**送り手**であって、黙るのは**受け手**だ(自分では立てられない)。
+QUIET_ACK_KIND_AUTO = "auto"      # 従来型= 完遂通知(自動)の手番ゼロ復路
+QUIET_ACK_KIND_NOTICE = "notice"  # ORG-49 で通した型= 人格名義の裏通達(HQ・司令塔・部門長)
+
+
+def quiet_ack_kind(rec):
+    """畳んだ便の型(台帳のラベル。判定には使わない)。"""
+    if str((rec or {}).get("author") or "") == QUIET_ACK_SENDER:
+        return QUIET_ACK_KIND_AUTO
+    return QUIET_ACK_KIND_NOTICE
+
 
 def quiet_ack_target(dept, rec):
     """この便を「人格応答を出さずに既読ackで畳む」対象と見なすか(機械述語のみ)。
 
-    ★見るのは送り主・経路・audience・送り手が立てた構造フラグの4つだけ。
+    ★見るのは経路・audience・送り手が立てた構造フラグの3つだけ。
       **本文は読まない**(rec["content"] も返信も参照しない)。
+      送り主(author)は台帳のラベルにするだけで、ここでは判定しない(ORG-49)。
     """
     if not isinstance(rec, dict):
         return False
-    if str(rec.get("author") or "") != QUIET_ACK_SENDER:
-        return False                      # ★送り主で閉じる(C-035=名指しを広げない)
     if str(rec.get("via") or "") != "dispatch":
-        return False
+        return False                      # 便の経路で閉じる(Chamiの直接発言はここに来ない)
     if str(rec.get("audience") or "") != "ai":
         return False                      # 表向きの通知は機械で隠さない
     if rec.get("quiet_ack_ok") is not True:
-        return False                      # 送り手の機械が手番ゼロを宣言した便だけ
+        return False                      # 送り手の機械／送り手の手が宣言した便だけ
     return bool(str(dept or "").strip()) # 宛先部門がある内部便は全部門で共通処理
 
 
@@ -1059,6 +1093,9 @@ def quiet_ack_record(dept, rec, note=""):
                 "from_dept": str(rec.get("from_dept") or ""),
                 "msg_id": str(rec.get("msg_id") or ""),
                 "quiet_ack_ok": bool(rec.get("quiet_ack_ok")),
+                # ★ORG-49。auto=完遂通知の手番ゼロ復路 / notice=人格名義の裏通達。
+                #   deadman_check.check_quiet_ack はこのラベルで内訳を出す(判定はしない)。
+                "kind": quiet_ack_kind(rec),
                 # ★中身は運ばない。後から便を特定できる長さだけ残す(監査用)。
                 "head": str(rec.get("content") or "")[:120],
                 "note": note,
@@ -11242,11 +11279,13 @@ class Daemon:
                 #   送り手が立てた構造フラグ＋受け手のオプトインだけ= **本文は読まない**。
                 #   畳んだら必ず台帳へ1行残す(読み手= deadman_check.check_quiet_ack)。
                 if quiet_ack_target(self.dept, rec):
+                    _kind = quiet_ack_kind(rec)
                     wrote = quiet_ack_record(self.dept, rec)
-                    q.ack(c["id"], result="既読ack(完遂通知・手番ゼロ=無投稿)")
-                    log(self.dept, "★手番ゼロの完遂通知を人格応答にせず畳んだ"
-                                   "(台帳=%s) msg=%s"
-                                   % ("quiet_ack.jsonl" if wrote else "書けず", mid))
+                    q.ack(c["id"], result="既読ack(手番ゼロ宣言=無投稿/%s)" % _kind)
+                    log(self.dept, "★手番ゼロ宣言の便を人格応答にせず畳んだ"
+                                   "(型=%s 送り主=%s 台帳=%s) msg=%s"
+                                   % (_kind, rec.get("author") or "?",
+                                      "quiet_ack.jsonl" if wrote else "書けず", mid))
                     continue
                 # ★★催促の便は掴んだ瞬間に台帳と突き合わせ直す(2026-08-24・_refresh_request_followup)。
                 #   投函から配達までの待ち時間に依頼が閉じることがある(実測2件)。
