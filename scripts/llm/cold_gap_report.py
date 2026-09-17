@@ -164,9 +164,17 @@ def summary(hours=168.0):
 
     # ★原因の内訳(2026-09-03 追加)。間隔だけでは「短い間隔なのに冷えている」が説明できない。
     #   圧縮を挟んだ冷えは**保温では救えない**(脈を打っても前置きは作り直される)。
-    #   保温で本当に救えるのは「分岐を越え、かつ圧縮でない」冷えだけ= これが裁定の分母。
+    # ★★2026-09-17 向きを修正(イージス研究室)。ここは **`>=` で書かれていた**=
+    #   「分岐を**越えた**冷え」を「保温で救えた冷え」と呼んでいた。**符号が逆だ。**
+    #   分岐 be_sec は「そこまでなら脈を打つほうが安い」上限だから、救えるのは **be_sec 未満**の側。
+    #   実測(直近168時間)= 旧定義の127本を実際に保温すると収支 -43,524,285(重み付き)、
+    #   新定義の52本なら +1,133,107。旧の数字は**最も高くつく便を数えていた**。
     n_comp = sum(1 for r in cold if r[4])
-    n_save = sum(1 for r in cold if r[0] >= be_sec and not r[4]) if pulse else 0
+    n_save = sum(1 for r in cold if r[0] <= be_sec and not r[4]) if pulse else 0
+    # ★中央値の分岐だけでは「その集合を本当に保温したらいくらか」が出ない。1本ずつ積む。
+    #   脈の本数= 間隔を保温周期で割った数-1(最初の1回は元々温かい)。
+    net_save = sum(extra - max(0.0, r[0] / (WARM_MIN * 60.0) - 1.0) * pulse
+                   for r in cold if r[0] <= be_sec and not r[4]) if pulse else 0.0
     L += ["",
           "  ■ 冷えの原因の内訳",
           "  → 冷え便のうち **直前に圧縮を挟んでいたもの= %d/%d (%.1f%%)** = 保温では救えない"
@@ -176,8 +184,12 @@ def summary(hours=168.0):
         if g:
             c = sum(1 for r in g if r[4])
             L.append("  %-22s 冷え%4d  うち圧縮%4d (%3.0f%%)" % (name, len(g), c, 100.0 * c / len(g)))
-    L.append("  ★★保温で本当に救えた冷え(分岐超え かつ 圧縮でない)= **%d/%d (%.1f%%)**"
+    L.append("  ★★保温で本当に救えた冷え(**分岐未満** かつ 圧縮でない)= **%d/%d (%.1f%%)**"
              % (n_save, len(cold), 100.0 * n_save / max(1, len(cold))))
+    L.append("  ★その集合を実際に保温した時の収支= **%s**(重み付き・プラスなら保温が安い)"
+             % format(net_save, "+,.0f"))
+    L.append("  ★2026-09-17 以前の行の savable は向きが逆(分岐**超え**)= 行同士を並べる時は"
+             " savable_rule の有無で見分ける。")
     d = {"hours": hours, "n": len(rows), "cold": len(cold), "warm": len(warm),
          "over1h": n_over, "over1h_pct": round(pct_over, 1),
          "cold_write_med": cc_c, "cold_read_med": cr_c,
@@ -197,7 +209,11 @@ def summary(hours=168.0):
          "bands_compact": {name: sum(1 for r in cold if _band(r[0]) == name and r[4])
                            for _, _, name in BANDS},
          "savable": n_save,
-         "savable_pct": round(100.0 * n_save / max(1, len(cold)), 1)}
+         "savable_pct": round(100.0 * n_save / max(1, len(cold)), 1),
+         # ★行を自己申告にする= 過去行(このキーが無い)は旧い逆向きの定義だと分かる。
+         #   黙って意味だけ入れ替えると、次に比べた人が気づけない。
+         "savable_rule": "gap<=breakeven & not compact (2026-09-17 修正)",
+         "savable_net": round(net_save)}
     return "\n".join(L), d
 
 
