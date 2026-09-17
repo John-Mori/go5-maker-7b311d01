@@ -60,6 +60,30 @@ def notes(path, kind):
             if r.get("op") == "note" and r.get("note_kind") == kind]
 
 
+def enjo_marker():
+    """炎上行に付く印を、正本(session_relay.defects_block)を**実行して**取り出す。
+
+    ★検査台は文面を自前で持たない= `session_relay` 側の `_fire` の文面を1文字変えても、
+      ここが追従する(REQ-90ebe8bfc8 のやり残し・2026-09-17 改善提案部門)。
+      文字列一致の保険ではなく、本物の描画を1回通した結果を expectation に使う(共通規律§3)。
+    """
+    tmpdir = tempfile.mkdtemp(prefix="enjomark_")
+    ledger = os.path.join(tmpdir, "open_defects.jsonl")
+    old = SR.set_defects_path(ledger)
+    try:
+        RW.stack_open_defects([item("910000000000000001", "enjo", "MARKERPROBE")],
+                              GUILD, dry_run=False)
+        # MARKERPROBE は一意の目印= 要旨1行(番号行)にだけ載る。番号行は defect_id を
+        #   [..] で持ち、msg_id は別の詳細行にしか出ない= sentinel 単独で番号行を特定する。
+        for ln in SR.defects_block(DEPT).splitlines():
+            if "MARKERPROBE" in ln and "]" in ln:
+                after_id = ln.split("]", 1)[1]           # " <印>MARKERPROBE…"
+                return after_id[:after_id.index("MARKERPROBE")].strip()
+        return ""
+    finally:
+        SR.set_defects_path(old)
+
+
 def run():
     tmpdir = tempfile.mkdtemp(prefix="enjostack_")
     ledger = os.path.join(tmpdir, "open_defects.jsonl")
@@ -168,13 +192,15 @@ def run():
         check("愛は1件も積まれない(不具合ではない)",
               a_ai == 0 and len(opens(ledger)) == n_open5c)
 
-        # === 6) 起動文に🔥が出る(部屋が重さを読める) ===
+        # === 6) 起動文に炎上印が出る(部屋が重さを読める) ===
+        #   ★印の文面は検査台が持たず、正本(session_relay)を実行して取り出す=enjo_marker()。
+        #     文面が変わってもこの検査は打ち直し不要で追従する(REQ-90ebe8bfc8・2026-09-17)。
         print("\n[6] 部屋の起動文")
+        MARK = enjo_marker()
         block = SR.defects_block(DEPT)
-        check("★炎上の行に『🔥【炎上=恒久対策まで行け】』が付く",
-              "🔥【炎上=恒久対策まで行け】" in block)
+        check("★炎上の行に炎上印(session_relay正本の文面)が付く", bool(MARK) and MARK in block)
         check("再発だけの行には付かない",
-              block.count("🔥【炎上=恒久対策まで行け】") == len(
+              bool(MARK) and block.count(MARK) == len(
                   [d for d in SR.fold_defects(DEPT) if d.get("enjo")]))
 
         # === 7) dry-run は台帳を1バイトも触らない ===
