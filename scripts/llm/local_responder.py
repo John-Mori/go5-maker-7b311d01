@@ -771,7 +771,8 @@ def wants_image(content):
 
 
 def send_as(channel, text, persona, suffix=""):
-    """別名義で1本だけ出す(トラブル役=アメス用)。send() と同じ persona_send に乗る。"""
+    """別名義で1本だけ出す(トラブル役用)。send() と同じ persona_send に乗る。
+    ★誰の名義かは呼び側が `image_rooms.trouble_message()` で部屋ごとに引く(2026-09-17 C-082)。"""
     argv = [sys.executable, os.path.join(ROOT, "scripts", "discord", "persona_send.py"),
             "--channel", channel, "--persona", persona]
     if suffix:
@@ -865,21 +866,19 @@ def handle_image_request(rec, raw_line, content, channel, dept=None):
              "growth": True, "image": True})
         print(f"  画像生成→貼付 [{channel}] {content[:30]!r}")
     elif rc == 3 and image_rooms is not None:
-        # ★LoRAの実体が置き場に無い(Chami指示「トラブル時アメス」)。
+        # ★LoRAの実体が置き場に無い(Chami指示「トラブル時アメス」→ 2026-09-17 C-082でLoRA3室はカスミ)。
         #   黙って素のモデルで描くと「LoRAが効いている」と誤読されるので、描かずに理由を出す。
+        # ★名義も文面も **部屋ごとに rooms.py から引く**(ここに直書きしない=正本を2つ持たない)。
         why = ""
         for ln in (out or "").splitlines():
             if ln.startswith("LORA_MISSING"):
                 why = ln[len("LORA_MISSING"):].strip()
-        send_as(channel,
-                "この部屋のLoRAがまだ置き場に無いから、絵は出せない。\n"
-                + (why or "理由が取れなかった。local/llm/responder_log.jsonl を見て。")
-                + "\nそこへ .safetensors を置いてくれれば、次の便からそのまま描けるようになってる。"
-                  "置き場所さえ埋まれば、あたしが出てくる用事はもう無いわ。",
-                image_rooms.TROUBLE_PERSONA, image_rooms.TROUBLE_SUFFIX)
+        who, body = image_rooms.trouble_message(dept, "lora_missing", why)
+        send_as(channel, body, who, image_rooms.TROUBLE_SUFFIX)
         # PROCESSED への記録は上で済んでいる(ここで二度書かない)
         log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "lora_missing", "channel": channel,
-             "dept": dept, "q": content[:200], "image": True, "err": why[:300]})
+             "dept": dept, "q": content[:200], "image": True, "err": why[:300],
+             "trouble_persona": who})
         print(f"  画像生成不可(LoRA未設置) [{channel}] {why[:80]!r}")
     elif rc == 5 and image_rooms is not None:
         # ★2026-09-16 イージス研究室: タグ変換段(gemma)の時間切れ(DISPATCH-aegis-gl-1789567116980)。
@@ -889,17 +888,12 @@ def handle_image_request(rec, raw_line, content, channel, dept=None):
         for ln in (out or "").splitlines():
             if ln.startswith("TAG_TIMEOUT"):
                 why = ln[len("TAG_TIMEOUT"):].strip()
-        send_as(channel,
-                "日本語を英語のタグに直す係(ローカルのLLM)が時間内に返してこなかったから、"
-                "絵まで行けなかった。\n"
-                + (why or "理由が取れなかった。local/llm/responder_log.jsonl を見て。")
-                + "\n描く側(ComfyUI)は無罪よ。たいていはVRAMの取り合い="
-                  "ComfyUIが前の絵のモデルを抱えたままだと、この係が前に進めなくなるの。"
-                  "もう一度同じ言葉で頼んでくれれば、空けてから引き直すようにしてあるわ。",
-                image_rooms.TROUBLE_PERSONA, image_rooms.TROUBLE_SUFFIX)
+        who, body = image_rooms.trouble_message(dept, "tag_timeout", why)
+        send_as(channel, body, who, image_rooms.TROUBLE_SUFFIX)
         log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "tag_timeout", "channel": channel,
              "dept": dept, "q": content[:200], "image": True,
-             "reason": "local_chain_rc5", "err": (why or err or out)[:300]})
+             "reason": "local_chain_rc5", "err": (why or err or out)[:300],
+             "trouble_persona": who})
         print(f"  タグ変換timeout [{channel}] {why[:80]!r}")
     else:
         # ローカルが通らなかった=Chamiの言う「うまくいくまでのClaude支援」に回す。黙って消さない。

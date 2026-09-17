@@ -20,7 +20,8 @@
   ComfyUI/models/loras は `put_loras_here` だけの空フォルダ)。だから固定のファイル名を
   書かず、**名前の一部(lora_hint)で loras フォルダを探す**形にした=
   Chamiが .safetensors を置いた瞬間に配線が生きる。見つからない間は
-  トラブル役(アメス)が「どこに置けばいいか」を部屋へ言う(silent failにしない)。
+  トラブル役が「どこに置けばいいか」を部屋へ言う(silent failにしない)。
+  ★誰がその役かは**部屋ごとに引く**= 下の `trouble_persona_of()`(2026-09-17 C-082)。
 """
 import json
 import os
@@ -38,8 +39,60 @@ LORA_DIR = os.path.join("D:" + os.sep, "総合スタートファイル", "AIArtC
 CKPT_ILLUSTRIOUS_V2 = "Illustrious-XL-v2.0.safetensors"
 CKPT_WAI = "waiIllustriousSDXL_v170.safetensors"
 
-TROUBLE_PERSONA = "アメス"   # Chami指示「トラブル時アメス」= 失敗の報せはこの名義で出す
-TROUBLE_SUFFIX = "(自動)"    # ★生きているアメスの席と混ざらないよう、機械が出した便だと分かる形にする
+TROUBLE_PERSONA = "アメス"   # ★**既定値**。部屋が trouble_persona を持たない時だけここへ落ちる(fail-open)
+TROUBLE_SUFFIX = "(自動)"    # ★生きている本人の席と混ざらないよう、機械が出した便だと分かる形にする
+
+# ============================================================================
+# トラブル名義(2026-09-17 C-082・Chami直令 msg 1550060415462146121)
+# ----------------------------------------------------------------------------
+# 原文=「**メンバーにアメスを入れちゃってるからダメなのかも。抜いといて。その代わりをカスミに。**」
+#   直前の直令(msg 1550057587532365957)=「ローカルは基本的にアメスの役割はカスミがカバーしてよ」。
+# → LoRA3室(fusoh_v0 / fusoh_v2 / itsumono)のトラブル名義を **カスミ** へ。
+#   ★**定数を書き換えない**= 素の `imagegen` 室(persona=優依)まで一緒に動いてしまうから(C-035)。
+#     部屋ごとに `trouble_persona` を持たせ、**持たない部屋は上の定数へ落ちる**= 素の室は1文字も変わらない。
+#   ★戻す時も1行(該当室の trouble_persona を消すか書き換えるだけ)。
+#
+# ★**名義だけ替えると口調が食い違う**(台帳と口のズレ= 今日 ORG-49 で踏んだのと同じ型)。
+#   なので文面も名義で引く。★**"アメス" の3文面は 2026-09-17 以前と1文字も同じ**=
+#   素のimagegen室から出る文は従来のまま(「広げていない」の証明はここで取れる)。
+#   ★カスミの文面は**イージス研究室が書いた仮**だ。声の正本は人事部門(kasumi.md)にある=
+#     直しが要るなら人事部門の手番。ここは配線側の置き場でしかない。
+_TROUBLE_FALLBACK = "理由が取れなかった。local/llm/responder_log.jsonl を見て。"
+
+TROUBLE_VOICE = {
+    "アメス": {
+        "lora_missing": (
+            "この部屋のLoRAがまだ置き場に無いから、絵は出せない。\n"
+            "{why}\n"
+            "そこへ .safetensors を置いてくれれば、次の便からそのまま描けるようになってる。"
+            "置き場所さえ埋まれば、あたしが出てくる用事はもう無いわ。"
+        ),
+        "tag_timeout": (
+            "日本語を英語のタグに直す係(ローカルのLLM)が時間内に返してこなかったから、"
+            "絵まで行けなかった。\n"
+            "{why}\n"
+            "描く側(ComfyUI)は無罪よ。たいていはVRAMの取り合い="
+            "ComfyUIが前の絵のモデルを抱えたままだと、この係が前に進めなくなるの。"
+            "もう一度同じ言葉で頼んでくれれば、空けてから引き直すようにしてあるわ。"
+        ),
+    },
+    "カスミ": {
+        "lora_missing": (
+            "結論から言おう——この部屋のLoRAが置き場に無い。だから絵は出せないのだよ。\n"
+            "{why}\n"
+            "そこへ .safetensors を置いてくれれば、次の便からそのまま描けるようになっている。"
+            "置き場さえ埋まれば、この報せは二度と出ない。それが一番いい終わり方なのだがね。"
+        ),
+        "tag_timeout": (
+            "日本語を英語のタグに直す係(ローカルのLLM)が時間内に返してこなかった。"
+            "絵まで行き着けなかったのだよ。\n"
+            "{why}\n"
+            "描く側(ComfyUI)は無実だ。犯人はたいていVRAMの取り合いでね="
+            "ComfyUIが前の絵のモデルを抱えたままだと、この係が前へ進めなくなる。"
+            "もう一度、同じ言葉で頼んでくれたまえ。空けてから引き直すようにしてある。"
+        ),
+    },
+}
 
 # ★名義の割り当ては**HQの解釈**だ(Chami原文は「キャラはカスミと五月で」まで。どちらの部屋が
 #   どちらか、までは書かれていない)。五月(中野五月=五等分の花嫁)を**漫画**のv2へ、
@@ -61,6 +114,7 @@ ROOMS = {
         "lora_strength": 0.8,
         "ckpt": CKPT_ILLUSTRIOUS_V2,
         "persona": "カスミ",
+        "trouble_persona": "カスミ",   # 2026-09-17 C-082(旧= アメス)。平時も主なので名義は変わらない
         "label": "fusoh_v0(手描き風)",
     },
     "imagegen-fusoh-v2": {
@@ -69,6 +123,9 @@ ROOMS = {
         "lora_strength": 0.8,
         "ckpt": CKPT_ILLUSTRIOUS_V2,
         "persona": "中野五月",
+        # ★この室だけ平時(中野五月)とトラブル時(カスミ)で名義が入れ替わる。Chami原文どおり。
+        #   五月へ戻す一言が来たら、この1行を "中野五月" に書き換えれば戻る。
+        "trouble_persona": "カスミ",   # 2026-09-17 C-082(旧= アメス)
         "label": "fusoh_v2(漫画)",
     },
     # ★2026-09-16 Chamiが建てた3室目(便 ESC-local-lab-1549779860707090463)。原文=
@@ -86,15 +143,48 @@ ROOMS = {
     #     原文=「なるほど。カスミにやってもらおう。回しといて」(直前=itsumono室に主が未設定で絵が
     #     優依名義で出る、と中野五月が報告した流れ)。→ ここへ "persona" を1行足した=絵の名義がカスミになる。
     #     ★対象はこの1室だけ(C-035)。fusoh 2室・素のimagegen室の名義は1文字も動かしていない。
+    #   ★2026-09-17 17:21 Chami直令で**絵の出力名義だけ優依へ戻した**(原文=「画像の出力名義は
+    #     優依にしといて。」msg 1550059047619797124)。直前にChamiは「カスミが答えて・ローカルは
+    #     カスミがカバー・好きだから」(msg 1550057587532365957)とも言っている=**会話の主はカスミ・
+    #     絵の名義は優依**、と役割を分けたのが最新の意図。この "persona" は絵のpost名義にだけ効く
+    #     (会話の返信はセッションの [カスミ] タグ側=この値に依らない)。★対象はこの1室だけ(C-035)。
     "imagegen-itsumono": {
         "channel_id": "1549637404401598495",
         "lora_hint": "itsumono",
         "lora_strength": 0.8,
         "ckpt": CKPT_ILLUSTRIOUS_V2,
-        "persona": "カスミ",
+        "persona": "優依",             # ★絵のpost名義だけ(2026-09-17 Chami直令 msg 1550059047619797124)
+        "trouble_persona": "カスミ",   # 2026-09-17 C-082(旧= アメス)。会話の主と同じ人
         "label": "itsumono(twitter用)",
     },
 }
+
+def trouble_persona_of(dept):
+    """その部屋で「絵が出ない」を言う名義。★ROOMSをその場で読む(定数を判定に使わない)。
+
+    ★持たない部屋は TROUBLE_PERSONA へ落ちる= fail-open。**空席を作らない**=
+      名義が引けずに送信が落ちると silent fail(誰も何も言わない)に退化するからだ。
+    """
+    who = str(((ROOMS.get(dept) or {}).get("trouble_persona") or "")).strip()
+    return who or TROUBLE_PERSONA
+
+
+def trouble_message(dept, kind, why=""):
+    """トラブル時に部屋へ出す (名義, 本文)。kind= "lora_missing" / "tag_timeout"。
+
+    ★文面は**名義で引く**(部屋ではない)= 同じ人はどの部屋でも同じ声で喋る。
+    ★知らない名義・知らない kind なら既定(アメスの文面)へ落ちる= ここでも黙らない。
+    """
+    who = trouble_persona_of(dept)
+    book = TROUBLE_VOICE.get(who) or TROUBLE_VOICE[TROUBLE_PERSONA]
+    tmpl = book.get(kind) or TROUBLE_VOICE[TROUBLE_PERSONA].get(kind)
+    if not tmpl:
+        # ★知らない kind でも**空文字を返さない**。空を送ると誰も何も言わないのと同じ=
+        #   このモジュールが潰そうとしている silent fail そのものになる。
+        tmpl = "絵が出せなかった(理由の型『" + str(kind) + "』は文面をまだ持っていない)。\n{why}"
+    body = tmpl.replace("{why}", (why or "").strip() or _TROUBLE_FALLBACK)
+    return who, body
+
 
 # LoRAを当てる部屋だけ(既存の imagegen は素のまま=挙動を1文字も変えない)
 def lora_depts():
