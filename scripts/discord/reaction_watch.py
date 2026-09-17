@@ -452,6 +452,107 @@ def collect(api, chans, since_ms, marks, seen, now_str):
                    "skipped_bot": skipped_bot, "truncated": truncated}
 
 
+# ------------------------------------------------ その投稿より後に入った物を添える(HQ-0272)
+# なぜ在るか= 2026-09-17 研究室HQ `msg 1549946783634038815`(実害の未遂)。
+#   09-17 09:30 の巡回便(ESC-local-lab-DISPATCH-local-lab-1789605039831)が配った炎上1件は、
+#   **投稿の16分後に実機へ入り終わっていた**(wd14_tag.py ほか / change_log 09-16T14:35)。
+#   便にその事実が1文字も無かったので、受け手が完了済みの仕事を「新設する」依頼票として
+#   組み直す寸前まで行った= **二重実装の未遂**(止血 msg 1549945072928161813)。
+#   冪等の台帳(reaction_seen.jsonl)が守るのは「二度配らない」だけで、
+#   ★**「配る時に、今の状態を添える」は誰も持っていなかった。**
+# ★引き金は機械= cid は巡回便が既に持っている値(投稿リンクの中身)。人手の入口を作らない
+#   (共通規律§3= 人手の入口を要件にした機構は実測0件になる)。
+# ★dept では引けない(HQ実測)= あの作業行は dept=aegis-gl / report_to=hq で、巡回項目は
+#   dept=local-lab だった。dept照合だと0件になって穴が埋まらない。
+#   → **行のJSON全文に cid が文字列で入っているか**で引く(部屋IDは本文・触った・なぜに載る)。
+# ★0件なら1文字も足さない(便を太らせない= HQ指定)。
+# ★読み方は scripts/lib/jsonl_store.py へ寄せる(ORG-11)= BOM落とし・帯(TZ)の解釈が既に
+#   1本になっている。ここで自前の _parse_ts を持つと読み方が割れる。
+CHANGE_LOG = os.path.join(LOCAL, "llm", "change_log.jsonl")
+CHANGELOG_MAX = 3                # 1項目につき最大3件(新しい順)。便を太らせない
+CHANGELOG_CUT = 150              # 「何」の引用はここで切る(全文は台帳を見ればいい)
+_changelog_cache = None
+
+
+def load_change_log():
+    """change_log を**1プロセスにつき1回だけ**読む(実測 2.0MB / 2,273行)。
+
+    戻り値= [(epoch秒, 行, 行のJSON全文)] 。読めなければ空リスト(★fail-open=
+    台帳が壊れていても巡回便そのものは出る。見張りが本体を巻き添えにしない)。
+    """
+    global _changelog_cache
+    if _changelog_cache is not None:
+        return _changelog_cache
+    out = []
+    try:
+        libdir = os.path.join(ROOT, "scripts", "lib")
+        if libdir not in sys.path:
+            sys.path.insert(0, libdir)
+        from jsonl_store import read_jsonl, ts_epoch      # noqa: PLC0415
+        rows, _bad = read_jsonl(CHANGE_LOG)
+        for r in rows:
+            t = ts_epoch(r.get("ts"), None)
+            if t is None:
+                continue                 # ts が読めない行は窓に入れられない(黙って0にしない)
+            out.append((t, r, json.dumps(r, ensure_ascii=False)))
+    except Exception as e:                                # noqa: BLE001
+        print(f"警告: change_log を読めない({e})= 巡回便に『既に入った物』を添えられない",
+              flush=True)
+        out = []
+    _changelog_cache = out
+    return out
+
+
+def changelog_after(cid, posted_at, limit=CHANGELOG_MAX):
+    """その投稿(cid)の時刻より後に、その部屋のIDを含む change_log の行を新しい順に返す。"""
+    try:
+        rows = load_change_log()          # ★先に読む= sys.path へ scripts/lib を入れるのもここ
+        from jsonl_store import ts_epoch                  # noqa: PLC0415
+        t0 = ts_epoch(posted_at, None)                    # Discord は UTC。帯つきなので揃う
+        if not cid or t0 is None:
+            return []
+        hits = [(t, r) for (t, r, s) in rows if t >= t0 and str(cid) in s]
+        hits.sort(key=lambda x: x[0], reverse=True)
+        return [r for _t, r in hits[:limit]]
+    except Exception:                                     # noqa: BLE001
+        return []
+
+
+def _one_line(v, cut=CHANGELOG_CUT):
+    """台帳の値(文字列/リスト)を1行へ潰す。書き方が割れているので読む側で吸収する。"""
+    if isinstance(v, (list, tuple)):
+        v = " / ".join(str(x) for x in v)
+    s = " ".join(str(v or "").split())
+    return (s[:cut] + "…") if len(s) > cut else s
+
+
+def done_since_block(it):
+    """★この項目に『投稿より後に入った物』を添える。0件なら空文字(1文字も足さない)。"""
+    rows = changelog_after(it.get("channel_id"), it.get("posted_at"))
+    if not rows:
+        return ""
+    out = [f"   ★★**この投稿より後に、この部屋で誰かが手を入れた記録が {len(rows)}件ある**"
+           f"(local/llm/change_log.jsonl を cid={it.get('channel_id')} で機械が実引きした)。\n"
+           f"     ★**新しく作り始める前に、これが同じ物かどうかを必ず見ろ。**"
+           f"同じなら残っているのは確認だけだ(二重実装の未遂が2026-09-17に現物で起きている)。\n"
+           f"     ★ただしこれは『入れた』の記録であって『直った』の証拠ではない(共通規律§4.55)。"
+           f"別件の行が混ざることもある= 読んで判断するのはそちらだ。\n"]
+    for r in rows:
+        ts = _one_line(r.get("ts"))[:19]     # 帯(+09:00)は落とす。★ここで「…」を付けない=
+                                             #   秒まで揃っていて欠けていないのに、切れた印が
+                                             #   付くと「台帳の値が壊れている」と読まれる
+        dept = _one_line(r.get("dept") or r.get("who") or "?", 24)
+        what = _one_line(r.get("何") or r.get("what") or r.get("summary") or "(何の記載なし)")
+        touched = _one_line(r.get("触った") or r.get("touched") or r.get("files") or "", 90)
+        commit = _one_line(r.get("commit") or "", 40)
+        out.append(f"     - {ts} [{dept}] {what}\n")
+        if touched:
+            out.append(f"       触った= {touched}\n")
+        if commit:
+            out.append(f"       commit= {commit}\n")
+    return "".join(out)
+
+
 # ---------------------------------------------------------------- 本文
 
 def quote_body(text):
@@ -480,6 +581,10 @@ def item_block(it, guild_id, n=None):
         f"   ----- 投稿の本文(原文のまま) -----\n"
         f"{quote_body(it['content'])}\n"
         f"   ----------------------------------\n"
+        # ★HQ-0272= 配る時に「今の状態」を添える。0件なら1文字も増えない。
+        #   ここ1箇所で部門便(dept_body)と改善提案部門の一覧(kaizen_body)の両方に載る
+        #   = item_block を通らない項目は無い(実測: 呼び出しは2箇所ともここ・C-064)。
+        + done_since_block(it)
     )
 
 
@@ -928,10 +1033,15 @@ def main():
 
     bad = watch_conflicts(marks)
     if bad:
-        # ★機械の印を拾うと、自分が押した印で自分を呼び続ける。設定ミスなので止める。
-        print(f"★中止: WATCH に機械の印が入っている ({', '.join(bad)})。"
-              "自分の印で自分を呼ぶ無限ループになる。WATCH を直すこと。")
-        return 2
+        # ★2026-09-09実測(改善提案部門)= ここを`return 2`で全巡回を止めていたら、
+        #   2026-09-05〜09-09の5日間、🔥/enjoh/golazo/愛まで含めて絵文字監視が丸ごと
+        #   沈黙していた(react.py.ALIASへ再発/改悪を機械印として追加した2026-09-04の翌日から)。
+        #   実際の自己ループ対策は下流の実引き(★926行台『非botのユーザーが1人でも居ること』
+        #   =humansフィルタ)が名前一致より確実に効いている。かつ再発/改悪を機械が自動で
+        #   押すコードは現時点で実装が無い(架空の衝突)。だから**全巡回を止めない**=
+        #   警告だけ出して続行する(可用性優先=fail-open、§3「常に誤発火する安全網は無視される」)。
+        print(f"★警告: WATCH に機械の印と同名の登録がある ({', '.join(bad)})。"
+              "実際の除外は下流の非bot実引きで行うので巡回は続ける。WATCH を確認すること。")
 
     chans, src = load_channels()
     print(f"部屋 {len(chans)}室 (出典 {src}) / 遡り {a.hours}時間")
