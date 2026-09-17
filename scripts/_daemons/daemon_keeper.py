@@ -103,6 +103,28 @@ def log(msg):
     print(f"{time.strftime('%H:%M:%S')} keeper: {msg}")
 
 
+def ps_lines(args, timeout=30):
+    """PowerShell を回して**必ず文字列を返す**(2026-09-17 イージス研究室)。
+    ★元は subprocess.run(..., text=True) で locale(cp932)へ落としていた。
+      プロセスのコマンドラインに cp932 で表せないバイトが混ざると
+      **読み取りスレッドが UnicodeDecodeError で死に、stdout が空文字で返る**。
+      呼び出し側はそれを「dept_daemon が1体も居ない」と読む= 二重起動へ倒れる。
+      実測= local/_daemon_keeper.log に 50件(2026-09-17 19:12 時点)。
+    ★だからここは bytes で受け、utf-8 → cp932 → replace の順に自分で解く。
+      **例外で落とさない**(判定不能でも文字列を返す= 後段の判定を殺さない)。"""
+    try:
+        out = subprocess.run(args, capture_output=True, timeout=timeout)
+    except Exception:
+        return None
+    raw = out.stdout or b""
+    for enc in ("utf-8", "cp932"):
+        try:
+            return raw.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="replace")
+
+
 class Slot:
     def __init__(self, dept):
         self.dept = dept
@@ -478,17 +500,15 @@ def _alive_dept_pids():
     """
     if os.name != "nt":
         return None, {}
-    try:
-        out = subprocess.run(
-            ["powershell", "-NoProfile", "-Command",
-             "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | "
-             "Where-Object { $_.CommandLine -match 'dept_daemon' } | "
-             "ForEach-Object { \"$($_.ProcessId)`t$($_.CommandLine)\" }"],
-            capture_output=True, text=True, timeout=30)
-    except Exception:
+    text = ps_lines(
+        ["powershell", "-NoProfile", "-Command",
+         "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | "
+         "Where-Object { $_.CommandLine -match 'dept_daemon' } | "
+         "ForEach-Object { \"$($_.ProcessId)`t$($_.CommandLine)\" }"])
+    if text is None:
         return None, {}
     pids, by_pid = set(), {}
-    for ln in (out.stdout or "").splitlines():
+    for ln in text.splitlines():
         parts = ln.split("\t", 1)
         if not parts or not parts[0].strip().isdigit():
             continue
@@ -751,14 +771,15 @@ def _kill_orphans_for(dept):
     if os.name != "nt":
         return 0
     try:
-        out = subprocess.run(
+        text = ps_lines(
             ["powershell", "-NoProfile", "-Command",
              "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | "
              "Where-Object { $_.CommandLine -match 'dept_daemon' -and "
              "$_.CommandLine -match '--dept\\s+%s(\\s|$)' } | "
-             "ForEach-Object { $_.ProcessId }" % re.escape(dept)],
-            capture_output=True, text=True, timeout=30)
-        pids = [p.strip() for p in (out.stdout or "").split() if p.strip().isdigit()]
+             "ForEach-Object { $_.ProcessId }" % re.escape(dept)])
+        if text is None:
+            return 0
+        pids = [p.strip() for p in text.split() if p.strip().isdigit()]
     except Exception:
         return 0
     for pid in pids:
