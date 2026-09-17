@@ -68,6 +68,7 @@
         python scripts/llm/local_responder.py --grade-history [--dry-run]
 常駐: scripts/llm/start_local_responder.bat
 """
+import datetime
 import json
 import os
 import re
@@ -573,11 +574,21 @@ def ask_growth(question, stats_text, extra="", dialog="", req_id="", channel="")
     # ★人格は都度読み(yui.md)。読めない日でも名乗りだけは残す=無人格の別人にならない。
     persona_block = yui_persona()
     room_lessons = room_lessons_block(channel)
+    # ★今の日時(2026-09-17 Chami「今、日本時間で何時？」に優依が『機能を持っていない』と答え
+    #   『やだ』となった=個々の部屋の仕事として教育部門が配線)。デーモンはこの機械(JST)で動くので
+    #   答えるたびに datetime.now() を焼き込めば「今何時/今日何日/何曜日」に実データで答えられる。
+    _now = datetime.datetime.now()
+    _wd = "月火水木金土日"[_now.weekday()]
+    now_str = _now.strftime("%Y年%m月%d日") + f"({_wd})" + _now.strftime(" %H時%M分")
     system = (
         "あなたは『優依(ゆい)』。go5-makerのローカルLLM(" + MODEL + ")だよ。\n\n"
         + ("=== あなたの人格(正本= 00_AI-HQ/departments/hr/characters/yui.md) ===\n"
            + persona_block + "\n\n" if persona_block else "")
         + "=== この部屋のこと ===\n" + ROOM_PURPOSE + "\n\n"
+        + "=== 今この瞬間の日時(日本時間・答えるたびに更新される実データ) ===\n"
+          "今は " + now_str + " だよ。\n"
+          "『今何時』『今日は何日』『何曜日』と時刻や日付を聞かれたら、これをそのまま答える。"
+          "『時間を知る機能がない』『分からない』とは言わない(これは実データだから答えられる)。\n\n"
         + (("=== 直近の会話(あなたとChamiのやり取り・古い順。今のChamiの発言はこの続き) ===\n"
             + dialog + "\n\n") if dialog else "")
         + "=== 話し方の規則 ===\n"
