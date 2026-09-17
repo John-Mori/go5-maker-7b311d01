@@ -81,6 +81,19 @@ CLUSTERS = [
                                 "保存が巻き戻"]),
     ("計測値の整合(累計/デルタ)", ["デルタ", "累計", "負値", "クリック増分", "下限クランプ"]),
     ("基盤混入(改修αでない)", ["build_office", "daily_report", "黒板", "振り返り", "設計書化"]),
+    # ==== 2026-09-06 追加(改善提案部門・毎朝8:10便が「その他 7/7件(100%)」を報告) ====
+    # ★経緯= 24h窓の system-engineer 7件が**全件**その他へ落ちた。90日での劣化ではなく、
+    #   優先事業の切替(旧5秒動画Webアプリ凍結・5chShortMovie/ad研究室支援へ実務が移行済み。
+    #   CLAUDE.md参照)により、system-engineer部門の実作業そのものが上の17本の対象領域
+    #   (go5-maker本体= 投稿導線/候補/ボタン/GAS等)から外れたのが真因。7件を実文で読むと
+    #   2系統に分かれた: ①5ch-daihon(YMM4台本編集ツール)新設・改修=3件 ②ad研究室連携の
+    #   Gemini API運用改修(room_comments.py/vision_comments.py/gemini_usage.py)=4件。
+    #   キーワードを1つ足す延命ではなく、**新しい実務2本を新クラスタとして追加**する。
+    ("5ch台本編集ツール/YMMP生成", ["5ch-daihon", "ymmp", "cutlist", "cut_list_to_ymmp",
+                                     "generator_caps", "validate_ymmp"]),
+    ("Gemini API運用/ad研究室連携", ["gemini", "default_models", "vision_comments",
+                                      "room_comments", "httperror", "err_detail",
+                                      "gemini_usage"]),
 ]
 
 # ★「何」が空欄の行は「その他」に紛れさせない。分類器の穴ではなく**台帳への記入の穴**で、
@@ -195,6 +208,18 @@ def main():
         print(_skill.render(now, args.hours))
     except Exception as _e:  # noqa: BLE001  黙って落とさない=何が起きたか出す(§2)
         print("\n◆新規skill化= 集計に失敗(%s)。scripts/kaizen/daily_skill_report.py を見てくれ。" % _e)
+
+    # ★毎朝の便に「⚠️(自動)生成不良」の件数を足す(Chami依頼 2026-09-17)。
+    #   render は0件で "" を返す= その日はこのブロックを出さない(Chami「0の日は何も言わなくていい」)。
+    #   別モジュールに閉じ、失敗しても上のmdは絶対に壊さない=try/except。
+    try:
+        import warn_gen_count as _warn
+        _blk = _warn.render(now, args.hours)
+        if _blk:
+            print()
+            print(_blk)
+    except Exception as _e:  # noqa: BLE001  黙って落とさない=何が起きたか出す(§2)
+        print("\n◆⚠️生成不良集計= 失敗(%s)。scripts/kaizen/warn_gen_count.py を見てくれ。" % _e)
 
     if not args.no_store:
         d = datetime.datetime.fromtimestamp(now)
