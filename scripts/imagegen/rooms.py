@@ -82,14 +82,16 @@ ROOMS = {
     #   ★LoRAの実物も実測済= loras\itsumono\checkpoint-e50_s600.safetensors
     #     (256,056,360バイト・2026-09-16 18:33)。置き場を全部歩いて "itsumono" に当たるのはこの1本だけ
     #     =誤爆しない。hint はフォルダ名で当てている(fusoh 2室と同じ形)。
-    #   ★"persona" は**わざと書いていない**= この便に人格の指名が無く、人格の決定はChamiの領域だ。
-    #     local_responder は conf.get("persona") or IMAGE_PERSONA で**優依**へ落ちる=絵は出る。
-    #     キャラを置くならChamiの言葉を待ってここへ1行足すだけでいい。
+    #   ★2026-09-17 Chami直令で主人格が決まった(回送= 中野五月[llm-qa] DISPATCH-aegis-gl-1789630298503)。
+    #     原文=「なるほど。カスミにやってもらおう。回しといて」(直前=itsumono室に主が未設定で絵が
+    #     優依名義で出る、と中野五月が報告した流れ)。→ ここへ "persona" を1行足した=絵の名義がカスミになる。
+    #     ★対象はこの1室だけ(C-035)。fusoh 2室・素のimagegen室の名義は1文字も動かしていない。
     "imagegen-itsumono": {
         "channel_id": "1549637404401598495",
         "lora_hint": "itsumono",
         "lora_strength": 0.8,
         "ckpt": CKPT_ILLUSTRIOUS_V2,
+        "persona": "カスミ",
         "label": "itsumono(twitter用)",
     },
 }

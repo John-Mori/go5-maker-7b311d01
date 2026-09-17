@@ -84,7 +84,10 @@ DAEMON = os.path.join(ROOT, "scripts", "llm", "dept_daemon.py")
 # ★2026-09-16 astro-room(西洋占星術サイト班)を追加(Chami直令3便・裁定C-080・回送 S-0004)。
 #   部屋は先にChamiが自分で作っていた(1549512442386587728)。常駐が居ないと
 #   「部屋は在るのに消費者が居ない」=INC-110と同型になるので、ここへ足すのが本体だ。
-DEPTS = ["hq","research-room", "aegis-gl", "keiei-kikaku", "hr-room", "hr-context", "qa-reviewer", "system-engineer", "product-scout", "shorts-analyst", "copy-director", "learning-coach", "learning-coach-2", "data-org", "frontend", "ai-office", "llm-edu", "llm-qa", "platform-se", "consult-intel", "past-room", "future-room", "kaizen-analyst", "incident", "system-engineer-b", "dream-care", "health-log", "report-notify", "imagegen", "manga-shorts", "kukuru-nakama", "gunji", "soudan-room", "goods-afi", "someday-room", "web-research", "otacon-radio", "imagegen-fusoh-v0", "imagegen-fusoh-v2", "local-lab", "astro-room"]
+# ★2026-09-17 imagegen-itsumono を追加(41→42体)。Chami直令「なるほど。カスミにやってもらおう。
+#   回しといて」の回送(中野五月[llm-qa] DISPATCH-aegis-gl-1789630298503)。部屋は2026-09-16から
+#   在ったが常駐が1体も立っていなかった=会話の席が無い状態だった。DEPT_CONF・rooms.py と対で足した。
+DEPTS = ["hq","research-room", "aegis-gl", "keiei-kikaku", "hr-room", "hr-context", "qa-reviewer", "system-engineer", "product-scout", "shorts-analyst", "copy-director", "learning-coach", "learning-coach-2", "data-org", "frontend", "ai-office", "llm-edu", "llm-qa", "platform-se", "consult-intel", "past-room", "future-room", "kaizen-analyst", "incident", "system-engineer-b", "dream-care", "health-log", "report-notify", "imagegen", "manga-shorts", "kukuru-nakama", "gunji", "soudan-room", "goods-afi", "someday-room", "web-research", "otacon-radio", "imagegen-fusoh-v0", "imagegen-fusoh-v2", "local-lab", "astro-room", "imagegen-itsumono"]
 BACKOFF_START = 10
 BACKOFF_CAP = 300
 HEALTHY_SEC = 60               # これ以上生きたら健康=バックオフリセット
