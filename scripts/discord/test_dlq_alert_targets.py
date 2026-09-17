@@ -44,22 +44,40 @@ def fire(fn, state, db=None):
     """1回だけ発火させ、実際に出た宛先と本文を返す(送信はしない)。
 
     db を渡すと、その周回だけ警報が読むキューDBを偽物へ向ける(本番DBは読まない)。
+    戻り値= [(面, 宛先, 本文), ...]。面は "表"(bot_send= Chamiが読む部屋)か
+    "裏"(ai_send= 部門セッションのAI便・部屋には出ない)。
+    ★2026-09-17: 外へ出る口が2つになった= **両方**を偽物にしないと本物が飛ぶ(C-064)。
     """
     sent_to = []
-    orig_send, orig_db = aw.bot_send, aw.queue_db_path
+    orig_send, orig_ai, orig_db = aw.bot_send, aw.ai_send, aw.queue_db_path
 
     def spy(channel, body, dry_run, by_dept=False):
-        sent_to.append((channel, body))
+        sent_to.append(("表", channel, body))
+        return True
+
+    def spy_ai(dept, body, dry_run):
+        sent_to.append(("裏", dept, body))
         return True
 
     aw.bot_send = spy
+    aw.ai_send = spy_ai
     if db:
         aw.queue_db_path = lambda: db
     try:
         fn(state, True)
     finally:
-        aw.bot_send, aw.queue_db_path = orig_send, orig_db
+        aw.bot_send, aw.ai_send, aw.queue_db_path = orig_send, orig_ai, orig_db
     return sent_to
+
+
+def front(sent):
+    """Chamiが読む面(Discordの部屋)へ出た宛先。"""
+    return [d for f, d, _ in sent if f == "表"]
+
+
+def back(sent):
+    """裏面(AI便)へ出た宛先。"""
+    return [d for f, d, _ in sent if f == "裏"]
 
 
 def with_db(db, fn, *a):
@@ -139,38 +157,92 @@ def main():
         ("system-engineer", "dead", 20 * H, "ack済", '{"author": "x"}'),  # 手当ての印あり
         ("hr-room", "pending", 40 * H, "", '{"author": "someone"}'),      # deadではない
     ])
-    total, by, oldest, chami = with_db(db, aw.stale_dead_summary)
-    print(f"  偽DBの実測(滞留): 計{total}件 / 内訳 {by} / 最古 {int(oldest//3600)}時間前 / Chami発 {chami}件")
+    total, by, oldest, chami, unknown = with_db(db, aw.stale_dead_summary)
+    print(f"  偽DBの実測(滞留): 計{total}件 / 内訳 {by} / 最古 {int(oldest//3600)}時間前 "
+          f"/ Chami発 {chami}件 / 判定不能 {unknown}件")
     check("★滞留の判定が実行で効く= 6時間未満・ack済・pending は数えない(4件だけ)",
           total == 4 and set(by) == {"aegis-gl", "llm-qa", "platform-se"})
 
     st = {"last_stale_dead_alert": 0}
     sent = fire(aw.check_stale_dead, st, db=db)
-    depts = [c for c, _ in sent]
-    body = sent[0][1] if sent else ""
-    print(f"  → 滞留警報の宛先(実発火): {depts}")
-    check("★★滞留警報が**実行で**2室(incident・hq)だけへ出る",
-          depts == [aw.SUMMARY_DEPT, "hq"])
-    check("★★滞留の当該部門へは出ない(3部門詰まっていても増えない)",
-          all(d not in depts for d in by))
-    check("本文に部門の内訳が残る= 2室で詰まり先が読める",
+    body = sent[0][2] if sent else ""
+    print(f"  → 滞留警報の面と宛先(実発火): 表={front(sent)} / 裏={back(sent)}")
+    # ★2026-09-17(オタコン便 msg 1549973120234954863・Chami msg 1549969032868925490)=
+    #   Chami発が1件も無い滞留は、Chamiの読む面へ出さない。鳴らす事自体は変えない。
+    check("★★非Chami便だけの滞留は**Chamiの読む面へ1通も出ない**",
+          front(sent) == [])
+    check("★★同じ滞留が**品質管理部門の裏面(AI便)へは出る**(警報を殺していない)",
+          back(sent) == ["qa-reviewer"])
+    check("★滞留の当該部門へは出ない(3部門詰まっていても増えない)",
+          all(d not in front(sent) + back(sent) for d in by))
+    check("裏便の本文に部門の内訳が残る= 詰まり先が読める",
           "aegis-gl" in body and "llm-qa" in body and "platform-se" in body)
-    check("本文の最古が実データどおり(30時間前)", "30時間前" in body)
+    check("裏便の本文の最古が実データどおり(30時間前)", "30時間前" in body)
+    check("裏便の本文が『なぜ表へ出していないか』を名乗る", "手番ゼロ" in body)
     check("Chami発が無いので見出しは🔥ではない", body.startswith("🕳"))
-    check("1日1回の上限が効く= 直後の2回目は鳴らない",
+    check("1日1回の上限が効く= 直後の2回目は鳴らない(裏へ出た周回もクールダウンを踏む)",
           fire(aw.check_stale_dead, st, db=db) == [])
 
-    # --- A-2 Chami本人の便が沈んでいる時だけ 🔥 に上がる(重大度の分岐も実行で見る) ---
+    # --- A-2 Chami本人の便が沈んでいる時は 🔥 で**表のまま**(裏へ落とさない) ---
+    # ★本文の形は本番のキューと同じにする(実測 2026-09-17: author='chami_fusoh' /
+    #   author_id='490925528367497227' を discord_gateway が毎便入れる)。
+    #   旧版の偽データは author='chami' だった= 正本(chami_identity)が知らない名前で、
+    #   検査だけが通る形になっていた。
     db2 = make_db([
-        ("aegis-gl", "dead", 7 * H, "", '{"author": "chami", "content": "この部屋、応答できる?"}'),
+        ("aegis-gl", "dead", 7 * H, "",
+         '{"author": "chami_fusoh", "author_id": "490925528367497227",'
+         ' "content": "この部屋、応答できる?"}'),
         ("llm-qa", "dead", 8 * H, "", '{"author": "someone"}'),
     ])
     sent2 = fire(aw.check_stale_dead, {"last_stale_dead_alert": 0}, db=db2)
-    body2 = sent2[0][1] if sent2 else ""
+    body2 = sent2[0][2] if sent2 else ""
     check("★Chamiの便が沈んでいたら見出しが🔥に上がる(2026-08-12の13日間沈黙の再発防止)",
           body2.startswith("🔥") and "1件" in body2)
-    check("🔥でも宛先は2室のまま(重大度で宛先を増やさない)",
-          [c for c, _ in sent2] == [aw.SUMMARY_DEPT, "hq"])
+    check("★★Chami発が在る時は**表の3室へ出る**(間引かない)",
+          front(sent2) == [aw.SUMMARY_DEPT, "hq", "qa-reviewer"])
+    check("★★Chami発が在る時は裏へ落とさない(落としたら事故)", back(sent2) == [])
+
+    # --- A-2b 正本(chami_identity)経由= 名前ではなく **author_id** でもChamiと読む ---
+    db2b = make_db([
+        ("aegis-gl", "dead", 7 * H, "",
+         '{"author": {"id": "490925528367497227", "username": "Chami_Fusoh"}, "content": "ん?"}'),
+    ])
+    sent2b = fire(aw.check_stale_dead, {"last_stale_dead_alert": 0}, db=db2b)
+    check("★author が辞書(Discord API形)でも author_id でChamiと判る= 表へ出る",
+          front(sent2b) == [aw.SUMMARY_DEPT, "hq", "qa-reviewer"] and back(sent2b) == [])
+
+    # --- A-2c 判定不能な本文は**表へ倒す**(fail-open= 黙ってChamiの便を裏へ落とさない) ---
+    db2c = make_db([
+        ("aegis-gl", "dead", 7 * H, "", "これはJSONではない素の文字列"),
+    ])
+    t2c, _, _, c2c, u2c = with_db(db2c, aw.stale_dead_summary)
+    sent2c = fire(aw.check_stale_dead, {"last_stale_dead_alert": 0}, db=db2c)
+    check("★Chami判定ができない本文は unknown として数える(Falseに丸めない)",
+          t2c == 1 and c2c == 0 and u2c == 1)
+    check("★★判定不能が在る周回は表へ倒す(fail-open)",
+          front(sent2c) == [aw.SUMMARY_DEPT, "hq", "qa-reviewer"])
+
+    # --- A-2d 面を決める純関数だけを直接叩く(境界・壊れた入力) ---
+    check("routes: Chami発0・判定不能0 → 表なし/裏= 品質管理部門",
+          aw.stale_dead_routes(0, 0) == ([], ["qa-reviewer"]))
+    check("routes: Chami発1 → 表3室/裏なし",
+          aw.stale_dead_routes(1, 0) == ([aw.SUMMARY_DEPT, "hq", "qa-reviewer"], []))
+    check("routes: None や数にできない値は表へ倒す(fail-open)",
+          aw.stale_dead_routes(None) == ([aw.SUMMARY_DEPT, "hq", "qa-reviewer"], [])
+          and aw.stale_dead_routes("こわれた") == ([aw.SUMMARY_DEPT, "hq", "qa-reviewer"], []))
+
+    # --- A-2e must-fail= この表明に歯が在るか。**面を割る前の宛先**へ戻すと赤くなるはずだ。
+    #     (ソースの文字列一致ではなく、分岐を壊して同じ場面を流す=C-053)
+    orig_routes = aw.stale_dead_routes
+    aw.stale_dead_routes = lambda fc, unknown=0: ([aw.SUMMARY_DEPT, "hq", "qa-reviewer"], [])
+    try:
+        broken = fire(aw.check_stale_dead, {"last_stale_dead_alert": 0}, db=db)
+    finally:
+        aw.stale_dead_routes = orig_routes
+    check("★must-fail: 面を割る前(常に表)へ戻すと、同じ非Chami滞留がChamiの面へ出る",
+          front(broken) == [aw.SUMMARY_DEPT, "hq", "qa-reviewer"] and back(broken) == [])
+    check("must-fail の後で本物の分岐が戻っている(検査が自分の差し替えを片付けた)",
+          aw.stale_dead_routes(0, 0) == ([], ["qa-reviewer"]))
 
     # --- A-3 増分速報も同じ偽DBで通す(基準id・前進判定・宛先) ---
     st3 = {}
@@ -178,10 +250,12 @@ def main():
           fire(aw.check_dead_letters, st3, db=db) == [] and st3.get("last_dead_max_id", 0) > 0)
     st4 = {"last_dead_max_id": 0, "last_dead_alert": 0}
     sent4 = fire(aw.check_dead_letters, st4, db=db)
-    depts4 = [c for c, _ in sent4]
+    depts4 = front(sent4)
     print(f"  → 増分速報の宛先(実発火): {depts4}")
-    check("★★増分速報が**実行で**2室(incident・hq)だけへ出る",
-          depts4 == [aw.SUMMARY_DEPT, "hq"])
+    # ★2026-09-13 に qa-reviewer(品質管理部門)が足された= 3室。増分側は今回の工事で触っていない。
+    check("★★増分速報が**実行で**3室(incident・hq・qa-reviewer)だけへ出る",
+          depts4 == [aw.SUMMARY_DEPT, "hq", "qa-reviewer"])
+    check("増分速報は裏面(AI便)を使わない(割ったのは滞留側だけ)", back(sent4) == [])
     check("★増分速報の当該部門へは出ない(9325c04のon_deadが個別に出す側の仕事)",
           all(d not in depts4 for d in ["aegis-gl", "llm-qa", "platform-se"]))
     check("基準idが前進していなければ鳴らない(二度鳴りしない)",
@@ -200,10 +274,10 @@ def main():
     print(f"  偽DBの実測(順序の穴): dead id= {sorted(with_db(db3, aw.dead_ids))} / 基準は100")
     st5 = {"dead_announced_ids": [10], "last_dead_max_id": 100, "last_dead_alert": 0}
     sent5 = fire(aw.check_dead_letters, st5, db=db3)
-    body5 = sent5[0][1] if sent5 else ""
+    body5 = sent5[0][2] if sent5 else ""
     check("★★基準(100)より小さい id=50 の dead でも鳴る(順序の穴が塞がっている)",
-          [c for c, _ in sent5] == [aw.SUMMARY_DEPT, "hq"])
-    check("本文に新規idが出る(どの便が死んだかを2室で読める)", "新規id 50" in body5)
+          front(sent5) == [aw.SUMMARY_DEPT, "hq", "qa-reviewer"])
+    check("本文に新規idが出る(どの便が死んだかを読める)", "新規id 50" in body5)
     check("鳴った後は id=50 も告知済みに入る(二度鳴りしない)",
           50 in (st5.get("dead_announced_ids") or [])
           and fire(aw.check_dead_letters, dict(st5, last_dead_alert=0), db=db3) == [])
@@ -235,22 +309,23 @@ def main():
     if total == 0:
         check("本番dead 0件なら鳴らない(空振りしない)", sentB == [])
     else:
-        deptsB = [c for c, _ in sentB]
+        deptsB = front(sentB)
         print(f"  → 増分速報の宛先: {deptsB}")
-        check("★本番データでも増分速報は incident と hq の2室だけへ出る",
-              deptsB == [aw.SUMMARY_DEPT, "hq"])
+        check("★本番データでも増分速報は incident・hq・qa-reviewer の3室だけへ出る",
+              deptsB == [aw.SUMMARY_DEPT, "hq", "qa-reviewer"])
         check("★本番データでも当該部門へは出ない", all(d not in deptsB for d in by))
 
-    s_total, s_by, s_oldest, _ = aw.stale_dead_summary()
-    print(f"  本番キューの実測(滞留): 計{s_total}件 / 内訳 {s_by} / 最古 {int(s_oldest//3600)}時間前")
+    s_total, s_by, s_oldest, s_chami, s_unknown = aw.stale_dead_summary()
+    print(f"  本番キューの実測(滞留): 計{s_total}件 / 内訳 {s_by} / 最古 {int(s_oldest//3600)}時間前"
+          f" / Chami発 {s_chami}件 / 判定不能 {s_unknown}件")
     sentB2 = fire(aw.check_stale_dead, {"last_stale_dead_alert": 0})
     if s_total == 0:
         check("本番の滞留0件なら鳴らない(空振りしない)", sentB2 == [])
     else:
-        deptsB2 = [c for c, _ in sentB2]
-        print(f"  → 滞留警報の宛先: {deptsB2}")
-        check("★本番データでも滞留警報は2室だけへ出る",
-              deptsB2 == [aw.SUMMARY_DEPT, "hq"])
+        print(f"  → 滞留警報の面と宛先: 表={front(sentB2)} / 裏={back(sentB2)}")
+        expect_front, expect_back = aw.stale_dead_routes(s_chami, s_unknown)
+        check("★本番データでも面の割り方が routes のとおり(Chami発が在れば表・無ければ裏)",
+              front(sentB2) == expect_front and back(sentB2) == expect_back)
 
     # =====================================================================
     # C) 源流(コード)の検査= 上のAで経路は実行で押さえた。ここは「枝が消えていない」
@@ -260,8 +335,15 @@ def main():
     code = "\n".join(l for l in src.splitlines() if not l.lstrip().startswith("#"))
     check("宛先に部門を足し込む式がコードから消えている",
           'targets = [SUMMARY_DEPT, "hq"] + [d for d in by' not in code)
-    check("2室固定の式が2箇所(増分・滞留)に在る",
-          code.count('targets = [SUMMARY_DEPT, "hq"]') == 2)
+    check("増分側は固定3室の式のまま(1箇所・今回の工事で触っていない)",
+          code.count('targets = [SUMMARY_DEPT, "hq", "qa-reviewer"]') == 1)
+    check("滞留側は面を割る純関数を通る(1箇所)",
+          code.count("front, back = stale_dead_routes(") == 1)
+    check("裏便は部屋へ出さない= 送信の引数に --also-post を渡している所が無い",
+          '"--also-post"' not in code)
+    check("鳴る条件は変えていない= 滞留の閾値と上限の定数がそのまま",
+          "STALE_DEAD_MIN_SEC = 6 * 60 * 60" in code
+          and "STALE_DEAD_COOLDOWN_SEC = 24 * 60 * 60" in code)
     check("頻度は変えていない= 増分のクールダウン定数がそのまま",
           "DEAD_ALERT_COOLDOWN_SEC" in code)
     check("他の警報の宛先には触っていない(窓の死活は incident のまま)",

@@ -21,6 +21,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import datetime, timezone
 
@@ -77,6 +78,7 @@ except Exception:                                      # noqa: BLE001
 
 BOT_SEND = os.path.join(ROOT, "scripts", "discord", "bot_send.py")
 PERSONA_SEND = os.path.join(ROOT, "scripts", "discord", "persona_send.py")
+DISPATCH = os.path.join(ROOT, "scripts", "llm", "dispatch.py")   # 裏面(AI便・部屋へは出さない)の口
 MACHINE_PERSONA = "メタルギアMk.II"  # 機械的アナウンスの担当(Chami指定2026-07-14・report-notifyの配送役)
 SESSION_LABEL_FILE = os.path.join(LOCAL, "llm", "session_label.txt")
 
@@ -225,7 +227,7 @@ UNANSWERED_SKIP_DEPTS = ("router",)  # 通知受付=機械の掲示板。人の�
 # ★Chami本人かの判定は `scripts/_common/chami_identity.py` 1本に寄せた(2026-09-16 イージス研究室)。
 #   ここには写しを置かない= ユーザ名かIDが変わった日、直し忘れた写しが黙って誤判定し、
 #   この見張りの場合は「Chamiの発言が無い」と読んで**警報が鳴らなくなる**(沈黙の形で出る)。
-from chami_identity import is_chami_user  # noqa: E402
+from chami_identity import is_chami_user, from_chami as rec_from_chami  # noqa: E402
 CHANNELS_FILE = os.path.join(LOCAL, "discord_channels.json")
 BOT_TOKEN_FILE = os.path.join(LOCAL, "discord_bot_token.txt")
 GUILD_ID = "1498341160207515678"
@@ -322,6 +324,46 @@ def bot_send(channel, body, dry_run, by_dept=False):
     args += ["--persona", MACHINE_PERSONA, body]
     r = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace")
     return r.returncode == 0
+
+
+AI_SENDER = "不在watchdog(自動)"   # 裏便の名義(人格ではない=機械が出したと分かる形)
+
+
+def ai_send(dept, body, dry_run):
+    """**裏面だけ**へ出す(部門セッションのAI便キューへ入れる・Discordの部屋へは出さない)。
+
+    なぜ要るか(C-055・Chami msg 1549969032868925490「誰も対処しないアラートだったらいらねぇ」)=
+      滞留警報の中身が全部**機械側の便**の時、Chamiの手番はゼロだ。それでも警報自体は
+      要る(誰かが片付ける必要はある)。→ 鳴らす事は変えず、**出す面だけ**を裏へ寄せる。
+
+    ★`--also-post` を付けない= キューにだけ積まれ、Discordの部屋には1文字も出ない。
+      型は scripts/_daemons/completion_notify.py の send() に合わせてある(本文はファイル渡し)。
+    ★fail-open= 送れなくても watchdog は止めない(Falseを返すだけ)。
+    """
+    if dry_run:
+        print(f"[dry-run] ai_send -> --dept {dept}(裏・AI便): {body}")
+        return True
+    fd, path = tempfile.mkstemp(prefix="stale_dead_", suffix=".md")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(body)
+        cmd = [sys.executable, DISPATCH, "--dept", dept, "--from-dept", SUMMARY_DEPT,
+               "--from", AI_SENDER, "--audience", "ai", "--direct",
+               "--quiet-ack-ok", "--body-file", path]
+        r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=120)
+        if r.returncode != 0:
+            tail = (r.stderr or r.stdout or "").strip().splitlines()
+            print(f"裏便の送信に失敗(rc={r.returncode}): {tail[-1] if tail else '(出力なし)'}")
+        return r.returncode == 0
+    except Exception as e:                                  # noqa: BLE001
+        print(f"裏便の送信で例外: {type(e).__name__}: {e}")
+        return False
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
 
 
 def poller_age_sec():
@@ -987,6 +1029,7 @@ RELAY_REPAIR_TIMEOUT_SEC = 180     # ★止まったサブプロセスでwatchdo
 # ★gateway沈黙死の自己回復(2026-09-01 platform-se・一ノ瀬怜):取りこぼしが連続した時だけ再起動へ。
 GW_STUCK_STREAK_MAX = 2             # 何周期連続の取りこぼしで「沈黙死」と断ずるか(15分×2=約30分の取り逃し)
 GW_RESTART_COOLDOWN_SEC = 30 * 60  # 自動再起動の暴走ガード(この窓内は判定してもFalse)
+RELAY_REPAIR_BROKEN_COOLDOWN_SEC = 6 * 3600   # 「安全網が壊れている」警報を鳴らす間隔
 
 
 def _relay_repair_recovered(out):
@@ -997,6 +1040,36 @@ def _relay_repair_recovered(out):
     """
     m = re.search(r"結果: 回収 (\d+)件", out or "")
     return int(m.group(1)) if m else 0
+
+
+def _relay_repair_stats(out):
+    """結果行から**除外の内訳**まで読む(§S-1恒久策 2026-09-09)。
+
+    なぜ件数だけでは足りないか: 2026-09-07に gateway が record へ channel_id を足した時、
+    relay_repair の build_record が追随せず**回収便が全件「キー不足」で除外**された。
+    当時の main() はその経路で1行も出さず、ここは「回収0件=取りこぼし無し」と読んで
+    gw_stuck_streak まで毎周期リセットした=沈黙死の検知まで盲になった(Chami便が約32時間宙吊り)。
+    → relay_repair 側が必ず出すようにした内訳を読み、
+      「0件だが動いた」と「全件除外で壊れている」を区別する。
+
+    戻り値 seen=False は**結果行そのものが無い**=恒久策が退行した/出力が壊れた合図。
+    ★この時 streak を触らない(0件と決めつけない)。判定できない事を「異常なし」に丸めない。
+    """
+    text = out or ""
+    m = re.search(r"結果: 回収 (\d+)件", text)
+    if not m:
+        return {"seen": False, "ok": 0, "dup": 0, "missing": 0,
+                "ex_window": 0, "ex_queued": 0, "ex_keys": 0, "ex_over": 0}
+    st = {"seen": True, "ok": int(m.group(1)), "dup": 0, "missing": 0,
+          "ex_window": 0, "ex_queued": 0, "ex_keys": 0, "ex_over": 0}
+    line = text[m.start():].splitlines()[0]
+    for key, pat in (("dup", r"重複無視 (\d+)件"), ("missing", r"取りこぼし (\d+)件"),
+                     ("ex_window", r"窓外(\d+)"), ("ex_queued", r"既存(\d+)"),
+                     ("ex_keys", r"キー不足(\d+)"), ("ex_over", r"上限(\d+)")):
+        mm = re.search(pat, line)
+        if mm:
+            st[key] = int(mm.group(1))
+    return st
 
 
 def _note_gateway_stuck(n, state, now):
@@ -1054,6 +1127,27 @@ def _restart_stuck_gateway(state, now):
         print(f"gateway沈黙死の停止に失敗: {type(e).__name__}")
 
 
+def _alert_relay_repair_broken(detail, state, dry_run, now_epoch):
+    """★安全網そのものが壊れている時だけ鳴らす(通常の回収では鳴らさない)。
+
+    回収された便は該当部屋へ流れるので通知は要らない(ORG-03/42)。だが
+    **回収が1件もできていない**時は誰の目にも入らない=黙って死ぬ。ここだけは鳴らす。
+    クールダウン付き・fail-open(送れなくてもwatchdogは止めない)。
+    """
+    if now_epoch - state.get("last_relay_repair_broken_alert", 0) < RELAY_REPAIR_BROKEN_COOLDOWN_SEC:
+        return
+    msg = (f"🧵 **取りこぼし回収(安全網)が機能していません**: {detail}。"
+           "この状態ではgatewayが落とした便を誰も拾えません。"
+           "確認: `python 00_AI-HQ\\scripts\\relay_repair.py`(dry-run)の『★除外』行のキー名を "
+           "`relay_repair.build_record()` へ足す / "
+           "`python 00_AI-HQ\\scripts\\test_relay_repair_sendmark.py` を通す(§S-1)。")
+    try:
+        if bot_send(SUMMARY_DEPT, msg, dry_run, by_dept=True):
+            state["last_relay_repair_broken_alert"] = now_epoch
+    except Exception as e:
+        print(f"安全網の警報を送れず: {type(e).__name__}")
+
+
 def check_relay_repair(state, dry_run, now_epoch=None):
     """gatewayの取りこぼしを15分に1回 subprocess で回収する(理由は上のブロックコメント)。
 
@@ -1062,6 +1156,8 @@ def check_relay_repair(state, dry_run, now_epoch=None):
       該当部屋へ流れて処理されるので、そこで自然にChamiの目に入る。通知を重ねると
       同じ事を2回鳴らすことになる。
     ★どんな失敗でもwatchdogを止めない(例外は握り潰してログ1行)。watchdogが死ぬのが最悪。
+    ★例外は1つだけ(2026-09-09 §S-1): **回収そのものが壊れている**時は Discord へ鳴らす。
+      回収できた便は部屋へ流れるから目に入るが、回収できなかった便は**どこにも現れない**。
     """
     now_epoch = time.time() if now_epoch is None else now_epoch
     if now_epoch - state.get("last_relay_repair", 0) < RELAY_REPAIR_GATE_SEC:
@@ -1081,12 +1177,33 @@ def check_relay_repair(state, dry_run, now_epoch=None):
             print(f"取りこぼし回収に失敗(rc={r.returncode}): "
                   f"{tail[-1] if tail else '(出力なし)'}")
             return
-        n = _relay_repair_recovered(r.stdout)
+        st = _relay_repair_stats(r.stdout)
+        n = st["ok"]
         if n > 0:
             print(f"★取りこぼし{n}件を回収した(gateway停止中の便)")
+        if not st["seen"]:
+            # ★結果行が無い=relay_repair が何も結論を出さずに帰った。0件と決めつけると
+            #   §S-1(2026-09-07)の再現になる。streakは**触らず**に警報だけ出す。
+            print("★relay_repair が結果行(『結果: 回収 N件』)を出さなかった="
+                  "安全網の状態を判定できない。gw_stuck_streak は据え置く。")
+            _alert_relay_repair_broken(
+                "relay_repair が結果行を出さずに終了しました(0件なのか全件除外なのか判定できません)",
+                state, dry_run, now_epoch)
+            return
+        if st["ex_keys"] > 0:
+            # ★回収できていないだけで**取りこぼしは実在した**。ここを0扱いにすると
+            #   gateway沈黙死のstreakが誤リセットされる(§S-1の二重の沈黙)。
+            print(f"★安全網が壊れている: レコードのキー不足で{st['ex_keys']}件を回収できていない"
+                  f"(取りこぼし{st['missing']}件・回収{n}件)")
+            _alert_relay_repair_broken(
+                f"取りこぼし{st['missing']}件のうち**{st['ex_keys']}件がレコードのキー不足で除外**され、"
+                "回収できていません(relay_repair.build_record が discord_gateway の形に追随していない疑い)",
+                state, dry_run, now_epoch)
         # ★沈黙死の自己回復(2026-09-01): 取りこぼしが連続=脈は生きていても実受信が死んでいる。
         #   偽脈で盲になった supervisor/脈監視の代わりに、地上真実(取りこぼし)で張り直す。
-        if _note_gateway_stuck(n, state, now_epoch):
+        #   ★2026-09-09: 「回収できた数」ではなく「取りこぼしが在ったか」で数える。
+        #     キー不足で救えなかった分も gateway が取り逃した証拠であることに変わりはない。
+        if _note_gateway_stuck(n + st["ex_keys"], state, now_epoch):
             _restart_stuck_gateway(state, now_epoch)
     except Exception as e:
         # タイムアウト(TimeoutExpired)・実行不能・その他すべてここで止める。
@@ -1285,7 +1402,15 @@ def check_dead_letters(state, dry_run):
     #   当該部門へ1件ずつ出す仕事は 9325c04 の on_dead フック(dept_daemon の _dead_letter_notice)が
     #   持っている= 同じ事実を「集計の長文で全室へ」と「個別に当該室へ」で二重に配っていた。
     #   ★内訳(detail)は本文に残る=どの部門で詰まっているかは2室で読める。判定・頻度・本文は変えない。
-    targets = [SUMMARY_DEPT, "hq"]
+    # ★★2026-09-13 品質管理部門(qa-reviewer)を追加(研究室HQ便 DISPATCH-aegis-gl-1789250391661)。
+    #   根拠は下の check_stale_dead(滞留側)と同じ Chami 直= 「これ品質管理部門の仕事として」
+    #   (2026-09-13T05:25:41 JST msg 1548429415170703381・部屋=研究室HQ)。
+    #   滞留側(1470行あたり)には05:35に入れたが、増分側のこの1本が漏れていた=
+    #   次に**新しい**デッドレターが出た時、所有部門へ届かない。同じ裁定は両方に効く。
+    #   ★2026-08-14 に外したのは「**当該部門**への横展開」(by の中身で宛先が増える形)。
+    #     今回足すのは by に依らない**固定の所有部門1つ**なので、その理由には当たらない。
+    #     判定(fresh の有無)・クールダウン・本文はどれも変えていない。
+    targets = [SUMMARY_DEPT, "hq", "qa-reviewer"]
     sent = False
     for dept in targets:
         if bot_send(dept, msg, dry_run, by_dept=True):
@@ -1307,6 +1432,55 @@ def check_dead_letters(state, dry_run):
 # → 増分とは別に**滞留の年齢**を見る。手当ての印が付くまで1日1回だけ言い続ける。
 STALE_DEAD_MIN_SEC = 6 * 60 * 60        # dead になって6時間、まだ手当ての印が無ければ滞留
 STALE_DEAD_COOLDOWN_SEC = 24 * 60 * 60  # 1日1回まで(毎周期鳴らすと無視される安全網になる)
+# ★出す面(2026-09-17 品質管理部門(オタコン)便 msg 1549973120234954863)。
+#   表= Chamiが読む部屋。裏= 部門セッションのAI便(部屋には出ない)。
+STALE_DEAD_FRONT_TARGETS = (SUMMARY_DEPT, "hq", "qa-reviewer")
+STALE_DEAD_BACK_TARGETS = ("qa-reviewer",)
+
+
+def stale_dead_routes(from_chami, unknown=0):
+    """滞留警報を**どの面へ出すか**だけを決める純関数。戻り値=(表の宛先, 裏の宛先)。
+
+    ★鳴る条件(滞留age・クールダウン・本文)には一切触らない。割るのは**出す面だけ**だ。
+    根拠= Chami msg 1549969032868925490(2026-09-17)
+      「誰も対処しないアラートだったらいらねぇ。邪魔なだけ」。
+      実例= 同日朝の「配送に失敗したまま放置されている便: 計2件」は、中身が3件とも
+      **機械側の重複隔離**で、Chamiの手番はゼロだった(品質管理部門が dlq_tool.py で
+      全文検算のうえ手当て済み= 3→0件)。手番ゼロの物をChamiの面へ置くのがC-055違反。
+
+    ★from_chami が1件でも在れば表(今までどおり)。裏へ落とすのは事故だ。
+    ★判定不能(None・数にできない値・Chami判定できない本文が在る)も**表へ倒す**
+      (fail-open= 判定できない事を「Chamiの便は無い」に丸めない)。
+    """
+    if from_chami is None:
+        return list(STALE_DEAD_FRONT_TARGETS), []
+    try:
+        n_chami = int(from_chami)
+        n_unknown = int(unknown or 0)
+    except (TypeError, ValueError):
+        return list(STALE_DEAD_FRONT_TARGETS), []
+    if n_chami > 0 or n_unknown > 0:
+        return list(STALE_DEAD_FRONT_TARGETS), []
+    return [], list(STALE_DEAD_BACK_TARGETS)
+
+
+def body_from_chami(body):
+    """キューの本文(Discordの生JSON)がChami発か。True/False/**None=判定不能**。
+
+    ★判定の正本は scripts/_common/chami_identity.py(写しを置かない・2026-09-16)。
+      author_id / author(辞書でも文字列でも)を正本に見せる= 名前だけの素朴一致より強い。
+    ★読めない形は False(=Chamiの便ではない)に丸めず None を返す。
+      2026-09-17 から from_chami の数が**出す面**を決める= 取りこぼすとChamiの便が裏へ落ちる。
+    """
+    if body is None or not str(body).strip():
+        return None
+    try:
+        rec = json.loads(str(body))
+    except Exception:                                       # noqa: BLE001
+        return True if '"author": "chami' in str(body) else None
+    if not isinstance(rec, dict):
+        return None
+    return bool(rec_from_chami(rec))
 
 
 def stale_dead_summary():
@@ -1314,11 +1488,11 @@ def stale_dead_summary():
 
     手当て済みの印= result 列が空でない(scripts/queue/dlq_tool.py --ack が書く)。
     ★status は 'dead' のまま動かさない= 既存の件数・台帳の意味を変えないため。
-    戻り値: (件数, {dept: 件数}, 最古の滞留秒数, Chami発の件数)
+    戻り値: (件数, {dept: 件数}, 最古の滞留秒数, Chami発の件数, Chami判定不能の件数)
     """
     db = queue_db_path()
     if not os.path.exists(db):
-        return 0, {}, 0, 0
+        return 0, {}, 0, 0, 0
     try:
         import sqlite3
         con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2)
@@ -1330,9 +1504,9 @@ def stale_dead_summary():
         finally:
             con.close()
     except Exception:
-        return 0, {}, 0, 0
+        return 0, {}, 0, 0, 0
     now_epoch = time.time()
-    by, oldest, from_chami = {}, 0, 0
+    by, oldest, from_chami, unknown = {}, 0, 0, 0
     for dept, enq, body in rows:
         try:
             age = now_epoch - float(enq)
@@ -1343,15 +1517,19 @@ def stale_dead_summary():
         by[dept or "?"] = by.get(dept or "?", 0) + 1
         oldest = max(oldest, age)
         # ★Chami本人の便かどうかは重大度が違う(返事を待っている人間が居る)。
-        #   本文はDiscordの生JSON。author名を素朴に見るだけ=判定不能なら鳴らす側へ倒す。
-        if body and '"author": "chami' in str(body):
+        #   2026-09-17から**出す面**もこの数で決まる= 取りこぼしはChamiの便を裏へ落とす事故。
+        #   判定不能は False に丸めず別に数え、routes 側で表へ倒す(fail-open)。
+        mine = body_from_chami(body)
+        if mine is None:
+            unknown += 1
+        elif mine:
             from_chami += 1
-    return sum(by.values()), by, int(oldest), from_chami
+    return sum(by.values()), by, int(oldest), from_chami, unknown
 
 
 def check_stale_dead(state, dry_run):
     """dead に落ちたまま手当てされていない便を、片付くまで1日1回だけ言い続ける。"""
-    total, by, oldest_sec, from_chami = stale_dead_summary()
+    total, by, oldest_sec, from_chami, unknown = stale_dead_summary()
     if not total:
         return
     now_epoch = time.time()
@@ -1378,11 +1556,33 @@ def check_stale_dead(state, dry_run):
     #   2026-08-13 に hq を足したのは正しい(動ける人が読む場所へ出す)=そこは残す。
     #   デッドレターの手当てはHQ/基盤の仕事で、ackも dlq_tool.py で一括だ=各部門は自室の1件で動かない。
     #   増音の巻き戻しであって警報の弱体化ではない(滞留の判定・1日1回の上限・本文はそのまま)。
-    targets = [SUMMARY_DEPT, "hq"]
+    # ★2026-09-13 qa-reviewer(品質管理部門)を足す(研究室HQ便 msg 1548431615489736758)。
+    #   Chami直で職掌が動いた= 「これ品質管理部門の仕事として」
+    #   (2026-09-13T05:25:41 JST msg 1548429415170703381・部屋=研究室HQ。正本は
+    #    00_AI-HQ/org_registry.yml の depts.qa-reviewer.purpose 末尾に研究室HQが追記済)。
+    #   = デッドレターの手当ての所有が HQ/基盤 → 品質管理部門 へ移った。上の1449-1452は
+    #     §3.7(Chamiの直接指示はどの裁定より上)でこの一言に上書きされた。
+    #   ★2026-08-14 に外したのは「**当該部門**への横展開」(各部門は自室の1件で動かない)。
+    #     今回足すのは当該部門ではなく**固定の所有部門1つ**なので、その理由には当たらない。
+    #     増音は1宛先ぶんだけ=滞留の判定・1日1回の上限・本文はどれも変えていない。
+    #   hq は残す(研究室HQは司令塔として見え続ける必要がある)。
+    # ★2026-09-17 **宛先を出す面で割る**(品質管理部門(オタコン)便 msg 1549973120234954863)。
+    #   Chamiの便が1件でも在る時は今までどおり表の3室へ。**機械側の便だけの時は裏(AI便)へ**。
+    #   鳴る条件は1つも変えていない= 滞留age・1日1回の上限・本文は同じまま(上の行は無改変)。
+    front, back = stale_dead_routes(from_chami, unknown)
     sent = False
-    for dept in targets:
+    for dept in front:
         if bot_send(dept, msg, dry_run, by_dept=True):
             sent = True
+    if back:
+        # ★裏だけへ出す時、なぜChamiの面に出していないかを本文へ1行だけ足す
+        #   (読む側が「間引かれた」ではなく「手番ゼロだから裏に居る」と分かるように)。
+        back_msg = (msg + "\n★この滞留は**Chami発の便を1件も含みません**(手番ゼロ)。"
+                    "そのためChamiの読む面へは出さず、この裏面(AI便)にだけ出しています(C-055)。"
+                    "Chami発が1件でも混ざった周回では、従来どおり表の部屋へ🔥で出ます。")
+        for dept in back:
+            if ai_send(dept, back_msg, dry_run):
+                sent = True
     if sent:
         state["last_stale_dead_alert"] = now_epoch
 
