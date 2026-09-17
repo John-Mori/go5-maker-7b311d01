@@ -16,10 +16,42 @@ $DestFile  = Join-Path $RepoRoot 'local\backup_dest.txt'
 $KeepCount = 3
 $MinFreeGB = 2
 
+# Logging must never be able to kill the backup (aegis lab, 2026-09-17).
+# What happened: on 2026-09-17 the 04:00 run wrote one line, then Add-Content threw
+#   IOException ("the process cannot access the file ... because it is being used by
+#   another process") and $ErrorActionPreference='Stop' aborted the whole script, so
+#   00_AI-HQ was never copied that day. A backup died because a LOG was busy.
+# Measured cause (not guessed): the other holder has backup.log open FOR READING.
+#   Opening it ourselves with FileShare Read or ReadWrite succeeds; with None or Write
+#   it fails. Add-Content picks a share mode that excludes the reader, so it throws.
+# Fix: open the file ourselves with FileShare ReadWrite (a reader can no longer block
+#   us), retry briefly for a real writer, and if it still fails, fall back to a sidecar
+#   file and CARRY ON. Never rethrow - a lost log line is not worth a lost backup.
 function Write-Log($msg) {
     $line = "{0} {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $msg
-    Add-Content -Path $LogFile -Value $line -Encoding utf8
-    Write-Output $line
+    Write-Output $line          # stdout first, so the line survives even if the file does not
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($line + "`r`n")
+    foreach ($attempt in 1..5) {
+        try {
+            $fs = [System.IO.File]::Open($LogFile, [System.IO.FileMode]::Append,
+                                         [System.IO.FileAccess]::Write,
+                                         [System.IO.FileShare]::ReadWrite)
+            try { $fs.Write($bytes, 0, $bytes.Length) } finally { $fs.Dispose() }
+            return
+        } catch {
+            Start-Sleep -Milliseconds (100 * $attempt)
+        }
+    }
+    # Still blocked: keep a durable record next to the log instead of going silent.
+    try {
+        $side = "{0}.blocked-{1}.log" -f $LogFile, (Get-Date -Format 'yyyy-MM-dd')
+        $fs2 = [System.IO.File]::Open($side, [System.IO.FileMode]::Append,
+                                      [System.IO.FileAccess]::Write,
+                                      [System.IO.FileShare]::ReadWrite)
+        try { $fs2.Write($bytes, 0, $bytes.Length) } finally { $fs2.Dispose() }
+    } catch {
+        # Both files unwritable: stdout above is the only record. Do NOT abort.
+    }
 }
 
 # Is $Root the tree we are allowed to write to, and does the leaf still exist?
