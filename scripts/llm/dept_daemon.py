@@ -5073,6 +5073,7 @@ from lang_gate import (  # noqa: E402  純関数のみ・単一の判定源(sing
     _JP_RE, _LATIN_RE, detect_english_dump, strip_english_preamble,
     detect_simplified,   # 2026-09-01 簡体字混入(ルールAへ合流)。判定はここ1本に置く
     detect_cyrillic,     # 2026-09-01 キリル混入(HQ-0227 裁定2 GO・同じ表へ合流)
+    _mask_code_spans,    # 2026-09-17 コード柵/インラインコード/URL を長さ保存で潰す(判定から除く)
     cyrillic_in_name_tag,  # 2026-09-02 残ったキリルが名乗りタグの中か=構造被害かの判定
     cyrillic_tags,         # 2026-09-02 化けた名乗りタグの中身(下流で直せるかの突き合わせ用)
     # 2026-09-02 恒久策#2= 既存の検知(全文が英語 / ハングル・簡体字・キリルの決め打ち)から
@@ -5591,11 +5592,18 @@ def detect_hangul(text, span=20):
       説明するために「판」そのものを含む)。置換したら**記録を壊す**。
     ★正当な引用(「ORG-45: 판 と 判 の混同」等)でも鳴る。これは誤検出ではなく**仕様**。
       送信を止めないので実害は無い。
+    ★コード柵/インラインコード/URL の中は判定しない(2026-09-17・Chami依頼 msg
+      1550002171422969919 =「わざとハングルを混ぜたテスト会話では生成不良を出さない」)。
+      キリル(detect_cyrillic)が 2026-09-02 から同じ作法で、ハングルだけ生の本文を見ていた=
+      **作りのズレ**を揃えただけで、範囲(_HANGUL_RE)も送信可否も1ミリも変えていない。
+      ★これは検知網の**縮小**だ= 柵の中で本当に事故化けした分は印が付かなくなる。
+        戻すなら _mask_code_spans を通さないだけでよい(1行)。
+      ★返す `index` / `context` は**原文基準**(マスクは長さを保存する)。
     ★空文字・None・非文字列でも例外を出さない(呼び出し側の fail-safe と二重の守り)。
     """
     try:
         s = str(text or "")
-        m = _HANGUL_RE.search(s)
+        m = _HANGUL_RE.search(_mask_code_spans(s))
         if not m:
             return None
         i = m.start()
