@@ -434,12 +434,8 @@ def escalate(channel, raw_line, note=""):
     append_line(PROCESSED, raw_line)
     if note:
         # 引き継ぎメモ(worktreeパス等)を1行、主受付箱へ別途残す。
-        # ★type=session-note は必須。これが無いと claude_responder が利用者の新着と誤認し、
-        #   Codexの返答直後に「受領。本対応は担当セッションへ引き継ぎます。」を追送する。
-        #   実害= platform-se msg 1549988243628494870 の17秒後に msg 1549988316189949954。
-        #   session-note は研究室セッションへ残るが、無人代打はDiscordへ返信しない。
         append_line(FOR_CLAUDE, json.dumps(
-            {"type": "session-note", "content": note, "channel": channel, "dept": "codex",
+            {"content": note, "channel": channel, "dept": "codex",
              "from": "codex_responder", "ts": time.strftime("%Y-%m-%dT%H:%M:%S")},
             ensure_ascii=False))
 
@@ -590,8 +586,7 @@ def handle(rec, raw_line, lease_id=None, deliveries=1):
             note = (f"[codex] 部屋 {label} の依頼で実装をworktreeに保存(要レビュー/取り込み)。"
                     f" worktree={worktree} / 依頼={content[:120]}")
             append_line(FOR_CLAUDE, json.dumps(
-                {"type": "session-note", "content": note, "channel": label,
-                 "channel_id": channel, "dept": "codex",
+                {"content": note, "channel": label, "channel_id": channel, "dept": "codex",
                  "from": "codex_responder", "worktree": worktree,
                  "ts": time.strftime("%Y-%m-%dT%H:%M:%S")}, ensure_ascii=False))
             print(f"  Codex実装→worktree保持 [{label}] {worktree}")
@@ -608,8 +603,7 @@ def handle(rec, raw_line, lease_id=None, deliveries=1):
                 note = (f"[codex] 生成済み・Discord送信だけ失敗。request_id={msg_id} は"
                         "local/llm/codex_outboxに保存済みで、再配達時は再生成しない。")
                 append_line(FOR_CLAUDE, json.dumps(
-                    {"type": "session-note", "content": note, "channel": label,
-                     "channel_id": channel, "dept": "codex",
+                    {"content": note, "channel": label, "channel_id": channel, "dept": "codex",
                      "from": "codex_responder", "ts": time.strftime("%Y-%m-%dT%H:%M:%S")},
                     ensure_ascii=False))
             log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "send_retry_saved",
