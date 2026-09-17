@@ -15,6 +15,7 @@ CHECKS = [
     "check_dept_firing.py",
     "check_solo_tag_typo.py",
     "check_version_consistency.py",
+    "check_backup_keeproot.py",
     "check_skills_installed.py",
 ]
 

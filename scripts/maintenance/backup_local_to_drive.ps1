@@ -63,6 +63,17 @@ $destBase = Join-Path $driveRoot.FullName (Split-Path $rel -Parent)
 # under My Drive. Chami 2026-09-16: do not put backups at <MyDrive>\go5-backup-keep;
 # use <MyDrive>\...\001_system-backup\go5-backup-keep instead.
 $keepRoot = Join-Path $destBase 'go5-backup-keep'
+
+# Regression guard (Chami enjoh 2026-09-16, C-038): keepRoot must NEVER be a direct
+# child of the drive root. If it ever regresses to <MyDrive>\go5-backup-keep (e.g. a
+# bad config with rel='local', or keepRoot re-derived from $driveRoot.FullName), abort
+# BEFORE writing so no backup lands at the forbidden spot. Behavior is protected
+# regardless of how the derivation above is edited; a static check mirrors this in CI.
+if ((Split-Path $keepRoot -Parent) -eq $driveRoot.FullName) {
+    Write-Log ("ABORT: keepRoot '{0}' resolves directly under My Drive root. Refusing (Chami 2026-09-16: keeps belong under 001_system-backup, not <MyDrive>\go5-backup-keep). Fix the destination config / keepRoot derivation." -f $keepRoot)
+    exit 1
+}
+
 $stamp    = Get-Date -Format 'yyyy-MM-dd'
 $month    = Get-Date -Format 'yyyy-MM'
 
