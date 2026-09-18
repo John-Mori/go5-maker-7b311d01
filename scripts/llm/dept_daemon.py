@@ -4992,13 +4992,79 @@ _WORK_RELAY_REASONS = ("ok", "not_work", "not_listed", "chami", "marker", "error
 _WORK_SEC_CACHE = {"mtime": None, "size": None, "data": {}}
 _WORK_SEC_TAIL_BYTES = 400_000                   # 台帳の末尾だけ読む(全部読むと毎便で重くなる)
 
+# ★2026-09-18 platform-se(狭い版P3パイロット・発注= カスミ DISPATCH-platform-se-1789740520050)。
+#   実測= 400KBテール窓は32部屋共有の台帳の直近 約31.5時間ぶんしか覆わない(2026-09-18時点で110行)。
+#   実在の常連差出人(例= hq/ケヴィン・デブライネ, sec履歴31件・2026-08-30〜09-17)でも、
+#   自分の直近便がこの窓の外へ押し出された瞬間 no_history へ誤判定され、繰り返し起きる
+#   (同一差出人が同じ回で最大8回 no_history)。これは「初回だから慎重に」ではなく**窓の穴**。
+#   → 内容の確信度で無理に補うのではなく、**窓を持たない増分キャッシュ**で正確に直す方が
+#     精度が高く(推測ゼロ)、fail-openの安全側は変えない(履歴が本当に無ければ従来どおり no_history)。
+#   ★対象部屋を `history_scan_v2_depts`(_model_override.json)に列挙した部屋だけへ適用。
+#     列挙されない部屋は旧関数(_work_sec_history)をそのまま通る=挙動0変化。
+_WORK_SEC_CACHE_V2 = {"offset": 0, "size": 0, "data": {}}
+_WORK_SEC_V2_MAX_PER_KEY = 20                    # 1差出人あたり溜め込みすぎない上限
+
+
+def _history_scan_v2_depts():
+    try:
+        doc = _model_override_doc() or {}
+        v = doc.get("history_scan_v2_depts") or []
+        return set(str(x) for x in v) if isinstance(v, list) else set()
+    except Exception:                            # noqa: BLE001
+        return set()
+
+
+def _work_sec_history_v2(dept, author, n=5):
+    """`_work_sec_history` の増分版。テール窓を使わず、前回読んだ場所から続きだけを読み足す。
+
+    ★ファイルが縮む/入れ替わる等の異常時は素直に全部読み直す(壊れた前提で古いキャッシュを使わない)。
+    ★読めない・壊れている時は空リストへ倒す(呼び側は「履歴なし」として扱う=品質側優先は不変)。
+    """
+    try:
+        st = os.stat(WORK_AUDIT)
+    except OSError:
+        return []
+    try:
+        if st.st_size < _WORK_SEC_CACHE_V2["size"]:
+            _WORK_SEC_CACHE_V2["offset"] = 0
+            _WORK_SEC_CACHE_V2["size"] = 0
+            _WORK_SEC_CACHE_V2["data"] = {}
+        if st.st_size > _WORK_SEC_CACHE_V2["offset"]:
+            with open(WORK_AUDIT, "rb") as f:
+                f.seek(_WORK_SEC_CACHE_V2["offset"])
+                if _WORK_SEC_CACHE_V2["offset"] > 0:
+                    pass                          # ★増分読みなので前回はちょうど行境界で止めてある
+                for raw in f:
+                    if not raw.endswith(b"\n"):
+                        break                      # ★書き込み途中の最終行は次回へ回す(offsetを進めない)
+                    try:
+                        r = json.loads(raw.decode("utf-8", "replace"))
+                    except Exception:              # noqa: BLE001
+                        continue
+                    a = r.get("author")
+                    if not a or r.get("sec") is None:
+                        continue
+                    key = (str(r.get("dept") or ""), str(a))
+                    lst = _WORK_SEC_CACHE_V2["data"].setdefault(key, [])
+                    lst.append(float(r.get("sec") or 0))
+                    if len(lst) > _WORK_SEC_V2_MAX_PER_KEY:
+                        del lst[: len(lst) - _WORK_SEC_V2_MAX_PER_KEY]
+                    _WORK_SEC_CACHE_V2["offset"] = f.tell()
+            _WORK_SEC_CACHE_V2["size"] = st.st_size
+    except Exception:                             # noqa: BLE001
+        return []
+    return list(_WORK_SEC_CACHE_V2["data"].get((str(dept or ""), str(author or "")), []))[-n:]
+
 
 def _work_sec_history(dept, author, n=5):
-    """`work_audit.jsonl` の末尾から (dept, author) の作業便の秒数を新しい順に最大n件。
+    """`work_audit.jsonl` から (dept, author) の作業便の秒数を新しい順に最大n件。
 
     ★台帳は追記のみなので、**mtimeとサイズが変わらない限り読み直さない**。
     ★読めない・列が無い(古い行)時は空リスト= 呼び側は「履歴なし」として扱う。
+    ★`history_scan_v2_depts` に列挙された部屋だけ増分キャッシュ版(`_work_sec_history_v2`)へ回す。
     """
+    if str(dept or "") in _history_scan_v2_depts():
+        return _work_sec_history_v2(dept, author, n)
     try:
         st = os.stat(WORK_AUDIT)
     except OSError:
