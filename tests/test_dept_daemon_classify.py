@@ -586,6 +586,55 @@ try:
 except OSError:
     pass
 
+# --- 8. 起動プロンプトが配るパスは「実在する所」だけを指す(2026-09-19 置き場違反の恒久) ---
+# 事故: Chami直令 msg 1550646669614518284「5secは5秒動画のフォルダやろ？そこに5chの動画ネタとか
+#   それにまつわるファイルを置かないでくれ」で ②変換台本・YMM4資産・発掘素材 27ファイルを
+#   5SecMovieMaker\local\ から 5chShortMovie\ 配下へ移した。ところが DEPT_CONF の work_scope /
+#   boot_note が **旧パスをハードコード**していたため、毎便それを受け取る部屋は行き先の無い所へ
+#   落とし続ける=心がけでは止まらない再発源(共通規律§3「心がけに任せない。機構に載せる」)。
+# ★この検査は「文字列が入っているか」ではなく **実物(ディスク)** と突き合わせる。
+#   起動プロンプトに書いたパスが消えた/移された瞬間に、本番の初発火を待たずにここで落ちる。
+import re as _re  # noqa: E402
+
+_REL = _re.compile("(?<![\\w.\\\\])((?:local|docs|scripts|tests|status)/[\\w\\-./]*[\\w\\-/])")
+_ABS = _re.compile("[A-Za-z]:\\\\[^\\s`\"'、。()（）|=*・「」【】,]+")
+_ROOTS = (D.ROOT, D.HQ)                      # 相対パスは5secとHQの両方を正本にする部屋が居る
+
+
+def _exists(tok):
+    if _re.match(r'^[A-Za-z]:', tok):
+        return os.path.exists(tok)
+    return any(os.path.exists(os.path.join(r, tok.replace("/", os.sep))) for r in _ROOTS)
+
+
+_dead = []
+_seen = 0
+for _dept in sorted(D.DEPT_CONF):
+    for _field in ("work_scope", "boot_note"):
+        _s = D.DEPT_CONF[_dept].get(_field)
+        if not isinstance(_s, str):
+            continue
+        for _m in list(_REL.finditer(_s)) + list(_ABS.finditer(_s)):
+            _tok = _m.group(1) if _m.re is _REL else _m.group(0)
+            # `threads_<板>_…` のような雛形は実在を問わない(<で切れた断片)
+            if _s[_m.end():_m.end() + 1] == "<":
+                continue
+            _tok = _tok.rstrip("、。)）」・")
+            _seen += 1
+            if not _exists(_tok):
+                _dead.append("%s.%s -> %s" % (_dept, _field, _tok))
+
+eq(_dead, [], "★起動プロンプトが実在しないパスを配っている(置き場違反の再発源)")
+eq(_seen > 50, True, "検査が空振りしていないこと(走査したパス様トークン=%d)" % _seen)
+
+# 旧パスそのものが復活していないこと(移動先が決まっている2つだけ名指しで釘を刺す)
+for _old in ("local/manga_shorts", "local/research/hakkutsu"):
+    _hit = [d for d in D.DEPT_CONF
+            for f in ("work_scope", "boot_note")
+            if isinstance(D.DEPT_CONF[d].get(f), str) and _old in D.DEPT_CONF[d][f]]
+    eq(_hit, [], "★旧置き場 %s が起動プロンプトへ戻っている" % _old)
+
+
 if fails:
     print("FAIL " + str(len(fails)) + "件")
     for f in fails:
