@@ -38,6 +38,12 @@ function post(body, token = "T0KEN") {
   });
 }
 
+function getEdit(key, token = "T0KEN") {
+  return new Request("https://go5-sync.example/api/persona/edit/" + key, {
+    headers: { "X-Sync-Token": token },
+  });
+}
+
 let pass = 0, fail = 0;
 async function check(name, got, want) {
   const ok = JSON.stringify(got) === JSON.stringify(want);
@@ -116,14 +122,41 @@ async function run() {
     const res = await worker.fetch(post("{壊れて", "T0KEN"), env, {});
     await check("壊れたbody→400", [res.status, (await res.json()).error], [400, "bad_body"]);
   }
-  // 11) 既存の口を壊していないこと= GET / と 未知パスの 404
+  // 11) 元画像と正方形編集レシピを保存し、完成画像keyから再取得できる
+  {
+    const edit = { version: 1, rot: 90, crop: { x: 12.5, y: 20, size: 300 }, source: { width: 900, height: 1200 }, outputSize: 512 };
+    const env = makeEnv({ r2: [[KEY_A, new Uint8Array([1])], [KEY_B, new Uint8Array([2])]] });
+    const res = await worker.fetch(post({ persona: "アメス", key: KEY_A, ct: "image/png", sourceKey: KEY_B, sourceCt: "image/jpeg", edit }), env, {});
+    const body = await res.json();
+    const queueRec = JSON.parse(env._r2.get("persona/queue.jsonl").trim());
+    const metaKey = "persona/edit/" + KEY_A + ".json";
+    await check("元画像・編集情報をキューと固定メタへ保存", [res.status, body.ok, queueRec.sourceKey, env._r2.has(metaKey)], [200, true, KEY_B, true]);
+    const got = await worker.fetch(getEdit(KEY_A), env, {});
+    const meta = await got.json();
+    await check("編集情報を再取得", [got.status, meta.ok, meta.sourceKey, meta.edit.rot, meta.edit.crop.size], [200, true, KEY_B, 90, 300]);
+  }
+  // 12) 元画像の実体が無ければ受け付けない
+  {
+    const env = makeEnv({ r2: [[KEY_A, new Uint8Array([1])]] });
+    const edit = { rot: 0, crop: { x: 0, y: 0, size: 100 }, source: { width: 100, height: 100 } };
+    const res = await worker.fetch(post({ persona: "アメス", key: KEY_A, sourceKey: KEY_B, edit }), env, {});
+    await check("元画像なし→409", [res.status, (await res.json()).error], [409, "source_not_uploaded"]);
+  }
+  // 13) 編集情報はトークン必須・未知keyは404
+  {
+    const env = makeEnv();
+    const denied = await worker.fetch(getEdit(KEY_A, "WRONG"), env, {});
+    const missing = await worker.fetch(getEdit(KEY_A), env, {});
+    await check("編集情報の認証と404", [denied.status, missing.status], [403, 404]);
+  }
+  // 14) 既存の口を壊していないこと= GET / と 未知パスの 404
   {
     const env = makeEnv();
     const ok = await worker.fetch(new Request("https://go5-sync.example/"), env, {});
     const nf = await worker.fetch(new Request("https://go5-sync.example/api/nope"), env, {});
     await check("既存: GET / とパス外", [ok.status, await ok.text(), nf.status], [200, "go5-sync ok", 404]);
   }
-  // 12) 既存の口を壊していないこと= PUT /api/img/:key が今までどおり動く
+  // 15) 既存の口を壊していないこと= PUT /api/img/:key が今までどおり動く
   {
     const env = makeEnv();
     const res = await worker.fetch(new Request("https://go5-sync.example/api/img/" + KEY_A, {

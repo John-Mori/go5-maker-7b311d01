@@ -39,6 +39,7 @@ class Fake:
         self.tmp = tempfile.mkdtemp(prefix="pqp_")
         m.LOCAL = self.tmp
         m.INBOX = os.path.join(self.tmp, "persona_inbox")
+        m.SOURCES = os.path.join(self.tmp, "persona_avatar_sources")
         m.CURSOR = os.path.join(self.tmp, "persona_queue_cursor.json")
         m.LOG = os.path.join(self.tmp, "llm", "poller.jsonl")
         m.AVATARS = os.path.join(self.tmp, "persona_avatars.json")
@@ -193,6 +194,23 @@ def main():
     rc = run(f, ["--dry-run"])
     check("dry-run→無傷", [rc, f.placed(), f.ingest, os.path.exists(f.m.CURSOR)],
           [0, [], 0, False])
+    f.close()
+
+    # 11) 元画像と編集レシピを完成画像とは別に保管する
+    edit = {"version": 1, "rot": 0, "crop": {"x": 10, "y": 20, "size": 300},
+            "source": {"width": 900, "height": 1200}, "outputSize": 512}
+    f = Fake(load(), {
+        "persona/queue.jsonl": q({"persona": "アメス", "key": KEY_A, "ct": "image/png",
+                                   "sourceKey": KEY_B, "sourceCt": "image/jpeg", "edit": edit}),
+        KEY_A: b"\x89PNG", KEY_B: b"\xff\xd8original",
+    }, {"アメス": []})
+    rc = run(f)
+    src = os.path.join(f.m.SOURCES, "アメス", KEY_B + ".jpg")
+    meta = os.path.join(f.m.SOURCES, "アメス", KEY_A + ".json")
+    meta_obj = json.load(io.open(meta, encoding="utf-8")) if os.path.exists(meta) else {}
+    check("元画像と編集レシピを別保管",
+          [rc, os.path.isfile(src), meta_obj.get("sourceKey"), (meta_obj.get("edit") or {}).get("crop", {}).get("size")],
+          [0, True, KEY_B, 300])
     f.close()
 
     print("\n%d PASS / %d FAIL" % (PASS, FAIL))

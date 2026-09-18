@@ -14,8 +14,9 @@
  *   GET  /api/img/has?keys=a,b  → { ok, present:[...存在するkey] }（アップロード要否の判定）
  *   PUT  /api/img/:key          → 本文=画像バイト。R2 に保存（既存なら何もしない＝冪等）。{ ok, key }
  *   GET  /img/:key              → R2 から配信（トークン不要＝<img src>用・key は sha256 で推測困難・長期キャッシュ）
- *   POST /api/persona/enqueue   → body {persona, key}。人格ハブが上げたアイコンの「申告」を
+ *   POST /api/persona/enqueue   → body {persona, key, sourceKey, edit}。完成画像と元画像を結ぶ「申告」を
  *                                  R2 persona/queue.jsonl へ**追記だけ**する。{ ok, line }
+ *   GET  /api/persona/edit/:key → 登録後の再編集用に、元画像keyと正方形切り抜き情報を返す。
  *   GET  /api/teian/latest       → 提案候補の当日JSONを配信（トークン必須）。R2 teian/latest.json。
  *   GET  /api/teian/:date        → 指定日(YYYY-MM-DD)の提案候補JSON。R2 teian/<date>.json。未配信は {empty:true}。
  *                                  ※書き込みは wrangler r2 object put（PC側=scripts/teian/publish_candidates.py）。
@@ -77,6 +78,12 @@ export default {
       if (!authOk(request, env)) return json({ ok: false, error: "bad_token" }, 403, cors);
       if (await rateLimited(env)) return json({ ok: false, error: "rate_limited" }, 429, cors);
       return personaEnqueue(request, env, cors);
+    }
+
+    // 登録後の再編集。完成画像keyから元画像と編集レシピを引く(トークン必須)。
+    if (path.startsWith("/api/persona/edit/") && request.method === "GET") {
+      if (!authOk(request, env)) return json({ ok: false, error: "bad_token" }, 403, cors);
+      return personaEdit(decodeURIComponent(path.slice("/api/persona/edit/".length)), env, cors);
     }
 
     // 状態 push
@@ -201,6 +208,7 @@ async function imgHas(url, env, cors) {
 //     箱を空にしてから処理する形にすると、その隙に落ちた分が無言で消える(実害の記録あり)。
 const PQ_KEY = "persona/queue.jsonl";
 const PQ_MAX = 256 * 1024; // これを超えたら**黙って捨てず**エラーで返す(静かな喪失を作らない)
+const PE_PREFIX = "persona/edit/";
 function safeName(s) {
   const t = String(s || "").replace(/[\x00-\x1f\x7f]/g, "").trim();
   return t.length >= 1 && t.length <= 40 ? t : "";
@@ -210,21 +218,58 @@ async function personaEnqueue(request, env, cors) {
   const body = parseJson(await request.text());
   const persona = safeName(body && body.persona);
   const key = String((body && body.key) || "");
+  const sourceKey = String((body && body.sourceKey) || key);
+  const sourceCt = String((body && body.sourceCt) || "").slice(0, 80);
+  const edit = safeAvatarEdit(body && body.edit);
   if (!persona || !validKey(key)) return json({ ok: false, error: "bad_body" }, 400, cors);
+  if (!validKey(sourceKey) || ((body && body.edit) && !edit)) return json({ ok: false, error: "bad_edit" }, 400, cors);
   // 申告された key の実体が R2 に在ることを先に確かめる(先に PUT /api/img/:key を通す約束)。
   if (!(await env.SYNC_IMAGES.head(key))) return json({ ok: false, error: "key_not_uploaded" }, 409, cors);
+  if (!(await env.SYNC_IMAGES.head(sourceKey))) return json({ ok: false, error: "source_not_uploaded" }, 409, cors);
   const cur = await env.SYNC_IMAGES.get(PQ_KEY);
   const prev = cur ? await cur.text() : "";
   if (prev.length > PQ_MAX) return json({ ok: false, error: "queue_full" }, 507, cors);
+  const editRec = { persona, key, ct: String((body && body.ct) || "").slice(0, 80), sourceKey, sourceCt, edit, at: new Date().toISOString() };
+  // 完成画像keyごとの固定メタ。キューが台帳へ着地した後も再編集に使うため消さない。
+  await env.SYNC_IMAGES.put(PE_PREFIX + key + ".json", JSON.stringify(editRec), {
+    httpMetadata: { contentType: "application/json", cacheControl: "no-store" }
+  });
   // 同じ (persona,key) が既に申告済みなら足さない(冪等)。ページの二度押しで行が増えない。
   const dup = '"persona":' + JSON.stringify(persona) + ',"key":"' + key + '"';
   if (prev.indexOf(dup) >= 0) return json({ ok: true, deduped: true, line: prev.split("\n").filter(Boolean).length }, 200, cors);
-  const rec = JSON.stringify({ persona, key, ct: String((body && body.ct) || ""), at: new Date().toISOString() });
+  const rec = JSON.stringify(editRec);
   const next = prev + (prev.endsWith("\n") || prev === "" ? "" : "\n") + rec + "\n";
   // ★read-modify-write= 同時申告が重なると片方が消えうる。手作業でアイコンを足す用途では
   //   同時実行が起きない前提。起きたらページ側が再申告すれば冪等に戻る(消えた行は残らない)。
   await env.SYNC_IMAGES.put(PQ_KEY, next, { httpMetadata: { contentType: "application/x-ndjson", cacheControl: "no-store" } });
   return json({ ok: true, line: next.split("\n").filter(Boolean).length }, 200, cors);
+}
+
+function safeAvatarEdit(value) {
+  if (value == null) return null;
+  if (typeof value !== "object" || Array.isArray(value)) return null;
+  const rot = Number(value.rot);
+  const c = value.crop || {};
+  const source = value.source || {};
+  const nums = [Number(c.x), Number(c.y), Number(c.size), Number(source.width), Number(source.height)];
+  if (![0, 90, 180, 270].includes(rot) || nums.some((n) => !Number.isFinite(n)) || Number(c.size) <= 0) return null;
+  const clean = {
+    version: 1,
+    rot,
+    crop: { x: nums[0], y: nums[1], size: nums[2] },
+    source: { width: nums[3], height: nums[4] },
+    outputSize: 512,
+  };
+  return JSON.stringify(clean).length <= 1024 ? clean : null;
+}
+
+async function personaEdit(key, env, cors) {
+  if (!env.SYNC_IMAGES) return json({ ok: false, error: "r2_unset" }, 500, cors);
+  if (!validKey(key)) return json({ ok: false, error: "bad_key" }, 400, cors);
+  const obj = await env.SYNC_IMAGES.get(PE_PREFIX + key + ".json");
+  if (!obj) return json({ ok: false, error: "edit_not_found" }, 404, cors);
+  const rec = parseJson(await obj.text());
+  return rec ? json(Object.assign({ ok: true }, rec), 200, cors) : json({ ok: false, error: "edit_corrupt" }, 500, cors);
 }
 
 // ── レート制限（KV日次カウンタ・未設定でも停止しない）─────────────

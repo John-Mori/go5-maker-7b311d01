@@ -27,6 +27,7 @@ persona_queue_poller.py — 人格ハブが上げたアイコンを、正本(per
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -35,6 +36,7 @@ ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
 LOCAL = os.path.join(ROOT, "local")
 AVATARS = os.path.join(LOCAL, "persona_avatars.json")
 INBOX = os.path.join(LOCAL, "persona_inbox")
+SOURCES = os.path.join(LOCAL, "persona_avatar_sources")
 CURSOR = os.path.join(LOCAL, "persona_queue_cursor.json")
 LOG = os.path.join(LOCAL, "llm", "persona_queue_poller.jsonl")
 BUCKET = "go5-sync-images"
@@ -88,6 +90,39 @@ def save_cursor(line, pending, dry):
         ensure_ascii=False, indent=2))
 
 
+def archive_source(persona, rec, dry):
+    """元画像と編集レシピをPC側にも残す。R2が正、ここは再編集・監査用の復旧可能な保管庫。"""
+    source_key = str(rec.get("sourceKey") or rec.get("key") or "").strip()
+    output_key = str(rec.get("key") or "").strip()
+    source_ct = str(rec.get("sourceCt") or rec.get("ct") or "")
+    if not source_key:
+        return False
+    ext = EXT.get(source_ct, ".bin")
+    dst_dir = os.path.join(SOURCES, persona)
+    source_path = os.path.join(dst_dir, source_key + ext)
+    meta_path = os.path.join(dst_dir, output_key + ".json")
+    if dry:
+        print("  [dry] 元画像保管 %s …%s" % (persona, source_key[-6:]))
+        return True
+    os.makedirs(dst_dir, exist_ok=True)
+    if not os.path.isfile(source_path) and not r2_get(source_key, source_path):
+        _log("source_get_failed", persona=persona, key=output_key, sourceKey=source_key)
+        return False
+    meta = {
+        "persona": persona,
+        "key": output_key,
+        "sourceKey": source_key,
+        "sourceCt": source_ct,
+        "edit": rec.get("edit"),
+        "at": rec.get("at"),
+    }
+    if os.path.exists(meta_path):
+        shutil.copyfile(meta_path, meta_path + ".bak")
+    with io.open(meta_path, "w", encoding="utf-8") as f:
+        f.write(json.dumps(meta, ensure_ascii=False, indent=2))
+    return True
+
+
 def main():
     dry = "--dry-run" in sys.argv
     verbose = "--verbose" in sys.argv or dry
@@ -130,6 +165,9 @@ def main():
         arr = ledger.get(persona)
         arr = arr if isinstance(arr, list) else ([arr] if arr else [])
         if BASE + key in arr:
+            if not archive_source(persona, rec, dry):
+                still.append(rec)
+                continue
             if verbose:
                 print("  = 台帳に既に在る(済み) %s …%s" % (persona, key[-6:]))
             continue
@@ -143,11 +181,16 @@ def main():
         dst = os.path.join(dst_dir, key[:12] + EXT.get(str(rec.get("ct") or ""), ".png"))
         if dry:
             print("  [dry] %s ← R2 …%s → %s" % (persona, key[-6:], dst))
+            archive_source(persona, rec, dry=True)
             placed += 1
             continue
         os.makedirs(dst_dir, exist_ok=True)
         if not r2_get(key, dst):
             print("  x R2から実体を取れない …%s → 保留" % key[-6:])
+            still.append(rec)
+            continue
+        if not archive_source(persona, rec, dry=False):
+            print("  x 元画像を保管できない …%s → 保留" % str(rec.get("sourceKey") or key)[-6:])
             still.append(rec)
             continue
         placed += 1

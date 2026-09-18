@@ -54,10 +54,21 @@ for attr, var, label in [("act", "act", "data-act"), ("c", "c", "data-c")]:
 
 # 4) renderが参照する主要クラスが CSS にあるか
 need = ["av-removed", "av-removed-chip", "cropper-overlay", "cropper-frame",
-        "cropper-grid", "cropper-btn", "cropper-cv"]
+        "cropper-grid", "cropper-btn", "cropper-cv", "discord-message-preview",
+        "cropper-square-preview", "av-shape-pair", "av-edit", "av-pending-tag"]
 for cls in need:
     if ("." + cls) not in css:
         errors.append("CSSクラス .%s が style.css に無い(参照はあるのに未定義)" % cls)
+
+# 5) 今回の契約: 正方形512px・元画像key・登録後再編集口・即時表示が同時に残っていること。
+for needle, label in [
+    ("var OUT_SIZE = 512", "正方形512px出力"),
+    ("sourceKey", "元画像key"),
+    ("/api/persona/edit/", "登録後再編集API"),
+    ("rememberPending", "登録直後の即時表示"),
+]:
+    if needle not in app:
+        errors.append("必須契約が app.js から消えた: " + label)
 
 if errors:
     print("NG persona-hub selfcheck:")
