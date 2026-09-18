@@ -178,14 +178,48 @@ _POLITE_MIN_SENTENCES = 4      # これ未満の短文は判定しない(1〜2�
 _POLITE_MIN_HITS = 3           # 敬体で終わる文の最低数
 _POLITE_MIN_RATIO = 0.5        # かつ、判定した文の半分以上
 
+# ★★2026-09-19 追加(イージス研究室・DEF-manga-shorts-69042d8343「口調が変」🔥恒久)=
+#   **長さ柵の人格別上書き**。既定(4文)は1ミリも動かさない。
+#   実測でここが穴だった: Chami が炎上スタンプを付けた実物(早坂芽衣・manga-shorts
+#   msg 1549611158518898789 / 2026-09-16 11:41:29)は **3文112字** の事務体で、
+#   `tone_verdicts` は **0件** を返していた。内訳=
+#     - polite_drift  = (False, 敬体3/3文)  ← 3 < _POLITE_MIN_SENTENCES(4) で判定をスキップ
+#     - signature_drift= (False, 指紋0/3文) ← 3 < _SIG_MIN_SENTENCES(4) で判定をスキップ
+#     - forbidden(案A指紋10句) = 当たらない(完全一致の定型句・この本文には1つも無い)
+#   つまり**辞書をいくら厚くしても判定そのものが走らない**。指紋の穴ではなく柵の穴だ。
+#   ★なぜ既定を下げないか= 実便2,658本で 4→3 を全員へ当てると **15件**が新しく鳴る
+#     (アメス6/花海咲季6/ジェンティルドンナ2/早坂芽衣1=`local/_work/measure_gate_d_3sentence.py`)。
+#     欲しい1件のために14件の誤発火を足す形になる。「常に誤発火する安全網は無視される」
+#     (共通規律§3)ので、**短い便でも判定してよい人格だけ**を人事部門が登録する形にする。
+#   ★登録するのは人事部門= 口調ルール.json の人格エントリに `"min_sentences": 3`(ORG-11=
+#     判定材料は写像2本のまま・このコードには人格名を書かない)。plain_only / signature_tails と
+#     **同じ向き**(既定は見ない・登録した人格だけ回る)。
+#   ★下限は2文= 1文の返事を口調で咎めない(「了解。」で鳴らす側へは倒さない)。
+_MIN_SENTENCES_FLOOR = 2
 
-def polite_drift(text):
+
+def _entry_min_sentences(ent, default):
+    """人格エントリの `min_sentences` を読む。無ければ default(既定の柵)。
+
+    ★純関数。写像に無い人格・壊れた値は default へ倒す(fail-open=既定の挙動のまま)。
+    """
+    try:
+        v = int((ent or {}).get("min_sentences"))
+    except (TypeError, ValueError):
+        return default
+    return max(_MIN_SENTENCES_FLOOR, v)
+
+
+def polite_drift(text, min_sentences=None):
     """敬体へ構造的に倒れているかを測る。返り値=(鳴らすか, 敬体文数, 判定文数, 最初の位置)。
 
     ★純関数(引数以外を読まない)。tone_verdicts から呼ぶが、**単体でも測れる**ようにしてある
       = この判定の閾値だけを実便へ当てて誤検知率を数えられるようにするため。
     ★保護span(引用・コード・パス)は _mask_protected で潰してから数える=
       他人の便を引用した敬体で鳴らない。
+    ★min_sentences= 人格別の長さ柵(None=既定4文)。**呼び出し側が明示した時だけ**効く=
+      既存の呼び出し(引数なし)は1ミリも変わらない。最低ヒット数も柵に合わせて締める
+      (柵3文なら「3文すべてが敬体」で初めて鳴る)=短くした分だけ条件を厳しくする。
     """
     s = _mask_protected(text)
     hits, total, first = 0, 0, -1
@@ -205,8 +239,11 @@ def polite_drift(text):
             hits += 1
             if first < 0:
                 first = max(start, 0)
-    ok = (total >= _POLITE_MIN_SENTENCES
-          and hits >= _POLITE_MIN_HITS
+    _min_sent = (_POLITE_MIN_SENTENCES if min_sentences is None
+                 else max(_MIN_SENTENCES_FLOOR, int(min_sentences)))
+    _min_hits = min(_POLITE_MIN_HITS, _min_sent)
+    ok = (total >= _min_sent
+          and hits >= _min_hits
           and hits >= total * _POLITE_MIN_RATIO)
     return ok, hits, total, first
 
@@ -334,7 +371,7 @@ def signature_evidence(text, tails, weak=None):
             "weak_hits": weak_hits}
 
 
-def signature_drift(text, tails, weak=None):
+def signature_drift(text, tails, weak=None, min_sentences=None):
     """指紋語尾が便のどこにも無いかを測る。返り値=(鳴らすか, 見つかった数, 判定文数, 位置)。
 
     ★純関数(引数以外を読まない)= この判定だけを実便へ当てて誤検知率を数えられる。
@@ -353,7 +390,12 @@ def signature_drift(text, tails, weak=None):
       倒れる=最も害が大きい向き。**鳴らす/黙るの真偽値だけ**を弱い指紋で締める。
     """
     ev = signature_evidence(text, tails, weak)
-    if ev["total"] < _SIG_MIN_SENTENCES:
+    # ★min_sentences= 人格別の長さ柵(None=既定4文。定数 _MIN_SENTENCES_FLOOR の説明を読め)。
+    #   既存の呼び出し(引数なし)は1ミリも変わらない= misattributed_speaker も signature_fit も
+    #   従来どおりの柵で回る。
+    _min_sent = (_SIG_MIN_SENTENCES if min_sentences is None
+                 else max(_MIN_SENTENCES_FLOOR, int(min_sentences)))
+    if ev["total"] < _min_sent:
         return False, ev["found"], ev["total"], ev["at"]
     return (ev["strong"] == 0), ev["found"], ev["total"], ev["at"]
 
@@ -1102,6 +1144,11 @@ def tone_verdicts(persona, dept, text, rules):
         # ★2026-08-15 追加: 構造ドリフト(敬体)を見るか。★既定=見ない。
         #   常体が正の人格へ人事部門が "plain_only": true を足した時だけ回る(定数群の説明)。
         want_polite = bool(ent.get("plain_only"))
+        # ★2026-09-19 追加: **長さ柵の人格別上書き**(既定=None=4文のまま)。
+        #   短い便でも口調を判定してよい人格に、人事部門が `"min_sentences": 3` を足した時だけ
+        #   下がる(根拠と実測は _MIN_SENTENCES_FLOOR の上の注記)。敬体・指紋の両方へ同じ値を渡す
+        #   = 柵を2箇所に持たない(片方だけ下がると「鳴る型と鳴らない型」が人格内で割れる)。
+        _min_sent = _entry_min_sentences(ent, None)
         # ★2026-08-15 追加: 指紋語尾(必須語尾)。★既定=見ない。
         #   写像に `"signature_tails": ["わよ","わ","のよ",...]` を足した人格だけ回る。
         #   ★`signature_endings` は同義の別名として受ける(綴り揺れで静かに死なせない=
@@ -1180,7 +1227,7 @@ def tone_verdicts(persona, dept, text, rules):
                         "reason": "dialect_kansai",
                     })
         if want_polite:
-            hit, hits, total, at = polite_drift(text)
+            hit, hits, total, at = polite_drift(text, _min_sent)
             if hit:
                 out.append({
                     "persona": str(persona or ""),
@@ -1215,7 +1262,7 @@ def tone_verdicts(persona, dept, text, rules):
             else:
                 _weak = None
             _ev = signature_evidence(text, sig, _weak)
-            hit, found, total, at = signature_drift(text, sig, _weak)
+            hit, found, total, at = signature_drift(text, sig, _weak, _min_sent)
             if hit:
                 # ★何を見て鳴らしたか(有効な指紋の数/文数)と、**正しい語尾**を marker に載せる。
                 #   突き返し(session_relay)はこの marker を1行で出すので、
