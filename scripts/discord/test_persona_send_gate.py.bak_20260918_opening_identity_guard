@@ -96,14 +96,12 @@ def test_backstop():
     #      out == TRAILER_JP のまま=この2本が FAIL する(配線前のコードで赤を実測済み)。
     out = p.english_backstop(TRAILER_JP, "オタコン", "system-engineer")
     _check("⑥ 末尾英文が消えている", out is not None and "Let me investigate" not in out)
-    _check("⑥ 日本語本文は残り、二重になる名乗りは落ちる",
-           out is not None and out.startswith("名簿の件")
-           and "[オタコン]" not in out and "編纂待ち" in out)
+    _check("⑥ 日本語本文と名乗りは残る",
+           out is not None and out.startswith("[オタコン]") and "編纂待ち" in out)
 
-    # ⑦ 固有名詞・URL・規約番号は不変。冒頭の自己名だけは表示名と二重になるため落とす。
+    # ⑦ 末尾が英語の固有名詞・URL・規約番号の**普通の返信**は1ミリも変えない(誤爆ガード)
     out = p.english_backstop(NORMAL_TAIL_EN, "一ノ瀬怜", "platform-se")
-    _check("⑦ URL/固有名詞は残り、自己名だけ落ちる",
-           out == NORMAL_TAIL_EN.replace("[一ノ瀬怜]", "", 1))
+    _check("⑦ 末尾がURL/固有名詞の通常返信は不変", out == NORMAL_TAIL_EN)
 
 
 if __name__ == "__main__":

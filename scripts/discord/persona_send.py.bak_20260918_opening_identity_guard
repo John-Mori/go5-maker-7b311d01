@@ -748,7 +748,7 @@ def enjoh_backstop(body, quiet=False):
 
 
 def apply_text_gates(body, persona=None, dept=None, tag="persona_send", audit=True):
-    """★Discordへ出る本文が最後に通る、口調/表記/名乗りゲートの合流点。
+    """★Discordへ出る本文が**最後に通る3ゲートの合流点**。ここを通った文字列が実際に投稿される。
 
     2026-09-09 HQ-0253(イージス研究室 第55世代)で切り出した。それまで3ゲートは main() の中に
     並んで書かれているだけで、**外から「投げた形」を再現する手段が無かった**。
@@ -759,7 +759,7 @@ def apply_text_gates(body, persona=None, dept=None, tag="persona_send", audit=Tr
     ★ゲートごとに突合側で対処してはいけない(ゲートは3つ在り、また増える)。
       **合流点を1本にして、判定する側はそこを呼ぶ**(ORG-11= 同じ判定を2箇所に持たない・C-064)。
 
-    順序は 口調 → 炎上表記 → 同形異字 → 冒頭の自己名。★勝手に入れ替えない。
+    順序は main() の従来どおり 口調 → 炎上表記 → 同形異字。★勝手に入れ替えない。
     ★english_backstop はここに**含めない**= あれは本文を直すだけでなく「送らない(None)」を
       返す関門で、判定の意味が違う(突合の再現に使うと、送らない便を再現できなくなる)。
     ★audit=False= 変換は同じまま台帳とstderrへ出さない。突合の再現で二重記帳しないため。
@@ -774,23 +774,7 @@ def apply_text_gates(body, persona=None, dept=None, tag="persona_send", audit=Tr
         _AUDIT_ID = _new_audit_id()
     body = tone_backstop(body, persona, dept, audit=audit)
     body = enjoh_backstop(body, quiet=not audit)
-    # homoglyph_backstop は監査切替を持たない。存在しない audit 引数を渡すとここで
-    # TypeErrorになり、後段の全ゲートへ到達しないため、正しい公開シグネチャだけを渡す。
-    body = _homo_gate(body, persona=persona, dept=dept, tag=tag)
-    # 表示名はWebhook側が付ける。本文冒頭の自己名は二重表示になるため最後の合流点で落とす。
-    # 上流の名簿解決が正式名の短縮形(例: 一ノ瀬怜→一ノ瀬)を引けなくても、実際の話者名との
-    # 前方/後方一致が一意ならここで拾う。直送・無人代打にも同じ網が効く(C-064)。
-    try:
-        llm_dir = os.path.join(ROOT, "scripts", "llm")
-        if llm_dir not in sys.path:
-            sys.path.insert(0, llm_dir)
-        from delivery_guard import strip_opening_self_intro
-        body, intro = strip_opening_self_intro(body, persona)
-        if audit and intro.get("stripped"):
-            print(f"[persona_send] ★冒頭の自己名を本文から外した"
-                  f"({intro.get('kind')}:{intro.get('label')})", file=sys.stderr)
-    except Exception:
-        pass                                        # 判定不能なら喋る側へ倒す(fail-open)
+    body = _homo_gate(body, persona=persona, dept=dept, tag=tag, audit=audit)
     # ★構造監査(軸②/軸③)は**3ゲートの後**= 実際に投稿される文字列をそのまま数える。
     #   audit=False(突合の再現)では書かない= 同じ便を2行数えたら分布が歪む。
     if audit:
@@ -858,25 +842,26 @@ def english_backstop(body, persona, channel):
             return body                       # ミラー=Chami本人の発言。英語でも触らない
         if os.path.join(ROOT, "scripts", "llm") not in sys.path:
             sys.path.insert(0, os.path.join(ROOT, "scripts", "llm"))
-        from delivery_guard import apply as apply_delivery_guard
-        out, info = apply_delivery_guard(body, persona)
-        pre = info.get("preamble") or {}
+        from lang_gate import (detect_english_dump, strip_english_preamble,
+                               strip_english_paragraphs)
+        out, pre = strip_english_preamble(body)
         if pre.get("stripped"):
             print(f"[persona_send] ★英語前置きを剥離(英字{pre.get('removed_latin')})→日本語本文だけ送る",
                   file=sys.stderr)
-        para = info.get("paragraphs") or {}
+            body = out
+        # 末尾/中間の純英語段落。安全弁は lang_gate 側(日本語ゼロは触らない・名乗りタグを
+        # 含む段落は剥がない・残る日本語が20字未満なら何もしない)=通常返信は1ミリも変わらない。
+        out, para = strip_english_paragraphs(body)
         if para.get("stripped"):
             _by = ",".join(para.get("by") or [])
             _ex = (para.get("excerpts") or [""])[0][:80]
             print(f"[persona_send] ★英語段落を{para['stripped']}件剥離"
                   f"(英字{para.get('removed_latin')}・判定{_by})→日本語本文だけ送る。"
                   f"冒頭=…{_ex}…", file=sys.stderr)
-        for intro in info.get("intro") or []:
-            print(f"[persona_send] ★冒頭の自己名を本文から外した"
-                  f"({intro.get('kind')}:{intro.get('label')})", file=sys.stderr)
-        hit = info.get("blocked")
+            body = out
+        hit = detect_english_dump(body)
         if hit is None:
-            return out                        # 通常返信=不要部分以外は変えない
+            return body                       # 通常返信=1ミリも変えない
         _audit_english_suppressed(persona, channel, hit, body)
         _kind = "本文まるごと英語" if hit.get("kind") != "mixed" else \
                 f"英語の作業ナレーション混在(英語機能語{hit.get('func')}語)"
@@ -1080,12 +1065,6 @@ def main():
     #     実在確認(dept_daemon.verify_replied)が**同じ1本**を呼んで「投げた形」を再現するため。
     #     ここをバラして書き戻すと、突合鍵がまた投稿前の本文からできて宙に浮く。
     body = apply_text_gates(body, persona=persona, dept=dept, tag="persona_send")
-    # 口調書き直し等が英語や自己名を再生成しても、HTTP直前の本文には残さない。
-    # delivery_guard は純関数で二重適用しても同じ本文になる。
-    gated = english_backstop(body, persona, channel or dept)
-    if gated is None:
-        sys.exit(4)
-    body = gated
     if not avatar and os.path.exists(AVATARS_FILE):
         with open(AVATARS_FILE, "r", encoding="utf-8") as f:
             avatar = json.load(f).get(persona)
