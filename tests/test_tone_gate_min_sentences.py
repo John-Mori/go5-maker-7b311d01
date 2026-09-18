@@ -69,6 +69,21 @@ def _with_min_sentences(rules, persona, n, plain_only=True):
     return rr
 
 
+def _without_registration(rules, persona):
+    """複製から `min_sentences` / `plain_only` を**外した**物を返す= 登録前の姿。
+    ★2026-09-19 修正= ここを本番JSONの直読みでやっていたのが誤りだった。
+      人事部門が登録した瞬間に「登録前は素通しする」という前提が消えてT1が赤くなった
+      (機構の不具合ではなく、検査が本番の値に寄りかかっていた)。
+      **before は自分で作る**= 本番がどちらの状態でも、主張は同じまま立つ。"""
+    rr = copy.deepcopy(rules)
+    ent = (rr.get("personas") or {}).get(persona)
+    if ent is None:
+        return None
+    ent.pop("min_sentences", None)
+    ent.pop("plain_only", None)
+    return rr
+
+
 def _reasons(rules, text, persona=PERSONA):
     return sorted({v.get("reason") for v in tone_verdicts(persona, DEPT, text, rules)})
 
@@ -83,16 +98,18 @@ def _run():
         return 1
     ok = True
 
-    # --- T1 穴の再現(既定の柵)= 実物が**素通りする** ---------------------------
-    #   ここが空になることが「なぜ炎上便が出たか」の機械の答えだ。直ったら T1 は
-    #   期待を書き換えるのではなく、T1 が守っている「既定は動かさない」が崩れた合図。
-    base = _reasons(rules, NG_JIMUTAI)
+    # --- T1 穴の再現(登録前の姿)= 実物が**素通りする** -------------------------
+    #   ここが空になることが「なぜ炎上便が出たか」の機械の答えだ。
+    #   ★判定は**クローンから登録を外した写像**で行う(本番JSONを直読みしない)=
+    #     人事部門が登録しても外しても、この主張は本番の値に左右されない。
+    rr0 = _without_registration(rules, PERSONA)
+    base = _reasons(rr0, NG_JIMUTAI)
     if not base:
-        print("[PASS] T1 既定の柵(4文)では実物の事務体は0件=これが穴の正体"
+        print("[PASS] T1 登録が無い時=既定の柵(4文)では実物の事務体は0件=これが穴の正体"
               "(3文しか無く判定を飛ばす)")
     else:
         ok = False
-        print(f"[FAIL] T1 既定で既に鳴っている -> {base}(前提が変わった。設計を読み直せ)")
+        print(f"[FAIL] T1 登録が無くても鳴っている -> {base}(前提が変わった。設計を読み直せ)")
 
     # --- T2 直し(min_sentences=3)= 実物が**捕まる** -----------------------------
     rr3 = _with_min_sentences(rules, PERSONA, 3)
@@ -140,16 +157,24 @@ def _run():
         ok = False
         print("[FAIL] T6 既定の挙動が変わっている(他の呼び出し元へ波及する)")
 
-    # --- T7 本番の写像は今どうなっているか(★合否には入れない・状態の表示) ------
+    # --- T7 本番の写像で実際に効いているか -------------------------------------
     #   登録は人事部門の手番(口調ルール.json は人事の正本・ORG-11)。ここで勝手に足さない。
+    #   ★条件付きの検査= **登録が在る間だけ**効きを守る。人事が外した時に赤くしない
+    #     (人事の裁量を機械で縛らない・fail-open)。未登録なら表示だけで合否に入れない。
     live = _persona_entry(rules, PERSONA) or {}
     if live.get("min_sentences") and live.get("plain_only"):
         live_hit = _reasons(rules, NG_JIMUTAI)
-        print(f"[本番] {PERSONA} は登録済(min_sentences={live.get('min_sentences')} / "
-              f"plain_only={live.get('plain_only')})→ 実物の判定 {live_hit}")
+        if "structural_polite" in live_hit and "signature_absent" in live_hit:
+            print(f"[PASS] T7 本番の写像で効いている= {PERSONA} 登録済"
+                  f"(min_sentences={live.get('min_sentences')} / "
+                  f"plain_only={live.get('plain_only')})→ 実物の判定 {live_hit}")
+        else:
+            ok = False
+            print(f"[FAIL] T7 {PERSONA} は登録されているのに実物を捕まえない -> {live_hit}"
+                  "(登録が効いていない=機構側を疑え)")
     else:
-        print(f"[未登録] {PERSONA} の写像に min_sentences / plain_only がまだ無い="
-              "**本番ではこの便はまだ素通しする**。登録は人事部門(hr-room)の手番。"
+        print(f"[未登録] {PERSONA} の写像に min_sentences / plain_only が無い="
+              "**本番ではこの便は素通しする**。登録は人事部門(hr-room)の手番。"
               "機構側(このファイルが固定した分)は入っている。")
 
     print("=== 全PASS ===" if ok else "=== FAIL あり ===")
