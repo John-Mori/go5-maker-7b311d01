@@ -2285,7 +2285,24 @@ def _boot_prompt(dept, conf, generation, handoff_path=None, handoff_failed=False
             "★`[名前]` の行そのものは自動で取り除かれるので、本文に名乗りを二重に書かなくてよい。")
     else:
         lines.append(f"人格の正本= {conf.get('character','')} を読んで、その人格を守れ。")
-    if conf.get("conversation_only"):
+    if conf.get("conversation_only") and conf.get("may_dispatch_work"):
+        # ★★2026-09-18 軍議(gunji)だけ= 受けは会話専用のまま、**送り口だけ開ける**
+        #   (Chami直令 msg 1550505360882671672「軍議なのにそんな縛りいらないだろ。撒けるように
+        #    変更してくれ」+ msg 1550514939008131093 / 軍議上申 msg 1550516404975833262)。
+        #   ★ここを分けた理由= boot_note に「撒け」と書いても、この関数が同じ起動文の中で
+        #     「他所へ投げるな」を出していたら**1通の中で矛盾**する。指示が割れると従われない。
+        #     正本のフラグ= dept_daemon.DEPT_CONF[dept]["may_dispatch_work"]。
+        #   ★受け側(dept_daemon の is_conversation_only → kw_work=False)は触っていない=
+        #     この部屋へ来た便で自室の実装が始まることは無い。開けたのは出口だけだ。
+        lines.append(
+            "この部屋で**自分の手を動かして実装するな**。手を動かすのは各部門が自室でやる。"
+            "議論と共有はこの場で答え切ること。"
+            "**ただし分担が決まった実依頼は、この場から撒いてよい**"
+            "(python scripts/llm/dispatch.py --dept <部門> --from-dept " + str(dept)
+            + " --from \"<あなたの名前>\" --work \"<一行サマリ>\" --body-file <本文.md>)。"
+            "『持ち帰る』の口約束で終わらせるな=便にしないと誰も動かない。"
+            "分からない点は『ここまでは確か / ここから先は未確認』と切り分けて正直に示せ。")
+    elif conf.get("conversation_only"):
         # 会話専用の質問部屋(learning-coach / llm-qa)= パイロットの文面のまま変えない。
         lines.append(
             "この部屋では**回送しない**。他所へ投げず、その場で答え切ること。"

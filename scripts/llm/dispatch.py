@@ -121,6 +121,23 @@ except Exception:                       # ★読めない時も配達を殺さ�
         return NAMED_HEAD.get(dept)
 
 
+# ★★2026-09-18 3階梯ガードの免除を持つ部屋(=**軍議だけ**)。
+#   起点= Chami直令 msg 1550505360882671672「軍議なのにそんな縛りいらないだろ。撒けるように
+#   変更してくれ」+ msg 1550514939008131093「任せたGo」/ 軍議(モドリッチ)上申 msg 1550516404975833262。
+#   ★なぜ軍議だけ免除してよいか= 3階梯(§6.4)が防ぎたいのは「部門長を飛び越して下へ直接投げる」
+#     ことだ。軍議は**部門長が同席して分担を決める場**だから、そこで決まった依頼は飛び級ではない。
+#     一方 head_of("軍議") は誰でもないので、今の実装だと軍議発の便は**全宛先が blocked** になる。
+#   ★効く条件は2つ**とも**要る= ①from_dept がこの集合 ②`--work` に実質値が在る(=実依頼)。
+#     会話便(--work 無し)には効かせない= 雑談の勢いで飛び級が起きないようにするため。
+#   ★`--direct` とは**別物**(C-084)。--direct が持つ毎時上限の迂回はこちらには無い=
+#     免除するのは3階梯チェック1つだけ。上限も呼称ゲートも従来どおり通る。
+#   ★正本= dept_daemon.DEPT_CONF["gunji"]["may_dispatch_work"]。ここはその写し=
+#     **両方に書かないと片肺**(NAMED_HEAD が12日間片肺だった前例が上に在る)。
+#     ズレは tests/test_dept_daemon_classify.py が鳴らす(DEPT_CONF側と突き合わせる)。
+#   ★戻し方= この集合を空にする(空なら免除は一切起きない=従来と1バイト差なし)。
+WORK_DISPATCH_EXEMPT_DEPTS = {"gunji"}
+
+
 ORG_REGISTRY = r"D:\SougouStartFolder\00_AI-HQ\org_registry.yml"
 
 
@@ -884,7 +901,17 @@ def main():
         log_broadcast(a.broadcast.strip(), depts, a.sender, a.dry_run)
 
     # ★3階梯チェック(RULES §6.4「飛び級しない」)
-    if not a.direct:
+    # ★★2026-09-18 軍議の実依頼だけ免除(WORK_DISPATCH_EXEMPT_DEPTS の注記が理由の正本)。
+    #   **2条件のAND**= 差出人が軍議 かつ --work に実質値が在る(=実依頼)。
+    #   会話便(--work 空)は免除しない=従来どおりガードが効く。
+    #   ★`--direct` と or で並べるが**別物**だ= --direct は他所(毎時上限)でも効く逃げ道、
+    #     こちらは3階梯チェック1つだけを外す。ここで混ぜて書いていない(C-084 据え置き)。
+    _gunji_work_exempt = (a.from_dept in WORK_DISPATCH_EXEMPT_DEPTS
+                          and is_work_request(a.work))
+    if _gunji_work_exempt:
+        print(f"  (3階梯チェックを免除: 差出人={a.from_dept} の実依頼"
+              "=部門長同席で分担が決まった場からの発注。毎時上限・呼称ゲートは通常どおり通す)")
+    if not a.direct and not _gunji_work_exempt:
         blocked = {}
         for d in depts:
             h = head_of(d)

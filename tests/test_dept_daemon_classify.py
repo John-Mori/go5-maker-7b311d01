@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", "scripts", "llm"))
 import dept_daemon as D  # noqa: E402
 import session_relay as _R  # noqa: E402  ★relay_model / 起動文の回帰に使う(2026-07-26)
+import dispatch as _DSP  # noqa: E402  ★2026-09-18 3階梯免除の片肺検査に使う(may_dispatch_work)
 
 # 人格の原典(persona_context)の置き場。member_call の既定と同じ1正本を指す。
 _CTX = os.path.join(D.ROOT, "local", "persona_context")
@@ -178,7 +179,15 @@ WORK_ROOMS = sorted([  # A= work_scope を持つ部屋。増減はどちらも�
     #                    (ルーム2の返信がルーム1へ出る)解消のため dept として分離したもの。
     #                    元の learning-coach と**同じ部屋の複製**なので設定も同形。
     "learning-coach-2",
-    "llm-edu", "platform-se", "product-scout", "qa-reviewer", "research-room",
+    "llm-edu",
+    # ★2026-09-18(イージス研究室)manga-shorts を B(conversation_only)から A へ**差し替え**た。
+    #   これは追従漏れの補修ではなく**権限の付与**= 期待値を人が変える手番そのもの。
+    #   起点= Chami直令 msg 1550505360882671672 +1550514939008131093 / 軍議上申 msg 1550516404975833262。
+    #   ★下の「共存は learning-coach のみ」へは足さない= conversation_only を**外して**Aへ移した
+    #     (同居させても conversation_only が先に評価されて閉じたままになる=形だけAになる)。
+    #   範囲= ②変換型の台本・カット案まで。最終素材化と .ymmp 仕上げはChamiの手元。
+    "manga-shorts",
+    "platform-se", "product-scout", "qa-reviewer", "research-room",
     "shorts-analyst",
     #   someday-room 2026-09-02 commit 6f8af66(Chami直接指示 msg 1544463960810725416)。
     #                work_scope の範囲は**調査と台帳追記まで**(実装はしない)。
@@ -228,6 +237,24 @@ eq(sorted(k for k, v in D.DEPT_CONF.items()
           if v.get("work_scope") and v.get("conversation_only")),
    ["learning-coach", "learning-coach-2"],
    "work_scopeと conversation_only の同居は learning-coach のみ(他は設定の取り違え)")
+# ★★2026-09-18 送り口だけ開いた部屋(may_dispatch_work)= **軍議だけ**。
+#   意味= 受けは conversation_only のまま(この部屋へ来た便で自室の実装は始まらない)、
+#   ただし分担が決まった実依頼を dispatch.py --work で撒くことは許す。
+#   起点= Chami直令 msg 1550505360882671672 + msg 1550514939008131093 / 上申 msg 1550516404975833262。
+#   ★増やす時は必ずここへ登録する= これは**3階梯ガード(§6.4)の免除**だ。黙って増えると
+#     「飛び級しない」が静かに形骸化する(常に誤発火する安全網は無視される=ORG-42の教訓の裏)。
+MAY_DISPATCH_ROOMS = ["gunji"]
+eq(sorted(k for k, v in D.DEPT_CONF.items() if v.get("may_dispatch_work")), MAY_DISPATCH_ROOMS,
+   "★3階梯免除を持つ部屋の登録簿(増減=期待値の変更。人が登録する)")
+# ★may_dispatch_work は conversation_only とセットの鍵= 受けを開けるものではない。
+for _n in MAY_DISPATCH_ROOMS:
+    if not D.DEPT_CONF.get(_n, {}).get("conversation_only"):
+        fails.append(f"{_n}: may_dispatch_work を持つのに conversation_only が無い"
+                     "(受け側の安全網まで開いている=送り口だけ開ける設計の逸脱)")
+# ★片肺検査= 正本(DEPT_CONF)と写し(dispatch.WORK_DISPATCH_EXEMPT_DEPTS)の一致。
+#   NAMED_HEAD が12日間片肺だった前例(dispatch.py 冒頭の注記)と同じ事故を起こさないため。
+eq(sorted(getattr(_DSP, "WORK_DISPATCH_EXEMPT_DEPTS", set())), MAY_DISPATCH_ROOMS,
+   "★dispatch.WORK_DISPATCH_EXEMPT_DEPTS が DEPT_CONF の may_dispatch_work と一致(片肺防止)")
 # forward_all 持ちは main箱を読む対話セッションが居る部屋=上の relay 検査で固定済み。
 for name, conf in D.DEPT_CONF.items():
     if name not in relay and not conf.get("work_scope") and not conf.get("conversation_only") \
