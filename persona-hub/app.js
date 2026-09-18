@@ -2,9 +2,9 @@
  * persona-hub/app.js — 人格設定 一覧ビューアの配線。
  *
  * データは data.js(window.PERSONA_HUB_DATA・正本の派生物)優先、無ければ local/persona_settings_index.json
- * を fetch。★正本(persona_avatars.json / R2)へは書かない=差分の追加/削除は「手元(localStorage)だけ」の
- * スクラッチパッド。Chamiが変更メモを人事部門へ伝え、人事部門が正本へ反映する運用(静的ページの制約)。
- * 既存本体ファイル(index.html/app.js/GAS/Worker)には一切依存しない新規追加ページ。
+ * を fetch。画像追加は go5-sync Worker を通してR2へ完成画像・元画像・編集レシピを保存し、
+ * PC側の取り込み常駐が正本(persona_avatars.json)へ確定する。登録直後はlocalStorageのpendingを
+ * 派生データへ重ね、GitHub Pagesの再生成を待たずに同じ画面へ表示する。
  * core/util.js の esc は既存のまま流用(読むだけ・改変なし)。copyText は失敗を握り潰して成功に
  * 見えるため使わない=ページ内 copyTextChecked(成否Promise+フォールバック)で置き換え。
  */
@@ -54,11 +54,12 @@
   // ★トークンはページに埋めない=Chamiがこの端末のlocalStorageへ1回だけ入れる(埋めると誰でも書けてしまう・デブライネ制約)。
   var SYNC_BASE = "https://go5-sync.trustsignalbot.workers.dev";
   var TOKEN_KEY = "go5_sync_token_v1";
+  var PENDING_KEY = "persona_hub_pending_avatars_v2";
 
   // 折り畳みの開閉状態(この端末だけ・見た目の好み)。既定=全開。閉じたsectionのタイトルだけ覚える。
   var COLLAPSE_KEY = "persona_hub_collapsed_v1";
 
-  var state = { personas: {}, names: [], filtered: [], selected: null };
+  var state = { personas: {}, names: [], filtered: [], selected: null, pending: [] };
   var els = {};
 
   document.addEventListener("DOMContentLoaded", init);
@@ -74,6 +75,35 @@
     var s = String(url || "").split("?")[0];
     var seg = s.split("/").pop() || s;
     return seg.slice(-6) || seg;
+  }
+  function imageKey(url) {
+    var s = String(url || "").split("?")[0];
+    var seg = s.split("/").pop() || "";
+    return /^[a-f0-9]{64}$/.test(seg) ? seg : "";
+  }
+  function loadPending() {
+    try {
+      var v = JSON.parse(localStorage.getItem(PENDING_KEY) || "[]");
+      return Array.isArray(v) ? v : [];
+    } catch (e) { return []; }
+  }
+  function savePending() {
+    try { localStorage.setItem(PENDING_KEY, JSON.stringify(state.pending || [])); } catch (e) {}
+  }
+  function mergePendingAvatars() {
+    var kept = [];
+    (state.pending || []).forEach(function (rec) {
+      var e = state.personas[rec.persona];
+      if (!e) return;
+      var icon = e.アイコン || (e.アイコン = {});
+      var urls = normalizeUrls(icon.url);
+      if (urls.indexOf(rec.url) >= 0) return; // data.js 側へ着地済み
+      urls.push(rec.url);
+      icon.url = urls;
+      kept.push(rec);
+    });
+    state.pending = kept;
+    savePending();
   }
   function init() {
     els.list = document.getElementById("personaList");
@@ -102,6 +132,8 @@
   function onData(json) {
     state.personas = (json && json.personas) || {};
     state.meta = (json && json._meta) || {};
+    state.pending = loadPending();
+    mergePendingAvatars();
     state.names = Object.keys(state.personas).sort(function (a, b) { return a.localeCompare(b, "ja"); });
     state.filtered = state.names.slice();
     renderList();
@@ -390,9 +422,16 @@
     var urls = normalizeUrls(icon && icon.url);
     var count = urls.length;
     var cells = urls.map(function (u, i) {
-      return '<div class="av-cell" data-url="' + esc(u) + '">' +
-        '<img class="avatar-thumb" src="' + esc(u) + '" alt="" loading="lazy">' +
+      var key = imageKey(u);
+      var pending = state.pending.some(function (p) { return p.persona === name && p.url === u; });
+      return '<div class="av-cell' + (pending ? ' is-pending' : '') + '" data-url="' + esc(u) + '">' +
+        '<div class="av-shape-pair" aria-label="Discord表示プレビュー">' +
+          '<img class="avatar-thumb av-square" src="' + esc(u) + '" alt="" loading="lazy">' +
+          '<img class="avatar-thumb av-circle" src="' + esc(u) + '" alt="" loading="lazy">' +
+        '</div>' +
         '<span class="av-label">#' + (i + 1) + ' <span class="av-id">' + esc(shortId(u)) + "</span></span>" +
+        (pending ? '<span class="av-pending-tag">即時表示・台帳反映待ち</span>' : '') +
+        '<button class="av-btn av-edit" type="button" data-act="edit" data-key="' + esc(key) + '" data-url="' + esc(u) + '">再編集</button>' +
       "</div>";
     });
     var body = cells.length ? cells.join("") : '<div class="section-empty">画像なし</div>';
@@ -406,7 +445,7 @@
             '<input type="file" class="av-file-up" accept="image/*" hidden>' +
           "</div>" +
           '<div class="av-upmsg" hidden></div>' +
-          '<p class="av-hint"><b>Discord添付は不要。</b>「直接アップロード」を押して画像を選ぶだけで正本へ入る(書き込みトークンはページ下部で1回だけ設定する=ページには埋め込まない)。取り込み常駐が動けば数十秒で台帳に反映される。<br>ネット越しが使えない時の別口=取り込みフォルダ <code>local/persona_inbox/&lt;キャラ名&gt;/</code> に置いて <code>scripts/hr/ingest_persona_images.py</code>。サムネはクリックで拡大できる。</p>' +
+          '<p class="av-hint"><b>登録直後からこの画面へ即時表示する。</b>左が保存される正方形、右がDiscordの丸表示だ。元画像もR2とPC側の保管庫へ残すため、「再編集」から後で微調整できる。台帳への確定は常駐処理後になる。</p>' +
         "</div>" +
       "</section>";
   }
@@ -422,6 +461,8 @@
         if (act === "upload") {
           if (!getSyncToken() && !setSyncToken()) { setUploadMsg("トークン未設定=中止した(ページ下部で1回だけ設定が要る)。", true); return; }
           var fu = sec.querySelector(".av-file-up"); if (fu) fu.click();
+        } else if (act === "edit") {
+          editRegisteredAvatar(name, btn.getAttribute("data-key"), btn.getAttribute("data-url"));
         }
       });
     });
@@ -432,8 +473,8 @@
   // ── 範囲トリミング(画像を編集)。追加/直接アップロードの前に、適用する矩形をChamiが厳密に選ぶ。
   //   スクショ準拠: 三分割グリッド+四隅ハンドルの切り抜き枠、左右回転(90度)、リセット、キャンセル/適用。
   //   done(null)=キャンセル、done({dataUrl,file,blob})=適用。正本には触れない(結果を既存の追加/送信経路へ渡すだけ)。
-  var OUT_MAX = 512; // 出力の長辺上限(アイコン用途=これ以上は不要・localStorage肥大も防ぐ)
-  function openCropper(file, done) {
+  var OUT_SIZE = 512; // Discordへ渡す正方形の実体。表示時はDiscord側で丸くマスクされる。
+  function openCropper(file, done, initialEdit) {
     if (!file || !window.FileReader || !document.createElement("canvas").getContext) {
       done && done(null); return;
     }
@@ -447,8 +488,8 @@
     var rot = 0;               // 0/90/180/270
     var base = null;           // 回転適用後の作業キャンバス(切り抜きの元)
     var scale = 1;             // 表示px / base px
-    var crop = null;           // 表示px系の {x,y,w,h}(stage原点)
-    var overlay, stage, cv, frame, gridWrap;
+    var crop = null;           // 回転後の元画像px系 {x,y,size}。表示サイズが変わっても精度を失わない。
+    var overlay, dialog, stage, cv, frame, previewSquare, previewDiscord, zoomCtl, cropInfo;
     var MIN = 24;              // 枠の最小表示サイズ(px)
 
     function cleanup() {
@@ -475,61 +516,94 @@
     }
 
     function layout() {
-      // stageの実表示幅からscaleを決め、canvasを等倍表示する
-      var maxW = stage.clientWidth || 320;
-      scale = maxW / base.width;
+      // 横長・縦長のどちらでも全体を見失わない。cropは元画像pxなのでresizeしても維持される。
+      var maxW = Math.min(400, Math.max(220, (dialog.clientWidth || 420) - 28));
+      var maxH = Math.min(360, Math.max(220, window.innerHeight * 0.38));
+      scale = Math.min(maxW / base.width, maxH / base.height);
       var dispW = base.width * scale, dispH = base.height * scale;
       cv.width = base.width; cv.height = base.height;
       cv.style.width = dispW + "px"; cv.style.height = dispH + "px";
       cv.getContext("2d").drawImage(base, 0, 0);
+      stage.style.width = dispW + "px";
       stage.style.height = dispH + "px";
     }
     function defaultCrop() {
-      var dispW = base.width * scale, dispH = base.height * scale;
-      var s = Math.min(dispW, dispH) * 0.86;
-      crop = { x: (dispW - s) / 2, y: (dispH - s) / 2, w: s, h: s };
+      var s = Math.min(base.width, base.height) * 0.86;
+      crop = { x: (base.width - s) / 2, y: (base.height - s) / 2, size: s };
     }
     function drawFrame() {
-      frame.style.left = crop.x + "px";
-      frame.style.top = crop.y + "px";
-      frame.style.width = crop.w + "px";
-      frame.style.height = crop.h + "px";
+      frame.style.left = (crop.x * scale) + "px";
+      frame.style.top = (crop.y * scale) + "px";
+      frame.style.width = (crop.size * scale) + "px";
+      frame.style.height = (crop.size * scale) + "px";
+      drawPreview();
     }
     function clampCrop() {
-      var dispW = base.width * scale, dispH = base.height * scale;
-      if (crop.w < MIN) crop.w = MIN;
-      if (crop.h < MIN) crop.h = MIN;
-      if (crop.w > dispW) crop.w = dispW;
-      if (crop.h > dispH) crop.h = dispH;
+      var minBase = MIN / Math.max(scale, 0.0001);
+      if (crop.size < minBase) crop.size = minBase;
+      if (crop.size > base.width) crop.size = base.width;
+      if (crop.size > base.height) crop.size = base.height;
       if (crop.x < 0) crop.x = 0;
       if (crop.y < 0) crop.y = 0;
-      if (crop.x + crop.w > dispW) crop.x = dispW - crop.w;
-      if (crop.y + crop.h > dispH) crop.y = dispH - crop.h;
+      if (crop.x + crop.size > base.width) crop.x = base.width - crop.size;
+      if (crop.y + crop.size > base.height) crop.y = base.height - crop.size;
     }
-    function rerender() { layout(); defaultCrop(); clampCrop(); drawFrame(); }
+    function drawCrop(target) {
+      var g = target.getContext("2d");
+      g.clearRect(0, 0, target.width, target.height);
+      g.drawImage(base, crop.x, crop.y, crop.size, crop.size, 0, 0, target.width, target.height);
+    }
+    function drawPreview() {
+      if (!previewSquare || !crop) return;
+      drawCrop(previewSquare);
+      drawCrop(previewDiscord);
+      if (cropInfo) cropInfo.textContent = Math.round(crop.size) + " × " + Math.round(crop.size) + " px → 512 × 512 px";
+      if (zoomCtl) {
+        var max = Math.min(base.width, base.height);
+        zoomCtl.value = Math.max(100, Math.min(600, Math.round(max / crop.size * 100)));
+      }
+    }
+    function rerender() { layout(); if (!crop) defaultCrop(); clampCrop(); drawFrame(); }
+
+    function restoreInitialEdit() {
+      var e = initialEdit || {};
+      var c = e.crop || {};
+      if ([0, 90, 180, 270].indexOf(Number(e.rot)) >= 0) rot = Number(e.rot);
+      buildBase();
+      if (Number(c.size) > 0 && Number.isFinite(Number(c.x)) && Number.isFinite(Number(c.y))) {
+        crop = { x: Number(c.x), y: Number(c.y), size: Number(c.size) };
+      }
+    }
 
     function apply() {
-      var sx = Math.round(crop.x / scale), sy = Math.round(crop.y / scale);
-      var sw = Math.round(crop.w / scale), sh = Math.round(crop.h / scale);
-      sw = Math.max(1, Math.min(sw, base.width - sx));
-      sh = Math.max(1, Math.min(sh, base.height - sy));
-      var ow = sw, oh = sh, long = Math.max(sw, sh);
-      if (long > OUT_MAX) { var k = OUT_MAX / long; ow = Math.round(sw * k); oh = Math.round(sh * k); }
+      var sx = Math.round(crop.x), sy = Math.round(crop.y), size = Math.round(crop.size);
+      size = Math.max(1, Math.min(size, base.width - sx, base.height - sy));
       var out = document.createElement("canvas");
-      out.width = ow; out.height = oh;
-      out.getContext("2d").drawImage(base, sx, sy, sw, sh, 0, 0, ow, oh);
-      var hasAlpha = /png|webp|gif/i.test(file.type || "");
-      var mime = hasAlpha ? "image/png" : "image/jpeg";
-      var dataUrl = out.toDataURL(mime, 0.92);
+      out.width = OUT_SIZE; out.height = OUT_SIZE;
+      out.getContext("2d").drawImage(base, sx, sy, size, size, 0, 0, OUT_SIZE, OUT_SIZE);
+      var mime = "image/png";
+      var dataUrl = out.toDataURL(mime);
       var baseName = (file.name || "icon").replace(/\.[^.]+$/, "");
-      var outName = baseName + (hasAlpha ? ".png" : ".jpg");
+      var outName = baseName + "_discord.png";
       function finish(blob) {
         var f = blob;
         try { f = new File([blob], outName, { type: mime }); } catch (e) { try { blob.name = outName; } catch (e2) {} }
         cleanup();
-        done && done({ dataUrl: dataUrl, file: f, blob: blob });
+        done && done({
+          dataUrl: dataUrl,
+          file: f,
+          blob: blob,
+          sourceFile: file,
+          edit: {
+            version: 1,
+            rot: rot,
+            crop: { x: crop.x, y: crop.y, size: crop.size },
+            source: { width: img.naturalWidth, height: img.naturalHeight },
+            outputSize: OUT_SIZE
+          }
+        });
       }
-      if (out.toBlob) out.toBlob(function (b) { finish(b || dataUrlToBlob(dataUrl, mime)); }, mime, 0.92);
+      if (out.toBlob) out.toBlob(function (b) { finish(b || dataUrlToBlob(dataUrl, mime)); }, mime);
       else finish(dataUrlToBlob(dataUrl, mime));
     }
 
@@ -539,7 +613,7 @@
       overlay.className = "cropper-overlay";
       overlay.innerHTML =
         '<div class="cropper-dialog" role="dialog" aria-label="画像を編集">' +
-          '<div class="cropper-title">画像を編集</div>' +
+          '<div class="cropper-title">Discordアイコンを調整 <span>正方形固定</span></div>' +
           '<div class="cropper-stage"><canvas class="cropper-cv"></canvas>' +
             '<div class="cropper-frame">' +
               '<div class="cropper-grid"></div>' +
@@ -547,6 +621,18 @@
               '<span class="cropper-h cropper-h-ne" data-h="ne"></span>' +
               '<span class="cropper-h cropper-h-sw" data-h="sw"></span>' +
               '<span class="cropper-h cropper-h-se" data-h="se"></span>' +
+            '</div>' +
+          '</div>' +
+          '<div class="cropper-zoom-row"><label>拡大</label><input class="cropper-zoom" type="range" min="100" max="600" step="1" value="100"><span class="cropper-crop-info"></span></div>' +
+          '<div class="cropper-nudge" aria-label="位置を微調整">' +
+            '<span>1px微調整</span><button type="button" data-nudge="up">↑</button>' +
+            '<button type="button" data-nudge="left">←</button><button type="button" data-nudge="down">↓</button>' +
+            '<button type="button" data-nudge="right">→</button>' +
+          '</div>' +
+          '<div class="discord-preview-wrap">' +
+            '<div class="cropper-square-preview"><span>保存画像(正方形)</span><canvas width="128" height="128"></canvas></div>' +
+            '<div class="discord-message-preview"><canvas width="80" height="80"></canvas>' +
+              '<div><b>' + esc(state.selected || "Character") + '</b><small>今日 16:26</small><p>Discordではこの丸い範囲で表示される。</p></div>' +
             '</div>' +
           '</div>' +
           '<div class="cropper-bar">' +
@@ -558,11 +644,16 @@
           '</div>' +
         '</div>';
       document.body.appendChild(overlay);
+      dialog = overlay.querySelector(".cropper-dialog");
       stage = overlay.querySelector(".cropper-stage");
       cv = overlay.querySelector(".cropper-cv");
       frame = overlay.querySelector(".cropper-frame");
-      gridWrap = overlay.querySelector(".cropper-grid");
+      previewSquare = overlay.querySelector(".cropper-square-preview canvas");
+      previewDiscord = overlay.querySelector(".discord-message-preview canvas");
+      zoomCtl = overlay.querySelector(".cropper-zoom");
+      cropInfo = overlay.querySelector(".cropper-crop-info");
 
+      if (initialEdit) restoreInitialEdit();
       rerender();
       window.addEventListener("resize", rerender);
       document.addEventListener("keydown", onKey, true);
@@ -573,9 +664,27 @@
         var c = b.getAttribute("data-c");
         if (c === "cancel") { window.removeEventListener("resize", rerender); cleanup(); done && done(null); }
         else if (c === "apply") { window.removeEventListener("resize", rerender); apply(); }
-        else if (c === "reset") { rot = 0; buildBase(); rerender(); }
-        else if (c === "rleft") { rot = (rot + 270) % 360; buildBase(); rerender(); }
-        else if (c === "rright") { rot = (rot + 90) % 360; buildBase(); rerender(); }
+        else if (c === "reset") { rot = 0; buildBase(); crop = null; rerender(); }
+        else if (c === "rleft") { rot = (rot + 270) % 360; buildBase(); crop = null; rerender(); }
+        else if (c === "rright") { rot = (rot + 90) % 360; buildBase(); crop = null; rerender(); }
+      });
+
+      zoomCtl.addEventListener("input", function () {
+        var centerX = crop.x + crop.size / 2, centerY = crop.y + crop.size / 2;
+        crop.size = Math.min(base.width, base.height) / (Number(zoomCtl.value) / 100);
+        crop.x = centerX - crop.size / 2; crop.y = centerY - crop.size / 2;
+        clampCrop(); drawFrame();
+      });
+      overlay.addEventListener("click", function (e) {
+        var b = e.target.closest ? e.target.closest("[data-nudge]") : null;
+        if (!b) return;
+        var step = Math.max(1, Math.round(crop.size / OUT_SIZE));
+        var d = b.getAttribute("data-nudge");
+        if (d === "up") crop.y -= step;
+        else if (d === "down") crop.y += step;
+        else if (d === "left") crop.x -= step;
+        else if (d === "right") crop.x += step;
+        clampCrop(); drawFrame();
       });
 
       wireFrame();
@@ -585,11 +694,11 @@
       var drag = null; // {mode:'move'|'nw'|'ne'|'sw'|'se', px,py, start:{...}}
       function pt(e) {
         var r = stage.getBoundingClientRect();
-        return { x: e.clientX - r.left, y: e.clientY - r.top };
+        return { x: (e.clientX - r.left) / scale, y: (e.clientY - r.top) / scale };
       }
       function start(e, mode) {
         e.preventDefault();
-        drag = { mode: mode, p: pt(e), start: { x: crop.x, y: crop.y, w: crop.w, h: crop.h } };
+        drag = { mode: mode, p: pt(e), start: { x: crop.x, y: crop.y, size: crop.size } };
         try { e.target.setPointerCapture && e.target.setPointerCapture(e.pointerId); } catch (err) {}
       }
       function move(e) {
@@ -597,13 +706,21 @@
         var p = pt(e), dx = p.x - drag.p.x, dy = p.y - drag.p.y, s = drag.start;
         if (drag.mode === "move") { crop.x = s.x + dx; crop.y = s.y + dy; }
         else {
-          var x1 = s.x, y1 = s.y, x2 = s.x + s.w, y2 = s.y + s.h;
-          if (drag.mode === "nw") { x1 = s.x + dx; y1 = s.y + dy; }
-          else if (drag.mode === "ne") { x2 = s.x + s.w + dx; y1 = s.y + dy; }
-          else if (drag.mode === "sw") { x1 = s.x + dx; y2 = s.y + s.h + dy; }
-          else if (drag.mode === "se") { x2 = s.x + s.w + dx; y2 = s.y + s.h + dy; }
-          crop.x = Math.min(x1, x2); crop.y = Math.min(y1, y2);
-          crop.w = Math.abs(x2 - x1); crop.h = Math.abs(y2 - y1);
+          var size;
+          if (drag.mode === "nw") {
+            size = Math.min(s.x + s.size - p.x, s.y + s.size - p.y);
+            crop.x = s.x + s.size - size; crop.y = s.y + s.size - size;
+          } else if (drag.mode === "ne") {
+            size = Math.min(p.x - s.x, s.y + s.size - p.y);
+            crop.x = s.x; crop.y = s.y + s.size - size;
+          } else if (drag.mode === "sw") {
+            size = Math.min(s.x + s.size - p.x, p.y - s.y);
+            crop.x = s.x + s.size - size; crop.y = s.y;
+          } else {
+            size = Math.min(p.x - s.x, p.y - s.y);
+            crop.x = s.x; crop.y = s.y;
+          }
+          crop.size = size;
         }
         clampCrop(); drawFrame();
       }
@@ -663,41 +780,113 @@
   }
   function directUpload(name, file) {
     if (!file) return;
-    // ★正本へ送る前に範囲トリミング(Chami msg1546525688914251846)。切り出した矩形だけをアップロードする。
+    // 元画像はそのまま保持し、正方形の完成画像と編集レシピを別に登録する。
     openCropper(file, function (res) {
       if (!res) { setUploadMsg("トリミングを取り消した=送信しなかった。", false); return; }
-      uploadBlob(name, res.file);
+      uploadAvatar(name, res);
     });
   }
-  function uploadBlob(name, file) {
-    if (!file) return;
+
+  function fileFromBlob(blob, name) {
+    try { return new File([blob], name, { type: blob.type || "application/octet-stream" }); }
+    catch (e) { try { blob.name = name; } catch (e2) {} return blob; }
+  }
+
+  function fetchEditMeta(key, token) {
+    if (!key) return Promise.resolve(null);
+    return fetch(SYNC_BASE + "/api/persona/edit/" + encodeURIComponent(key), {
+      cache: "no-store", headers: { "X-Sync-Token": token }
+    }).then(function (r) {
+      if (r.status === 404) return null;
+      if (!r.ok) throw new Error("編集情報の取得失敗 HTTP " + r.status);
+      return r.json();
+    });
+  }
+
+  function editRegisteredAvatar(name, key, currentUrl) {
     var token = getSyncToken();
-    if (!token) { if (!setSyncToken()) { setUploadMsg("トークン未設定=中止した。", true); return; } token = getSyncToken(); }
-    setUploadMsg("アップロード中… " + (file.name || "image"), false);
-    file.arrayBuffer().then(function (buf) {
+    if (!token) { if (!setSyncToken()) { setUploadMsg("再編集にはトークン設定が要る。", true); return; } token = getSyncToken(); }
+    setUploadMsg("元画像と編集情報を読み込み中…", false);
+    fetchEditMeta(key, token).then(function (meta) {
+      var sourceKey = meta && meta.sourceKey;
+      var sourceUrl = sourceKey ? (SYNC_BASE + "/img/" + sourceKey) : currentUrl;
+      return fetch(sourceUrl, { cache: "no-store" }).then(function (r) {
+        if (!r.ok) throw new Error("元画像の取得失敗 HTTP " + r.status);
+        return r.blob();
+      }).then(function (blob) {
+        var ext = /jpeg/.test(blob.type) ? ".jpg" : (/webp/.test(blob.type) ? ".webp" : ".png");
+        var src = fileFromBlob(blob, (sourceKey || key || "avatar") + ext);
+        openCropper(src, function (res) {
+          if (!res) { setUploadMsg("再編集を取り消した。", false); return; }
+          uploadAvatar(name, res);
+        }, meta && meta.edit);
+      });
+    }).catch(function (err) {
+      setUploadMsg("再編集を開始できない: " + String((err && err.message) || err), true);
+    });
+  }
+
+  function putImageFile(file, token) {
+    return file.arrayBuffer().then(function (buf) {
       return sha256hex(buf).then(function (sha) {
-        // ★画像PUTが先(でないと enqueue が key_not_uploaded=409 で弾かれる)。
         return fetch(SYNC_BASE + "/api/img/" + sha, {
           method: "PUT",
           headers: { "X-Sync-Token": token, "Content-Type": file.type || "application/octet-stream" },
           body: buf
         }).then(function (r) {
           if (!r.ok) throw new Error("画像PUT失敗 HTTP " + r.status);
-          return fetch(SYNC_BASE + "/api/persona/enqueue", {
-            method: "POST",
-            headers: { "X-Sync-Token": token, "Content-Type": "application/json" },
-            body: JSON.stringify({ persona: name, key: sha, ct: file.type || "" })
-          });
+          return { key: sha, ct: file.type || "application/octet-stream" };
+        });
+      });
+    });
+  }
+
+  function rememberPending(name, key, sourceKey, sourceCt, edit) {
+    var url = SYNC_BASE + "/img/" + key;
+    state.pending = (state.pending || []).filter(function (p) { return !(p.persona === name && p.key === key); });
+    state.pending.push({ persona: name, key: key, url: url, sourceKey: sourceKey, sourceCt: sourceCt, edit: edit, at: new Date().toISOString() });
+    savePending();
+    var e = state.personas[name];
+    if (e) {
+      var icon = e.アイコン || (e.アイコン = {});
+      var urls = normalizeUrls(icon.url);
+      if (urls.indexOf(url) < 0) urls.push(url);
+      icon.url = urls;
+    }
+    renderList();
+    renderDetail(name);
+    return url;
+  }
+
+  function uploadAvatar(name, result) {
+    if (!result || !result.file || !result.sourceFile) return;
+    var token = getSyncToken();
+    if (!token) { if (!setSyncToken()) { setUploadMsg("トークン未設定=中止した。", true); return; } token = getSyncToken(); }
+    setUploadMsg("完成画像・元画像・編集情報を保存中…", false);
+    Promise.all([putImageFile(result.file, token), putImageFile(result.sourceFile, token)])
+      .then(function (saved) {
+        var output = saved[0], source = saved[1];
+        return fetch(SYNC_BASE + "/api/persona/enqueue", {
+          method: "POST",
+          headers: { "X-Sync-Token": token, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            persona: name,
+            key: output.key,
+            ct: output.ct,
+            sourceKey: source.key,
+            sourceCt: source.ct,
+            edit: result.edit || null
+          })
         }).then(function (r2) {
           return r2.json().catch(function () { return {}; }).then(function (j) {
             if (!r2.ok || !j.ok) throw new Error("投函失敗 HTTP " + r2.status + (j && j.error ? " " + j.error : ""));
-            var id = sha.slice(-6);
-            if (j.deduped) setUploadMsg("既に登録済みの画像だった(重複スキップ)。id …" + id, false);
-            else setUploadMsg("投函できた(確認待ち)。取り込み常駐が動けば数十秒で台帳に反映される。id …" + id + (j.line ? " / 行" + j.line : ""), false);
+            var id = output.key.slice(-6);
+            rememberPending(name, output.key, source.key, source.ct, result.edit || null);
+            if (j.deduped) setUploadMsg("登録済みの画像を画面へ反映した。元画像から再編集できる。id …" + id, false);
+            else setUploadMsg("登録を受け付け、画面へ即時反映した。台帳確定は常駐処理中だ。id …" + id + (j.line ? " / 行" + j.line : ""), false);
           });
         });
-      });
-    }).catch(function (err) {
+      }).catch(function (err) {
       setUploadMsg("失敗: " + String((err && err.message) || err) + "(トークン誤り/常駐未起動/通信不可の可能性)。", true);
     });
   }
