@@ -1313,42 +1313,156 @@ def _bump_relay_turn(dept):
         return 0
 
 
-def _voice_core(path, max_lines=5, max_chars=180):
+# ★★2026-09-19 改悪の真因側(発注= 人事部門ククール回送
+#   ESC-hr-room-DISPATCH-hr-room-1789776794119 / 壊れた実物= 軍議 msg 1550654993458135084
+#   三笘薫「チャミ、進めた。」+二人称「お前」。前は動いていた実物= msg 1550253034125135914)。
+#   0歩目(壊れている実物): 07:57:42 の封筒には声の芯が**載っていた**。にもかかわらず壊れた。
+#     載っていた文字列がこれだ=
+#       「呼称=**Chami**(綴りは★**半角ローマ字…に落ちない**〔…〕・★**二人称は「君」=「お前」と…」
+#     ★**禁止の語が切り落とされていた**。残る断片は「「お前」と…」で、読みようによっては
+#       「お前と呼ぶ」にすら見える。下の素朴な `s[:max_chars]` がやっていたことだ。
+#   ★なぜ切れたか(構造)= 人事は**既存の1行の末尾へピンを追記する**運用だ
+#     (2026-09-09「お前」・2026-09-19「カタカナに落ちない」。2026-09-03版の同じ行は
+#      180字に収まっていて切れていない=実測で確認した)。行は伸びる一方なので、
+#     **後から足したピンほど先に落ちる**= 人格を磨くほど効かなくなる。
+#   → ①証跡(日付・msg番号・C番号)は規律そのものではないので抜粋から外す
+#     ②切る時は断片の境界で切る(禁止を半端に切らない)
+#     ③呼称/呼び方/二人称の行は声の芯5行とは**別枠**で持つ(他の行に押し出されない)。
+#   ★ここは正本の**写し**ではなく毎回の**機械抽出**だ(C-003の二重正本にはならない)。
+_PIN_MARKERS = ("呼称", "呼び方", "二人称", "綴り")
+_FRAG_SEPS = ("★", "・", " / ", "。")
+# 証跡= 括弧の中に日付 or msg番号 or C-番号が入っている区間。規律ではなく「なぜそう決めたか」。
+_EVID_SPAN = re.compile(
+    r"[〔((][^〔()())]{0,240}?(?:\d{4}-\d{2}-\d{2}|msg\s*\d{8,}|C-\d{3})"
+    r"[^〔()())]{0,240}?[〕))]")
+
+
+def _strip_evidence(s):
+    """行から証跡の括弧だけを落とす(入れ子があるので変化が止まるまで回す)。"""
+    prev = None
+    while prev != s:
+        prev = s
+        s = _EVID_SPAN.sub("", s)
+    return re.sub(r"[ 　]{2,}", " ", s).replace("()", "").replace("()", "").strip()
+
+
+def _fit_frag(s, cap):
+    """長い行を縮める。★**文字数で切らず、断片の境目で切る**(禁止を半端に切らない)。
+
+    どの境目でも切れない時だけ従来どおり文字数で切る(その時も「…」を付ける)。
+    """
+    if len(s) <= cap:
+        return s
+    head = s[:cap]
+    for sep in _FRAG_SEPS:
+        if sep in head:
+            cut = head.rsplit(sep, 1)[0].rstrip(" 　・/★")
+            if len(cut) >= cap // 3:          # 短くなりすぎる切り方はしない
+                return cut + "…"
+    return head + "…"
+
+
+def _voice_core(path, max_lines=5, max_chars=180, max_pins=2, pin_chars=280):
     """characterfileから「声の芯」の行だけを抜く(見出しでなく**行の中身**で拾う)。
 
     ★全文を積まない= 一人称・口調・呼び方・芯の行だけ。読めなければ ""(=再注入しない)。
+    ★呼称ピン(誰を何と呼ぶか・二人称)は `max_pins` 行を**別枠**で先頭へ置く。
+      理由は上のブロック= 5行枠を他の行と奪い合わせると、追記されたピンから先に消える。
     """
     try:
         with open(path, encoding="utf-8") as f:
             raw = f.read()
     except Exception:
         return ""
-    out = []
+    pins, voice = [], []
     for ln in raw.splitlines():
         s = ln.strip()
         if not s.startswith("-") and not s.startswith("★"):
             continue
-        if not any(m in s for m in _VOICE_MARKERS):
+        is_pin = any(m in s for m in _PIN_MARKERS)
+        if not is_pin and not any(m in s for m in _VOICE_MARKERS):
             continue
-        s = s.lstrip("- ").strip()
-        if len(s) > max_chars:
-            s = s[:max_chars] + "…"
-        out.append("  - " + s)
-        if len(out) >= max_lines:
+        s = _strip_evidence(s.lstrip("- ").strip())
+        if not s:
+            continue
+        if is_pin:
+            if len(pins) < max_pins:
+                pins.append("  - " + _fit_frag(s, pin_chars))
+        elif len(voice) < max_lines:
+            voice.append("  - " + _fit_frag(s, max_chars))
+        if len(pins) >= max_pins and len(voice) >= max_lines:
             break
-    return "\n".join(out)
+    return "\n".join(pins + voice)
+
+
+def _reinject_event(dept):
+    """**世代交代の直後 / 圧縮の直後**なら理由を返す(それ以外は "")。
+
+    ★★2026-09-19 改悪の第2の穴。実測(軍議 第11世代のトランスクリプト bd3240a1):
+        00:19:52 新世代の起動文28,073字(「全員分のcharacterfileを全部読め」入り)
+                 → この世代は characterfile を**1本も読んでいない**(Read/Grep/Glob 0件)。
+                   前の第10世代(ae9f8432)は12回読んでいて、09-18は正しく "Chami" と書けていた。
+        07:57:42 ここで**初めて**声の芯が載った= 交代から**7時間37分・3便**、人格の実文が
+                 1文字も目の前に無いまま喋っていた(周期が8便なので構造上こうなる)。
+        08:01:28 圧縮 → 08:36:51 圧縮 → 08:41:22 の封筒は**素**(4,040字)→ 08:49:18 事故。
+    ★つまり「パスを渡して読めと言う」は**読まれなかった時に何も鳴らない**。
+      そして周期8便は、人格が一番薄い瞬間(交代直後・圧縮直後)を狙って外す。
+      → 状態そのもの(世代番号・圧縮回数)が動いた便で鳴らす。C-041と同じ話で、
+        経過便数は状態の代理でしかない。
+    ★初回は**黙って記録するだけ**(=対応表に居ない部屋・導入直後に空振りで鳴らさない)。
+    ★fail-open= 何が読めなくても ""(鳴らさない側へ倒す。封筒は素のまま組み上がる)。
+    """
+    try:
+        d = str(dept or "").strip()
+        if not d:
+            return ""
+        entry = (load_sessions() or {}).get(d)
+        if not isinstance(entry, dict):
+            return ""                     # ★対応表に居ない部屋= 判定材料が無いので黙る
+        gen = int(entry.get("generation") or 0)
+        cc = int(entry.get("compact_count") or 0)
+        try:
+            with open(RELAY_TURN_STATE, encoding="utf-8") as f:
+                st = json.load(f)
+        except Exception:
+            st = {}
+        if not isinstance(st, dict):
+            st = {}
+        seen = st.get("_seen")
+        if not isinstance(seen, dict):
+            seen = {}
+        prev = seen.get(d)
+        why = ""
+        if isinstance(prev, dict):
+            if int(prev.get("gen") or 0) != gen:
+                why = f"世代交代の直後(第{gen}世代)"
+            elif cc > int(prev.get("cc") or 0):
+                why = f"圧縮の直後({cc}回目)"
+        seen[d] = {"gen": gen, "cc": cc}
+        st["_seen"] = seen
+        try:
+            os.makedirs(os.path.dirname(RELAY_TURN_STATE), exist_ok=True)
+            with open(RELAY_TURN_STATE, "w", encoding="utf-8") as f:
+                json.dump(st, f, ensure_ascii=False)
+        except Exception:
+            return ""                     # 覚えられない=毎便鳴らないように黙る側へ
+        return why
+    except Exception:
+        return ""                         # fail-open= 予防線で封筒を壊さない
 
 
 def _persona_reinject_block(dept, conf=None, forced=False):
     """8便に1回(または直近便で口調が崩れた次便)だけ、声の芯を数行だけ封筒へ戻す。
 
     forced= その便に `_tone_feedback_block` が付いた(=tone/構造ドリフトの警告が出た)時。
+    ★これに加えて **世代交代の直後・圧縮の直後**は周期を待たずに載せる(`_reinject_event`)。
     ★fail-open= 何が起きても ""(素の封筒)。予防線が配送を殺すことは無い。
     """
     try:
         n = _bump_relay_turn(dept)        # ★数えるのは毎便(発火の有無に関わらず1回だけ呼ぶ)
+        event = _reinject_event(dept)     # ★これも毎便(状態の差分を取りこぼさない)
         due = bool(n) and n % REINJECT_EVERY == 0
-        if not due and not forced:
+        if not due and not forced and not event:
             return ""
         c = conf
         if not c:
@@ -1376,10 +1490,16 @@ def _persona_reinject_block(dept, conf=None, forced=False):
         if not lines:
             return ""                     # 1枚も読めない=黙る(空の見出しを積まない)
         head = ("=== ★声の芯を戻す(前の便で崩れが出た) ===\n" if forced
+                else f"=== ★声の芯を戻す({event}) ===\n" if event
                 else f"=== ★声の芯を戻す({REINJECT_EVERY}便に1回の定期) ===\n")
-        return (head + "\n".join(lines) + "\n"
-                + "★これはcharacterfileの**抜粋**だ。ここに無い分は正本を読み直せ。"
-                  "書き出す前に一人称と呼び方だけ確かめろ。\n\n")
+        tail = ("★これはcharacterfileの**抜粋**だ。ここに無い分は正本を読み直せ。"
+                "書き出す前に一人称と呼び方だけ確かめろ。\n")
+        if event:
+            # ★交代直後・圧縮直後は「読め」が一番効かない場面(実測= 第11世代は読まなかった)。
+            #   抜粋だけで済ませずに**正本を開かせる**ことを、この便でだけ強く言う。
+            tail += ("★この便は" + event + "だ。**上のパスのcharacterfileを実際に開いて読め**"
+                     "(前の世代が読んだことは、あなたが読んだことにはならない)。\n")
+        return (head + "\n".join(lines) + "\n" + tail + "\n")
     except Exception:
         return ""                         # fail-open= 予防線で封筒を壊さない
 
