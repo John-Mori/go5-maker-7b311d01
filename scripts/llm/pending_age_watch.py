@@ -94,7 +94,11 @@ RESOLVED_MARK = re.compile(r"<!--\s*([A-Za-z][\w\-]*:[\w\-]+)\s+RESOLVED\b")
 OWNER_MARK = re.compile(r"所有\s*[=＝]\s*([A-Za-z0-9_\-]+|[^\s)）、。,]+)")
 STAR_DATE = re.compile(r"★\s*(\d{4})-(\d{2})-(\d{2})")
 ANY_DATE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
-ITEM_ID = re.compile(r"\b((?:HQ|ORG|INC)-\d{2,5})\b")
+ITEM_ID = re.compile(r"\b((?:HQ|ORG|INC)-\d{2,5}(?:-[A-Z])?)\b")
+# ★子番号(`HQ-0213-C`)は**親とは別の案件**。ここを `HQ-0213` までしか読まないと、
+#   下の closed_keys が「-A が閉じた」証拠で -C まで黙らせる。2026-09-20 に実測=
+#   サフィックス付きは10種(HQ-0018-A / HQ-0206-A,B / HQ-0210-A,B / HQ-0213-A,B,C /
+#   HQ-0214-A,B)で**全て半角大文字1文字**。素朴な key 一致案はこれで3件を誤って沈黙させた。
 # ★台帳のID欄は行末の `\`HQ-0249\` @2026-09` という決まった形で書かれている(ID列)。
 #   本文の中で**別の裁定番号を引き合いに出す**(例「ORG-11= 表を2か所に持つと必ず片方が腐る」)と、
 #   素の ITEM_ID.search は行の**最初**の当たりを返すので、そちらを行のIDだと読み違える。
@@ -103,7 +107,16 @@ ITEM_ID = re.compile(r"\b((?:HQ|ORG|INC)-\d{2,5})\b")
 #   → **ID列の形を先に見て、無い時だけ素の当たりへ落ちる。**
 #   実測(2026-09-08・現行+アーカイブの「入れた(確認待ち)」168行)= ID列を持つ行は45行で
 #   **1行に2つ現れる行は0件**、素の先頭と食い違うのは**上のHQ-0249の1行だけ**=巻き添え0。
-ITEM_ID_COL = re.compile(r"`((?:HQ|ORG|INC)-\d{2,5})`\s*@\d{4}-\d{2}")
+ITEM_ID_COL = re.compile(r"`((?:HQ|ORG|INC)-\d{2,5}(?:-[A-Z])?)`\s*@\d{4}-\d{2}")
+# ★アーカイブ側の「解決」を機械が読める唯一の形(2026-09-20 / シャビ・アロンソの指摘)。
+#   閉じ判定の口はこれまで3つ= ①行頭の `- [x]` ②ブロックの `[ns:key] RESOLVED` 札
+#   ③打ち消し線。②が見る札と台帳ID `HQ-xxxx` は**別体系**で、09アーカイブに RESOLVED 印は
+#   0件。人が閉じる時に実際に書いているのは**見出しの `★解決`** だった。
+#   → アーカイブへ `<!-- HQ-xxxx RESOLVED -->` を後付けして回るのではなく、
+#     **機械が既存の書式を読めるようにする**(C-038= 書き手を増やさず読み手を直す)。
+#   ★見出しに縛る理由は BLOCK_HEAD と同じ= 本文で「HQ-0271 は★解決済み」と触れただけの行
+#     (09アーカイブ:662)まで証拠に数えると、生きている案件が黙って消える(§3)。
+SOLVED_HEAD = re.compile(r"^\s*#{1,6}\s.*★\s*解決")
 
 
 def item_id(text):
@@ -288,11 +301,47 @@ def block_closed(text, no, marks):
     return marks.get(m.group(1), 0) > no
 
 
+def file_rank(files):
+    """ファイルの**新しさ**の順位。ledger_files() の並びは [現行, 2026-07, 2026-08, …]=
+    先頭の現行が一番新しく、残りは年月の昇順。順位を採るのは下の closed_keys のためだけ。"""
+    return dict((p, (10 ** 6 if i == 0 else i)) for i, p in enumerate(files))
+
+
+def closed_keys(files, rank):
+    """台帳IDごとに「閉じた証拠」の位置 [(ファイル順位, 行番号, ファイル名), …]。
+
+    ★証拠として数えるのは2つだけ=
+      ① 行頭が `- [x]` で、その行の item_id が読める(人が台帳で閉じた形)
+      ② `SOLVED_HEAD` に当たる**見出し**(アーカイブで人が閉じた形)
+    ★位置を持たせる理由= **同じIDが別案件へ再利用されている**(実測: HQ-0221 が09アーカイブの
+      516行で閉じ、550行で別件として開き直している)。位置を捨てて「IDが一度でも閉じたか」で
+      見ると、後から開いた方まで黙る。→ 使うのは**保留行より後ろ**に在る証拠だけ(scan 側)。
+    """
+    out = {}
+    for path in files:
+        for no, raw in enumerate(io.open(path, encoding="utf-8", errors="replace"), 1):
+            cb = CHECKBOX.match(raw)
+            if not ((cb and cb.group(1).lower() == "x") or SOLVED_HEAD.match(raw)):
+                continue
+            mid = item_id(raw)
+            if mid:
+                out.setdefault(mid, []).append((rank[path], no, os.path.basename(path)))
+    return out
+
+
 def scan(now, files=None, alias=None):
-    """台帳を1周して「入れた(確認待ち)」行を全部拾う。**判定はしない**(数えるだけ)。"""
+    """台帳を1周して「入れた(確認待ち)」行を全部拾う。**判定はしない**(数えるだけ)。
+
+    ★2026-09-20 追加= ①他ファイルの閉じた証拠で落とす ②同じ台帳IDを1件に畳む。
+      どちらも「1件を何度も鳴らす/閉じた件を鳴らす」= 見張りへの信用を削る形だった
+      (04:00の便が「7日超過5件」と出して実体は3件)。
+    """
     alias = alias if alias is not None else dept_aliases()
     items = []
-    for path in (files if files is not None else ledger_files()):
+    files = list(files if files is not None else ledger_files())
+    rank = file_rank(files)
+    closed = closed_keys(files, rank)
+    for path in files:
         lines = io.open(path, encoding="utf-8", errors="replace").read().splitlines()
         marks = resolved_marks(lines)          # ★ブロックの状態印は行より先に1周して集める
         for no, raw in enumerate(lines, 1):
@@ -305,8 +354,11 @@ def scan(now, files=None, alias=None):
                 continue                       # 閉じ済みのチェックボックスは対象外
             if block_closed(text, no, marks):
                 continue                       # ★ブロックの状態印で閉じている(見出しは触られない)
-            date, src, owner, req = parse_line(live, alias)
             mid = item_id(text)
+            if mid and [e for e in closed.get(mid, ())
+                        if (e[0], e[1]) > (rank[path], no)]:
+                continue                       # ★後ろの版で閉じている(現行の `- [x]` / `★解決`)
+            date, src, owner, req = parse_line(live, alias)
             key = mid or "L" + hashlib.sha1(
                 text.strip().encode("utf-8")).hexdigest()[:10]
             items.append({
@@ -319,8 +371,32 @@ def scan(now, files=None, alias=None):
                 "dept": owner,
                 "req": req or "hq",          # 台帳の持ち主= 研究室HQ(読めない時の受け皿)
                 "head": text.strip()[:110],
+                "dup": 0,                    # 同じ台帳IDで畳んだ**他の**行の数
             })
-    return items
+    return fold(items)
+
+
+def fold(items):
+    """同じ台帳IDの行を1件に畳む(欠陥2= 1回の便に同じ札が二重で載る)。
+
+    ★残すのは**現行ファイル側**= scan の周回順で先に来る方。アーカイブの古い写しではなく
+      今の台帳の行を人へ渡すため(便に出る `file:line` がそのまま開ける場所になる)。
+    ★例外は1つ= 残した側が日付を読めず、畳む側が読める時だけ差し替える。日齢が読めない行は
+      督促の本数を決められない= 判定できる方を残す(§3 fail-open)。
+    ★`key` が `L…`(IDの無い行のハッシュ)の時も同じ字面なら畳んでよい= 同じ行の写し。
+    """
+    out, at = [], {}
+    for it in items:
+        i = at.get(it["key"])
+        if i is None:
+            at[it["key"]] = len(out)
+            out.append(it)
+            continue
+        out[i]["dup"] += 1
+        if out[i]["age"] is None and it["age"] is not None:
+            it["dup"] = out[i]["dup"]
+            out[i] = it
+    return out
 
 
 def summarize(items, baseline):
@@ -343,6 +419,7 @@ def summarize(items, baseline):
         "over3": len([i for i in dated if i["age"] > AGE_REMIND]),
         "over7": len([i for i in dated if i["age"] > AGE_ESCALATE]),
         "no_dept": len([i for i in items if not i["dept"]]),
+        "folded": sum(i.get("dup", 0) for i in items),   # 同じ台帳IDで畳んだ行の数
     }
 
 
@@ -388,12 +465,17 @@ def _foot(stats, baseline):
     return ("\n★数え方= `status/hq_open_items.md` + `status/archive/hq_open_items_<年-月>.md` の"
             "「入れた(確認待ち)」行 %d件を1周。日付が読めたのは %d件"
             "(★印 %d / 行内の日付 %d)、**日齢不明 %d件**(推定で埋めていない)。\n"
+            "%s"
             "★基準日 %s より前の %d件(在庫)は数えたが鳴らしていない= 棚卸しはHQが別で持つ(HQ-0236)。\n"
             "★宛先は台帳の字面から機械が当てている(札の直後の部門名 → 無ければ行の一番左)。"
             "違うなら1行返してくれ= 誤配は台帳の書き方の側で直す。\n"
             "★出所= 裁定 C-070 / 見張り `scripts/llm/pending_age_watch.py`(定刻 watch_triggers T6)。"
             % (stats["total"], stats["dated"], stats["by_star"], stats["by_line"],
-               stats["unknown"], baseline, stats["stock"]))
+               stats["unknown"],
+               ("★アーカイブと現行に同じ台帳IDで載っていた %d行は1件へ畳んだ"
+                "(残したのは現行の台帳側の行)。\n" % stats["folded"])
+               if stats.get("folded") else "",
+               baseline, stats["stock"]))
 
 
 GUARD_LEAD = re.compile(r"の部門長は\s*'([A-Za-z0-9_-]+)'")
