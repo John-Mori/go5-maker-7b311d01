@@ -649,6 +649,12 @@ def ask_growth(question, stats_text, extra="", dialog="", req_id="", channel="")
     ensure_chat_model()
     payload = {"model": MODEL, "stream": False,
                "reasoning_effort": "none",
+               # ★2026-09-20 中野五月: 反復対策(Chami「同じことばっかり言う」)。
+               #   temperature 0.4 は据え置き(0.5=存在しない数字を作る実測ゆえ上げない)。
+               #   代わりに frequency/presence_penalty で言い回しのループを抑える
+               #   (LM Studio /v1 が両パラメータを受理するのを実測してから入れた)。
+               #   逆効果(捏造/破綻)が出たら真っ先にここを 0 へ戻す。
+               "frequency_penalty": 0.5, "presence_penalty": 0.3,
                "temperature": 0.4, "max_tokens": 1024,
                "messages": [{"role": "system", "content": system},
                             {"role": "user", "content": question}]}
@@ -1021,7 +1027,7 @@ def handle_growth(rec, raw_line, content, channel):
         #   実測ログから組み立てる既存関数)。live会話は文脈を軽く=直近6往復・幅220に絞る
         #   (num_ctx 8192 + think:True の余白を残すため。採点役へ渡す12/40件とは別枠)。
         answer = ask_growth(content, growth_stats(channel),
-                            dialog=recent_dialog(channel, limit=6, width=220),
+                            dialog=recent_dialog(channel, limit=12, width=260),  # ★2026-09-20 中野五月: 記憶6→12ターン(幅260)へ拡張=Chami「話を覚えてない」対策。think切(reasoning_effort:none)で空いた余白を会話履歴に回す。捏造/文脈溢れが出たら6/220へ戻す
                             req_id=rec.get("msg_id", ""), channel=channel)
     except Exception as e:
         answer = ""
@@ -1233,7 +1239,7 @@ def handle_growth_vision(rec, raw_line, content, channel, imgs):
     )
     try:
         answer = ask_growth(question, growth_stats(channel), extra=extra,
-                            dialog=recent_dialog(channel, limit=6, width=220),
+                            dialog=recent_dialog(channel, limit=12, width=260),  # ★2026-09-20 中野五月: 記憶6→12ターン(幅260)へ拡張=Chami「話を覚えてない」対策。think切(reasoning_effort:none)で空いた余白を会話履歴に回す。捏造/文脈溢れが出たら6/220へ戻す
                             req_id=rec.get("msg_id", ""), channel=channel)
         err = ""
     except Exception as e:
