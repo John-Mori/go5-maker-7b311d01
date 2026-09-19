@@ -1161,6 +1161,27 @@ def is_local_pipeline_order(rec):
         return False
 
 
+# ★2026-09-20 Chami直令(研究室HQ DISPATCH-aegis-gl-1789845665234)=
+#   「既読とかの絵文字スタンプもいらない」。部屋「プロンプト変換と学習」に**印を一切出さない**。
+#   ★gateway側(NO_SENT_MARK_DEPTS)は**別の口**で、そちらは台帳のdept(=imagetag)を見ている。
+#     ここで塞ぐのは常駐が押す 既読✅/着手👀/束ね印/走行中の既読 の4口(C-064= OUT口は全数同時に塞ぐ)。
+NO_MARK_DEPTS = ("imagetag-talk",)
+
+
+def marks_muted(rec):
+    """この便へは進捗印を**一切押さない**か(押す口が4つあるので判定は1本・ORG-11)。
+
+    ★①「生成依頼」便(描くのはローカル・2026-09-16)②印を出さない部屋(NO_MARK_DEPTS)。
+      判定を増やしたのではなく、既に在った①の呼び口をこの関数へ寄せて②を足しただけだ。
+    """
+    if is_local_pipeline_order(rec):
+        return True
+    try:
+        return str((rec or {}).get("dept") or "") in NO_MARK_DEPTS
+    except Exception:
+        return False        # 読めない時は塞がない(fail-open= 印は表示・配送を止めない)
+
+
 def marks_ok(rec, ch, mid, dry_run=False):
     """この便へDiscordの進捗印(既読✅/着手👀)を押してよいか。
 
@@ -1179,8 +1200,8 @@ def marks_ok(rec, ch, mid, dry_run=False):
         return False
     if isinstance(rec, dict) and rec.get("test"):
         return False
-    if is_local_pipeline_order(rec):
-        return False        # ★2026-09-16 「生成依頼」便=Claudeは描かない(上の関数を読め)
+    if marks_muted(rec):
+        return False        # ★「生成依頼」便=Claudeは描かない / 印を出さない部屋(上の関数を読め)
     return bool(ch and mid)
 
 
@@ -4114,11 +4135,14 @@ DEPT_CONF = {
         "work_scope": (
             "あなたが自分で完結してよい作業(ネタ集め=素材収集の範囲):\n"
             "- **収集の実行**: python scripts/scrape_5ch.py "
-            "(出力= local/5ch/threads_<板>_<YYYY-MM-DD>.jsonl・勢い降順)。"
+            "(出力= 5chShortMovie/リサーチ/5ch本体_生レス/threads_<板>_<YYYY-MM-DD>.jsonl・勢い降順)。"
             "★5chは .net から .io へ移行済= .net を決め打ちした呼び方をしない\n"
             "- **収集スクリプトの作成・改修**(C-019/C-027= 自室の業務に要る道具は自室で作る)。"
-            "★書き先は local/ 配下だけ。外部サービスへ書き込まない\n"
-            "- **素材台帳の整理**: local/5ch/ ・ local/5ch_research/ 配下\n"
+            "★置き場の正本は scripts/paths_5ch.py 1本(2026-09-19 Chami直令の大移動)。"
+            "**直パスを書き足すな**=変える時はそこを直す。5SecMovieMaker/local/ 配下へ5ch素材を置かない。"
+            "外部サービスへ書き込まない\n"
+            "- **素材台帳の整理**: 5chShortMovie/リサーチ/5ch本体_生レス/ ・ "
+            "5chShortMovie/リサーチ/まとめ反応集切り出し/ 配下\n"
             "★集めたものは**数で報告する**(何件・どの板・いつの分)。「集めました」だけで終わらせない。\n"
             "範囲外(=本文にそう書いて最終行に <<WORK>>):\n"
             "- **5秒動画メーカー本体**(index.html / *.js / gas / worker)= 改修部門α(C-015)\n"
@@ -4493,6 +4517,54 @@ DEPT_CONF = {
             "★その時は**カスミ**が理由を言う(2026-09-17 Chami直令。旧=アメス)。"
             "この室だけ平時=あなた(中野五月)・トラブル時=カスミ、と名義が入れ替わる。\n"
             "- ★**モデルやLoRAを勝手にダウンロードするな。**要るなら何がなぜ要るかをChamiに言う。\n"
+            "- 配線・常駐の直しが要る話はイージス研究室へ上げる(この部屋で基盤をいじらない)。"
+        ),
+    },
+    # ========================================================================
+    # ★2026-09-20 部屋「プロンプト変換と学習」の**字の便**だけを受ける口(Chami直令・
+    #   研究室HQ DISPATCH-aegis-gl-1789845665234)。原文=「その部屋ではカスミが入っといて。
+    #   画像オンリーでこっちが投稿した無視でいい。既読とかの絵文字スタンプもいらない。
+    #   こっちが字の文を書いたら応答して欲しいね」。
+    #
+    #   ★**この dept は Discord のチャンネルを持たない**(台帳 discord_channels.json の
+    #     あの部屋は `imagetag` のまま=1ch→1dept を崩さない。gateway の chan_map 自動追随も不変)。
+    #     入口は1つだけ= 優依(local_responder.handle_tag_request)が「添付が無い」と見た便を
+    #     `dept=imagetag-talk` で積み直す。**gateway からは1行も来ない。**
+    #   ★だから dept_daemon と local_responder が**同じ行を奪い合わない**(HQの明示条件)。
+    #     画像便は今までどおり優依だけが claim して WD14 のタグ列を返す=画像でClaudeは起きない。
+    #   ★返信の宛先は便の `channel`(= persona_send --channel)なので、台帳にdept行が無くても
+    #     同じ部屋へ返る。dead-letter通知だけは `--dept` を使う口で、そこは届かない(記録は残る)。
+    #   ★印(既読✅/着手👀)は NO_MARK_DEPTS で全口を塞いである。gateway の送信印📮は
+    #     元から NO_SENT_MARK_DEPTS に `imagetag` が居るので押されない(押下点の判定は台帳のdept)。
+    #   ★費用(DEF-hq-e64f0bbee0・週間枠)= conversation_only で回送も work生成もしない/
+    #     relay_model を sonnet-5 に落とす/ coalesce_sec で連投を1回にまとめる/ 返事は短く(boot_note)。
+    #     ★正直に書く= `work_relay_model` の自動値下げは**この部屋では効かない**(C-014=Chami便は
+    #       落とさない・そもそも is_work が立たない)。効くのは上の4つだけだ。
+    # ========================================================================
+    "imagetag-talk": {
+        "character": os.path.join(_CHAR, "kasumi.md"),
+        "memory": os.path.join(_MEM, "imagetag-talk.jsonl"),
+        "persona": "カスミ",
+        "personas": [
+            {"persona": "カスミ", "character": os.path.join(_CHAR, "kasumi.md"),
+             "role": "この部屋の主(字で書かれた話に答える。プロンプトの読み解き・言い換えの相談相手)",
+             "aliases": ("kasumi", "カスミ", "かすみ", "霧原かすみ")},
+        ],
+        "port": 18843,          # 18842(hansei-ekurabe)まで使用済=2026-09-20 実測(DEPT_CONFを読み込んで数えた)
+        "session_relay": True,
+        "conversation_only": True,
+        "relay_model": "claude-sonnet-5",   # ★週間枠(DEF-hq-e64f0bbee0)。既定はopus=ここだけ明示で落とす
+        "coalesce_sec": 20,     # 連投を1回にまとめる(copy-directorの45秒は待たせすぎ・ここは会話)
+        "boot_note": (
+            "■この部屋の性格(必ず守る)\n"
+            "- 部屋の名前は「プロンプト変換と学習」。Chamiが画像を貼ると**優依(ローカルLLM)**が"
+            "WD14のタグ列を返す部屋だ。\n"
+            "- ★**あなたに来るのは「字だけの便」だけ**。画像が貼られた便はあなたには届かない"
+            "(優依が受ける)。**画像の話題を横取りするな・タグ列を自分で作るな。**\n"
+            "- あなた(カスミ)の仕事= 字で書かれた話に答えること。タグの読み解き、言い換え、"
+            "「このプロンプトはどういう意味か」の相談相手。\n"
+            "- ★**返事は短く**(3〜5文・長くても400字)。ここは作業部屋ではなく学習のメモ置き場だ。\n"
+            "- ★**絵文字の印は付かない部屋**(Chami直令)。「既読を押しておく」等と書くな。\n"
             "- 配線・常駐の直しが要る話はイージス研究室へ上げる(この部屋で基盤をいじらない)。"
         ),
     },
@@ -9883,10 +9955,10 @@ class Daemon:
         """
         ids = [str(m) for m in (msg_ids or []) if str(m or "").strip()]
         skip = {str(r.get("msg_id") or "") for r in (recs or [])
-                if isinstance(r, dict) and is_local_pipeline_order(r)}
+                if isinstance(r, dict) and marks_muted(r)}
         if skip:
             ids = [m for m in ids if m not in skip]
-            log(self.dept, "束ね印=「生成依頼」便には押さない(%d件) msg=%s"
+            log(self.dept, "束ね印=押さない便を外した(生成依頼/印を出さない部屋)(%d件) msg=%s"
                            % (len(skip), ",".join(sorted(skip))))
         if self.dry_run or not ch or not ids:
             return
@@ -9971,8 +10043,8 @@ class Daemon:
                 seen.add(m)
                 if not self._is_from_chami(b) or b.get("test"):
                     continue            # 他部門の便・検証便には押さない(Chamiの画面を汚さない)
-                if is_local_pipeline_order(b):
-                    continue            # ★2026-09-16 「生成依頼」便=描くのはローカル(印を押さない)
+                if marks_muted(b):
+                    continue            # ★「生成依頼」便=描くのはローカル / 印を出さない部屋
                 if str(b.get("channel") or "") != ch:
                     continue            # いま走っている便と同じ部屋の分だけ
                 # ★2026-09-06(aegis-gl)Discordのメッセージ IDでない便には押さない。

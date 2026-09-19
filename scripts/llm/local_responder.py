@@ -183,6 +183,16 @@ QUEUE_DEPT = "llm-growth"  # 自室のdept(discord_channels.json)
 #     (入れると合図規律 cue_required() と gateway の画像ファンアウトが巻き込む)。
 #     入口は queue 1本= gateway が台帳(discord_channels.json)を見て積んだ行を下で拾う。
 TAG_DEPT = "imagetag"      # 部屋「プロンプト変換と学習」(id 1549486988569354320)
+# ★2026-09-20 Chami直令(研究室HQ DISPATCH-aegis-gl-1789845665234)。原文=
+#   「その部屋ではカスミが入っといて。画像オンリーでこっちが投稿した無視でいい。
+#     既読とかの絵文字スタンプもいらない。こっちが字の文を書いたら応答して欲しいね」
+#   = **同じ部屋に返し手が2人**になる(画像=優依 / 字=カスミ)。
+#   ★台帳(discord_channels.json)のdeptは `imagetag` のまま**1ch→1dept を崩さない**。
+#     gateway が積むのも従来どおり dept=imagetag の1行で、claim するのも従来どおり
+#     この常駐**1本だけ**= dept_daemon と同じ行を奪い合う形にはしない(HQの明示条件)。
+#   ★字だけの便は、添付が無いと**ここで分かった時点**で下の TALK_DEPT へ積み直す。
+#     判定を増やしていない= 添付の有無は handle_tag_request が元から見ている場所だ。
+TALK_DEPT = "imagetag-talk"   # 同じ部屋の「字の便」だけを渡す先(消費者= dept_daemon のカスミ)
 GROWTH_CHANNELS = ("ローカルllm成長進捗",)  # 自室のDiscordチャンネル名(org_registry.yml id=1526159156019462194)
 LESSONS = os.path.join(LOCAL, "llm", "lessons.jsonl")     # 採点台帳(grade.py が書く)
 KNOWLEDGE = os.path.join(LOCAL, "llm", "knowledge.md")    # 知識パック(build_knowledge.py が書く)
@@ -957,20 +967,63 @@ def tag_image_paths(rec):
     return paths
 
 
+def handoff_to_talk(rec):
+    """字だけの便を TALK_DEPT(カスミの常駐)へ積み直す。戻り値=(ok, 理由)。
+
+    ★msg_id は**別の値**にする= queue の msg_id は UNIQUE で、元の便(dept=imagetag)が
+      既に同じidで入っている。同じidで積むと INSERT が弾かれ(IntegrityError→False)、
+      字の便が**黙って消える**。接尾辞1つで別行にする(便は捨てない・C-048)。
+    ★本文(rec)の msg_id は**元のまま**渡す= 返信の宛先(GO5_REPLY_TO)と処理済み台帳が
+      Discordの実物と同じidで並ぶ。付け替えるのは queue の行の鍵だけだ。
+    """
+    if not os.path.exists(QDB):
+        return False, "キューDBが無い"
+    try:
+        sys.path.insert(0, os.path.join(ROOT, "scripts", "queue"))
+        from leasequeue import LeaseQueue
+        q = LeaseQueue(QDB)
+    except Exception as e:
+        return False, f"キューを開けない:{type(e).__name__}"
+    try:
+        body = dict(rec)
+        body["dept"] = TALK_DEPT
+        ok = q.enqueue(json.dumps(body, ensure_ascii=False),
+                       msg_id=f"{rec.get('msg_id') or 'noid'}-talk", dept=TALK_DEPT)
+    except Exception as e:
+        return False, f"投函失敗:{type(e).__name__}"
+    finally:
+        try:
+            q.close()
+        except Exception:
+            pass
+    return (True, "") if ok else (False, "同じidが既に入っている")
+
+
 def handle_tag_request(rec, raw_line):
     """部屋「プロンプト変換と学習」。**画像が貼られた時だけ**タグ列(プロンプト)を返す。
 
     ★引き金は「画像の添付そのもの」(研究室HQ裁定 2026-09-16)= 合図語をここで発明しない。
-      文章だけの便は**何もしない・喋らない**(ここは学習のメモも置かれる部屋だ)。
-      ただし黙って捨てず responder_log.jsonl に mode=tag_no_image を残す=後から数えられる。
+      優依(この常駐)が喋るのは画像便だけ、という線は**1文字も動かしていない**。
+    ★2026-09-20 変わったのは「字だけの便のあと始末」だけ(Chami直令 DISPATCH-aegis-gl-1789845665234)。
+      旧= mode=tag_no_image を1行残して **return False**(部屋は無音。03:03:12の「配線できた?」が
+          返事をもらえなかったのはここだ)。
+      新= 本文が在るなら TALK_DEPT へ積み直す= **カスミが同じ部屋で返す**。
+      ★本文が空(画像も字も無い/スタンプだけ)の便は従来どおり黙る= 起こす理由が無い。
+      ★積めなかった時も黙って捨てない(mode に理由を残す)。
     """
     channel = rec.get("channel") or ""
     paths = tag_image_paths(rec)
     if not paths:
+        content = (rec.get("content") or "").strip()
+        mode, why = "tag_no_image", ""
+        if content:
+            ok, why = handoff_to_talk(rec)
+            mode = "tag_talk_handoff" if ok else "tag_talk_handoff_failed"
         append_line(PROCESSED, raw_line)
-        log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "tag_no_image", "channel": channel,
-             "dept": TAG_DEPT, "q": (rec.get("content") or "")[:200], "sent": False})
-        print(f"  画像なし=何もしない [{channel}]")
+        log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": mode, "channel": channel,
+             "dept": TAG_DEPT, "q": (rec.get("content") or "")[:200], "sent": False,
+             "to": TALK_DEPT if content else "", "err": why})
+        print(f"  画像なし [{channel}] {mode}")
         return False
     if wd14_tag is None:
         append_line(PROCESSED, raw_line)
