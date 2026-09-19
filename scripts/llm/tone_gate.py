@@ -1095,6 +1095,64 @@ def misattributed_speaker(persona, text, rules, roster):
         return None                      # fail-open= 判定に転んだら従来どおり
 
 
+# ★名乗りの直前に置いてよい語(=自己紹介の形だと分かる手掛かり)。2026-09-20 イージス研究室。
+#   「軍議へ。ヴィルシーナだ。」の `。` / 「私はアメスよ」の `私は` が該当する。
+#   ここを緩めて「は」を一律に許すと **「担当はヴィルシーナだ」= 他人の紹介**まで拾って
+#   名義を他人へ動かす= 最も害の大きい誤り(他人のアイコンで別人の言葉を出す)になる。
+_SELF_LEAD_RE = re.compile(r"(?:^|[。．！!？?」』\n]\s*|(?:私|わたし|僕|ぼく|俺|おれ|あたし|わし|こちら)は\s*)$")
+# 名乗りの直後に来る繋ぎ(これが無ければ「ヴィルシーナの案」等の言及=名乗りではない)。
+_SELF_TAIL_RE = re.compile(r"^(?:だ|です|である|でございます|だぜ|だよ|だわ|よ|ね)(?:[。．、,!！?？\s]|$)")
+_SELF_NAME_MAX_LINES = 3        # 頭の何行まで名乗りを探すか(本文中の言及を拾わない線)
+
+
+def self_named_speaker(text, roster):
+    """本文が**頭で自分から名乗っている**部屋の人格名を返す。決められなければ None。
+
+    なぜ要るか(実物 2026-09-19 manga-shorts msg 1550851084782800968 /
+    ESC-hr-room-1550916219786240062):
+      本文は頭から尻まで「軍議へ。ヴィルシーナだ。」=ヴィルシーナとして筋が通っていたのに、
+      `[名前]` タグが無かったため名義が解けず、部屋の既定人格(fail-safe先の三笘薫)の
+      名前とアイコンで出た。出力ゲートF(misattributed_speaker)は **`[名前]` で名乗った便
+      だけ**が対象なので、タグが無いこの形は素通りする=そこが穴だった。
+      ★タグが無い時、本文の名乗りは「誰の便か」を示す**一次証拠**だ。既定人格は
+        「名義が引けない時のfail-safe先」でしかない=証拠がある側を採る。
+
+    引数:
+      text   : ブロック本文(タグ剥がし後)。
+      roster : その部屋に居る人格の正式名の列。★この集合の外へは絶対に出さない。
+
+    None を返す条件(=決めない):
+      - 頭 _SELF_NAME_MAX_LINES 行に名乗りが無い / 2人ぶん以上見つかる(決められない)
+      - 引用・コード・パスの中にしか無い(_mask_protected で潰してから探す)
+    """
+    try:
+        if not roster:
+            return None
+        lines = [ln for ln in str(text or "").splitlines()][:_SELF_NAME_MAX_LINES + 2]
+        head = "\n".join(lines[:_SELF_NAME_MAX_LINES + 2])
+        s = _mask_protected(head)
+        found = set()
+        for name in roster:
+            nm = str(name or "")
+            if not nm:
+                continue
+            i = 0
+            while True:
+                i = s.find(nm, i)
+                if i < 0:
+                    break
+                if (_SELF_LEAD_RE.search(s[:i])
+                        and _SELF_TAIL_RE.match(s[i + len(nm):])):
+                    found.add(nm)
+                    break
+                i += len(nm)
+        if len(found) == 1:
+            return found.pop()
+        return None                      # 0人=名乗り無し / 2人以上=決められない
+    except Exception:
+        return None                      # fail-open= 判定に転んだら従来どおり
+
+
 def tone_verdicts(persona, dept, text, rules):
     """口調違反(=一人称の食い違い)の候補一覧を返す(純関数・警告のみ)。
 

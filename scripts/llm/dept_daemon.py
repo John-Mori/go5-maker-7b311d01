@@ -5682,6 +5682,56 @@ def audit_speaker(dept, persona, text, roster, rec=None):
         return None              # fail-open= 転んだら従来どおり
 
 
+def audit_self_named(dept, persona, text, roster, rec=None):
+    """出力ゲートF-2= **タグが無い便**の名義を、本文の名乗りから直す(2026-09-20)。
+
+    ★ゲートF(audit_speaker)は `[名前]` で名乗った便だけが対象= **タグが無い便は素通り**
+      していた。そこが今回の穴だ。
+      実物= manga-shorts msg 1550851084782800968(ESC-hr-room-1550916219786240062・
+      Chami「なんやねんこのルール無視しすぎメッセージ」/ 人事ククール裁定)。
+      本文は「軍議へ。ヴィルシーナだ。」でヴィルシーナとして筋が通っていたのに、
+      頭に英語の足場文が残ってタグが成立せず、**部屋の既定人格(fail-safe先の三笘薫)の
+      名前とアイコンで出た**。しかも `_speaker` も三笘薫で解決されるので、口調ゲートDが
+      ヴィルシーナの「でございます」を三笘の「だ」へ書き直していた(tone_audit 21:48:26/30)
+      = 名義のねじれが**口調の書き直しまで巻き込む**。
+    ★動かすのは**名義だけ**。本文は1文字も触らない(ゲートFと同じ)。
+    ★既定人格は「名義が引けない時のfail-safe先」であって「前に立つ指定」ではない
+      (conf["persona"] のコメント原文)。本文の名乗りという一次証拠がある時は、そちらを採る。
+    ★決められない時は None=従来どおり既定人格で出る(fail-open。沈黙させない)。
+    返り値: 本文が名乗った人格の正式名(str) or None。
+    """
+    try:
+        if _tone_gate is None or not roster:
+            return None
+        who = _tone_gate.self_named_speaker(text, roster)
+        if not who or (persona and _tone_gate._norm(who) == _tone_gate._norm(persona)):
+            return None
+        log(dept, f"★出力ゲートF-2(名乗りとタグの欠落): タグが無く既定の{persona}で出ようとしたが、"
+                  f"本文は{who}として名乗っている=**名義を{who}にして送る**(本文は触らない) "
+                  f"msg={str((rec or {}).get('msg_id', ''))}")
+        try:
+            os.makedirs(os.path.dirname(TONE_AUDIT), exist_ok=True)
+            with open(TONE_AUDIT, "a", encoding="utf-8") as f:
+                f.write(json.dumps({
+                    # ★event="tone"= session_relay が次の封筒へ突き返す対象にする。
+                    #   名義は機械が直せても、**1行目に `[名前]` と名乗らない癖**は生成側でしか
+                    #   直らない。ここで黙ると同じ便が毎回出る(共通規律§3)。
+                    "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                    "dept": dept, "event": "tone",
+                    "persona": str(persona or ""),      # 既定で出ようとしていた方(誤)
+                    "to": str(who),                     # 本文が名乗っていた本当の話者
+                    "marker": "タグ無しで既定の%sで出ようとしたが本文は%sと名乗っている" % (persona, who),
+                    "reason": "speaker_unnamed_body_declared",
+                    "msg_id": str((rec or {}).get("msg_id", "")),
+                    "excerpt": str(text or "")[:200],
+                }, ensure_ascii=False) + "\n")
+        except Exception:
+            pass                 # 監査の失敗で名義の修正を巻き添えにしない
+        return who
+    except Exception:
+        return None              # fail-open= 転んだら従来どおり
+
+
 def _naming_rules():
     """呼称ルール.json を読む(読めなければ None=ゲートは無効化)。
 
@@ -10552,6 +10602,17 @@ class Daemon:
                     if _true_who:
                         _who = _true_who
                         _speaker = _true_who
+                # ★★出力ゲートF-2(2026-09-20)= **タグが無い便**の名義を本文の名乗りから直す。
+                #   ゲートFは `[名前]` で名乗った便しか見ない= タグが落ちた便(今回の実物)は
+                #   既定人格の名前とアイコンで出ていた。ここもC/Dより**先**に置く=
+                #   名義を直してから口調ゲートに渡さないと、別人の声へ書き直されてしまう。
+                #   ★機械名義の便(_speaker=MACHINE_PERSONA)は対象外= 機械の告知を
+                #     人格名義へ動かさない(2026-07-28 Chami指摘「精霊には喋らさないで」)。
+                elif not self.machine_named():
+                    _self_who = audit_self_named(self.dept, _speaker, _part, _roster, rec)
+                    if _self_who:
+                        _who = _self_who
+                        _speaker = _self_who
                 _new_part, _applied, _remain = audit_naming(self.dept, _speaker, _part, rec)
                 if _applied:
                     log(self.dept,

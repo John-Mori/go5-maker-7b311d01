@@ -91,6 +91,45 @@ def detect_english_dump(text):
         return None          # 検査が落ちても応答は続ける(fail-safe)
 
 
+_SCAFFOLD_MIN_LATIN = 25        # その行の英字(コード/URLを除く散文)の下限
+_SCAFFOLD_MIN_FUNC = 3          # その行の英語機能語の下限(固有名詞列と分ける線)
+_SEP_LINE_RE = re.compile(r"^\s*(?:-{3,}|\*{3,}|_{3,}|={3,})\s*$")
+
+
+def _cut_scaffold_head_line(body, info=None):
+    """前置きを剥がした残りの**1行目**に英語の足場文が残っていたら、その行ごと落とす。
+
+    ★純関数・fail-safe(転んだら入力をそのまま返す)。落としたら info["scaffold_line"] に
+      落とした行を入れる= **黙って消さない**(共通規律§2。呼び側が監査へ残せる)。
+    ★1行しか見ない= 2行目以降まで進めると「英語混じりの本文」を丸ごと消す事故になる。
+    """
+    try:
+        s = str(body or "")
+        head, nl, rest = s.partition("\n")
+        if not nl:
+            return s                           # 1行しか無い=落とすと空になる
+        h = head.strip()
+        if not h or h.startswith("[") or h.startswith("```"):
+            return s                           # 名乗りタグ/コード柵は触らない
+        core = re.sub(r"`[^`]*`", " ", h)
+        core = re.sub(r"https?://\S+", " ", core)
+        if (len(_LATIN_RE.findall(core)) < _SCAFFOLD_MIN_LATIN
+                or len(_EN_FUNC_RE.findall(core)) < _SCAFFOLD_MIN_FUNC):
+            return s                           # 英語の散文ではない=通常の本文
+        out = rest.lstrip(" \t\r\n")
+        # 足場文の直後に残る区切り線(`---`)も一緒に落とす= 足場の一部であって本文ではない
+        _l1, _nl1, _r1 = out.partition("\n")
+        if _nl1 and _SEP_LINE_RE.match(_l1):
+            out = _r1.lstrip(" \t\r\n")
+        if len(_JP_RE.findall(out)) < 20:
+            return s                           # 落とすと本文が痩せる=落とさない(安全側)
+        if isinstance(info, dict):
+            info["scaffold_line"] = h[:200]
+        return out
+    except Exception:
+        return str(body or "")
+
+
 def strip_english_preamble(text):
     """先頭の英語前置き(段落)だけを剥がし、日本語本文を残す(純関数・テスト可・fail-safe)。
 
@@ -151,6 +190,20 @@ def strip_english_preamble(text):
         body = s[cut:].lstrip(" \t\r\n")       # 日本語本文の頭から採用
         if len(_JP_RE.findall(body)) < 20:
             return s, info                     # 残りが薄い=実質まるごと英語→suppress/翻訳へ委ねる
+        # ★★2026-09-20 イージス研究室= L134-137 が「偽陽性0ではない」と書き残していた
+        #   **英日が1行に混ざった文の途中で切れる誤剥離**の、実物を掴んだので閉じる。
+        #   実物= manga-shorts msg 1550851084782800968(ESC-hr-room-1550916219786240062)。
+        #     原文1行目= `Dept-memory recorded and verified. Here is my single return to 軍議
+        #                 (the daemon relays this reply本文 and marks the 実依頼 ... ):`
+        #     最初の日本語文字は行の途中の「軍」= そこで切ると **`軍議 (the daemon relays
+        #     this reply本文 and marks ...):` が本文の頭として部屋へ出る**。剥がしたのに
+        #     裏方の足場文が残る=ククール裁定「裏方の段取り指示が本文へ漏れた」の経路そのもの。
+        #   ★落とすのは「剥がした残りの**1行目**が、なお英語の散文(機能語3語以上+英字25字以上)」
+        #     の時だけ。機能語で測るのは detect_english_dump と同じ理由= 固有名詞・パス・
+        #     識別子をいくら並べても機能語は増えない=正当便との分かれ目(C-035)。
+        #   ★安全弁= 名乗りタグ `[名前]` の行/コード柵は触らない。落とした後の日本語が
+        #     20字未満なら落とさない(本文を食わない)。判定は行1本だけ=2行目以降へは進まない。
+        body = _cut_scaffold_head_line(body, info)
         info["stripped"] = True
         info["removed_latin"] = head_latin
         return body, info
