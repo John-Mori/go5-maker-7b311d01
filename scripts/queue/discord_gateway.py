@@ -113,7 +113,7 @@ try:
     from react import (CODEX_OVERRIDE as _REACT_CODEX,      # noqa: E402
                        EMOJI_ID as _REACT_ID, EMOJI_NAME as _REACT_NAME)
 except Exception:
-    _REACT_CODEX = {"送信": ("uptsukiyomi", "1522060098355069139")}
+    _REACT_CODEX = {"送信": ("Send_MS_Boss", "1551218921170927649")}
     _REACT_ID = {"送信": "1527369203819085864"}
     _REACT_NAME = {"送信": "sendms"}
 SENT_MARK_FALLBACK = "\U0001F4EE"      # 📮 = カスタム絵文字が引けない時だけの退避(Claude側のみ)
@@ -243,9 +243,15 @@ def sent_mark_for(guild, dept, content="", attachments=None):
         return None                      # ★押さない(「生成依頼」便=描くのはローカル・2026-09-16)
     emojis = list(getattr(guild, "emojis", None) or [])
     if str(dept or "") == "codex":
-        name, eid = _REACT_CODEX.get("送信", ("uptsukiyomi", "1522060098355069139"))
-        for e in emojis:
-            if (eid and str(getattr(e, "id", "")) == str(eid)) or getattr(e, "name", "") == name:
+        # ★2026-09-20 Codex送信印を uptsukiyomi → Send_MS_Boss へ差し替え(Chami直命
+        #   msg 1551219293058768959・発注= 改善提案部門 msg 1551220560619503711)。
+        #   ここの既定値は react.py を読めなかった時の退避にすぎない(正本は react.CODEX_OVERRIDE)。
+        name, eid = _REACT_CODEX.get("送信", ("Send_MS_Boss", "1551218921170927649"))
+        for e in emojis:                 # ①ID一致(実名を改称されても当たる)
+            if eid and str(getattr(e, "id", "")) == str(eid):
+                return e
+        for e in emojis:                 # ②実名は保険(IDを持たない印用)
+            if getattr(e, "name", "") == name:
                 return e
         return f"{name}:{eid}" if eid else name
     eid = _REACT_ID.get("送信")

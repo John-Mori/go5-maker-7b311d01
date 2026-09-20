@@ -333,17 +333,22 @@ def main(argv):
                   "-> %s が受信経路の外へ出た" % type(e).__name__)
         check("5 印が押せなくても便は queue に入っている", "7" in queued(loc))
 
-        # ---- [6] Codex宛の配達= 送信印は uptsukiyomi(Codex印) ----
+        # ---- [6] Codex宛の配達= 送信印は Send_MS_Boss(Codex印) ----
         # ★研究室HQ 配線依頼 msg 1546348202960093225 の回帰。壊れた実物は
         #   「送信=sendms(Claude印) と 既読=‼️/着手=🐍(Codex印) が同じ1通に同居」。
         #   ここは判定(is_codex_mentioned→route_codex_summon→dept)を全部本物で回し、
         #   add_reaction に**実際に渡った値**だけを見る(ソース文字列一致では捕まらない型)。
+        # ★2026-09-20 差し替え= Codex送信印 uptsukiyomi → Send_MS_Boss
+        #   (Chami直命 msg 1551219293058768959 / 発注 改善提案部門 msg 1551220560619503711)。
+        #   uptsukiyomi は §E「月詠みアップ済」の本来意味へ戻った=ここで撃ったら回帰。
         print("[6] Codex宛の配達 (@ボス召喚)")
-        upt = FakeEmoji("uptsukiyomi", 1522060098355069139)
-        gc = FakeGuild([FakeEmoji("kidoku", 1), sendms, FakeEmoji("chakusyu", 2), upt])
+        boss_ms = FakeEmoji("Send_MS_Boss", 1551218921170927649)
+        upt = FakeEmoji("uptsukiyomi", 1522060098355069139)      # 旧印(押さなくなった側)
+        gc = FakeGuild([FakeEmoji("kidoku", 1), sendms, FakeEmoji("chakusyu", 2), upt, boss_ms])
         m8 = FakeMsg(8, "@ボス これ見てくれ", chami, ch, gc)
         asyncio.run(on_message(m8))
-        check("6 送信印は uptsukiyomi(Codex印)", m8.pushed[:1] == [upt], "-> %r" % (m8.pushed,))
+        check("6 送信印は Send_MS_Boss(Codex印)", m8.pushed[:1] == [boss_ms], "-> %r" % (m8.pushed,))
+        check("6 旧印(uptsukiyomi)はもう押されていない", upt not in m8.pushed)
         check("6 Claude印(sendms)は押されていない", sendms not in m8.pushed)
         check("6 便は dept=codex で queue に入っている", queued_dept(loc, "8") == "codex",
               "-> %r" % (queued_dept(loc, "8"),))
@@ -354,11 +359,11 @@ def main(argv):
         check("6 名指しでない便は従来どおり sendms", m9.pushed[:1] == [sendms],
               "-> %r" % (m9.pushed,))
 
-        # ギルドに uptsukiyomi が無くても Claude印へは落ちない (react.pyのIDアンカーと同じ)
+        # ギルドに Send_MS_Boss が無くても Claude印へは落ちない (react.pyのIDアンカーと同じ)
         m10 = FakeMsg(10, "@スネーク たのむ", chami, ch, FakeGuild([sendms]))
         asyncio.run(on_message(m10))
-        check("6 uptsukiyomiが引けなくてもIDアンカーで撃つ",
-              m10.pushed[:1] == ["uptsukiyomi:1522060098355069139"], "-> %r" % (m10.pushed,))
+        check("6 Send_MS_Bossが引けなくてもIDアンカーで撃つ",
+              m10.pushed[:1] == ["Send_MS_Boss:1551218921170927649"], "-> %r" % (m10.pushed,))
         check("6 引けない時もsendms/📮へは落ちない",
               sendms not in m10.pushed and "\U0001F4EE" not in m10.pushed)
 
@@ -366,7 +371,7 @@ def main(argv):
         mmc = FakeMsg(11, "@ボス 確認して", FakeAuthor("Chami(main)", 222, bot=True), ch, gc,
                       webhook_id=777)
         asyncio.run(on_message(mmc))
-        check("6 ミラー便のCodex召喚にも uptsukiyomi", mmc.pushed[:1] == [upt],
+        check("6 ミラー便のCodex召喚にも Send_MS_Boss", mmc.pushed[:1] == [boss_ms],
               "-> %r" % (mmc.pushed,))
 
         # ---- [7] 優依の部屋= 送信印を押さない (Chami直接指示 2026-09-12) ----
@@ -458,10 +463,10 @@ def main(argv):
 
         # 改称耐性がCodex側を侵していないこと(ID一致の枝を足しただけ=撃ち分けは不変)
         m23 = FakeMsg(23, "@ボス 改称後に召喚", chami, ch,
-                      FakeGuild([newname, FakeEmoji("uptsukiyomi", 1522060098355069139)]))
+                      FakeGuild([newname, FakeEmoji("Send_MS_Boss", 1551218921170927649)]))
         asyncio.run(on_message(m23))
-        check("9 Codex便は改称後も uptsukiyomi のまま",
-              bool(m23.pushed) and getattr(m23.pushed[0], "name", "") == "uptsukiyomi",
+        check("9 Codex便は改称後も Send_MS_Boss のまま",
+              bool(m23.pushed) and getattr(m23.pushed[0], "name", "") == "Send_MS_Boss",
               "-> %r" % (m23.pushed,))
         check("9 Codex便にClaude印(Send_MS)は混ざらない", newname not in m23.pushed)
 
