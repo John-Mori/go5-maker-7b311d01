@@ -215,8 +215,15 @@ else:
     _fb2 = dept_daemon.audit_persona_fallback(DEPT, FALLBACK, _PLAIN, ROSTER,
                                               {"msg_id": INCIDENT_LETTER})
     _l2 = audit_lines()
-    check("落ちたことは掴むが、書き直しは止めない 実測=%r" % (_fb2,),
+    # ★2026-09-20 22時台の改訂= ここも**止める**側へ変わった(人事部門ククールの回送)。
+    #   一人称が1つも無い便では contradicted が空=旧条件は素通りし、D-2 が既定人格の
+    #   語尾を全文へ塗った(copy-director の芽衣「なんだ！！」連打)。詳しい検査は
+    #   `scripts/llm/test_tone_fallback_norewrite.py`。
+    check("落ちたことを掴む(contradicted は空= 旧条件では素通りしていた) 実測=%r" % (_fb2,),
           _fb2.get("fell_back") and not _fb2.get("contradicted"))
+    check("★一人称が無くても書き直しは止める 実測=%r"
+          % (dept_daemon.tone_rewrite_blocked(_fb2),),
+          dept_daemon.tone_rewrite_blocked(_fb2) is True)
     check("理由= persona_fallback_default で1行残る 実測=%r"
           % ([e.get("reason") for e in _l2],),
           len(_l2) == 1 and _l2[0].get("reason") == "persona_fallback_default")

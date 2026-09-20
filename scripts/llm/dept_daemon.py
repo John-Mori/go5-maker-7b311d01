@@ -5925,9 +5925,21 @@ def audit_self_named(dept, persona, text, roster, rec=None):
         return None              # fail-open= 転んだら従来どおり
 
 
-def audit_persona_fallback(dept, persona, text, roster, rec=None):
-    """出力ゲートF-3= **名義が引けず既定人格へ落ちた**便を1行残し、本文が別人格を
-    指しているなら**書き直しを止める**(2026-09-20・研究室HQ シャビ・アロンソの依頼)。
+def audit_persona_fallback(dept, persona, text, roster, rec=None, resolve=None):
+    """出力ゲートF-3= **名義が引けず既定人格へ落ちた**便を1行残し、
+    **話者依存の書き直し(C/D/D-2)を止める**(2026-09-20・研究室HQ シャビ・アロンソの依頼)。
+
+    ★2026-09-20 22時台の改訂(人事部門ククールの回送・起点= Chami改悪スタンプ
+      msg 1551217685986017425 / 壊れた実物= copy-director msg 1551214483240656967):
+      止める条件を「本文が別人格の一人称で埋まっている時(contradicted)」から
+      **既定へ落ちた便すべて(fell_back)**へ広げた。理由=
+        名義が既定へ落ちた時点で「この本文を書いた人」と「口調ゲートが見る写像」は
+        もう別人だ。**一人称が出ていない便では contradicted が空になる**ので、
+        旧条件は素通りし、D-2 が既定人格の指紋語尾を全文へ塗った
+        (実物= 三笘の作業報告が「検算OKなんだ！！」「直したよ〜」💕 の芽衣語尾で出た)。
+      = 止める理由は「別人の一人称が在るか」ではなく「**話者が確定していないか**」。
+      実測(tone_audit.jsonl 2026-09-20 F-3投入後)= persona_fallback_default は3件、
+      うち D-2 が乗ったのは1件(=この改悪)。止めても失う書き直しはほぼ無い。
 
     壊れた実物(2026-09-20 18:18:43〜18:24 研究室HQ・Chami「インシデントです」):
       アロンソが1行目の `[シャビ・アロンソ]` をコード柵の中へ入れた
@@ -5953,9 +5965,18 @@ def audit_persona_fallback(dept, persona, text, roster, rec=None):
         識別力のある一人称が**ちょうど1人ぶん**の時だけ名前が返る。引用・コード柵・
         パス・固有名詞列は数えない。
     ★単独人格の部屋は対象外(roster が2人未満)= そこでは既定名義が正常な既定だ。
-    返り値: {"fell_back": bool, "contradicted": 別人格名 or ""}。例外時は落ちた印だけ False。
+    ★`resolve` を渡すと、本文に**解決できる同室別人格のタグ**(`[三笘]` 等)が在るかを数えて
+      `tag_names` に残す(人事部門ククールの依頼2への答=「話者すり替えの根」の計器)。
+      ★**名義はそれでも動かさない**= 壊れた実物のタグは行頭の名乗りではなく
+        「Discordへ[三笘]で報告する。」という**文中の言及**だ。言及で名義を動かすと
+        「[アメス]へ回す」と書いた便がアメスの顔で出る=上に書いた最も害の大きい誤りへ倒れる。
+        行頭の名乗りなら split_persona_blocks が既に(1行目でなくても)拾って割っている。
+      → ここでは数えて marker に書き、session_relay が**次の封筒へ突き返す**。
+        直すのは生成側の名乗り方だ(機構で名義を推測しない)。
+    返り値: {"fell_back": bool, "contradicted": 別人格名 or "", "tag_names": {名前: 回数}}。
+      例外時は落ちた印だけ False。
     """
-    out = {"fell_back": False, "contradicted": ""}
+    out = {"fell_back": False, "contradicted": "", "tag_names": {}}
     try:
         if not persona or len(roster or ()) < 2:
             return out
@@ -5980,6 +6001,26 @@ def audit_persona_fallback(dept, persona, text, roster, rec=None):
             c = _t.count(nm)
             if c:
                 names[nm] = c
+        # ★本文中の `[名前]`(文中の言及も含む)で、この部屋で解決できる別人格のもの。
+        #   数えるだけ= 名義は動かさない(上の説明)。柵の中は勘定に入れない。
+        tags = {}
+        if callable(resolve):
+            try:
+                _ln = _t.split("\n")
+                _fen = _fenced_lines(_ln)
+                for _i, _line in enumerate(_ln):
+                    if _i in _fen:
+                        continue
+                    for _raw in re.findall(r"[\[［]([^\[\]［］\n]{1,24})[\]］]", _line):
+                        _w = resolve(_raw)
+                        if not _w or _w == persona:
+                            continue
+                        tags[_w] = tags.get(_w, 0) + 1
+            except Exception:
+                tags = {}
+        out["tag_names"] = tags
+        _tagnote = (("(★本文には解決できる `[%s]` が在る=1行目に置けば名義は正しく出た)"
+                     % "][".join(sorted(tags))) if tags else "")
         mid = str((rec or {}).get("msg_id", ""))
         if other:
             log(dept, f"★出力ゲートF-3(名義の疑い): 名乗りが無く既定の{persona}へ落ちたが、"
@@ -5987,7 +6028,8 @@ def audit_persona_fallback(dept, persona, text, roster, rec=None):
                       f"(名義も本文も触らない) msg={mid}")
         else:
             log(dept, f"★出力ゲートF-3(名義が既定へ落ちた): 1行目に解決できる `[名前]` が無い"
-                      f"=この便は既定の{persona}の名前とアイコンで出る msg={mid}")
+                      f"=この便は既定の{persona}の名前とアイコンで出る"
+                      f"{_tagnote}=**呼称/口調の書き直しは行わない** msg={mid}")
         try:
             os.makedirs(os.path.dirname(TONE_AUDIT), exist_ok=True)
             with open(TONE_AUDIT, "a", encoding="utf-8") as f:
@@ -5999,10 +6041,12 @@ def audit_persona_fallback(dept, persona, text, roster, rec=None):
                     "marker": (("名乗りが無く既定の%sで出るが、本文の一人称は%sのもの"
                                 "=書き直しを止めた") % (persona, other)) if other else
                               ("1行目に解決できる `[名前]` が無い"
-                               "=この便は既定の%sの名前とアイコンで出た" % (persona,)),
+                               "=この便は既定の%sの名前とアイコンで出た"
+                               "(語尾の書き直しは止めた)%s" % (persona, _tagnote)),
                     "reason": ("speaker_contradicts_fallback" if other
                                else "persona_fallback_default"),
                     "other_names": names,
+                    "tag_names": tags,
                     "msg_id": mid,
                     "excerpt": _t[:200],
                 }, ensure_ascii=False) + "\n")
@@ -6011,6 +6055,19 @@ def audit_persona_fallback(dept, persona, text, roster, rec=None):
         return out
     except Exception:
         return out               # fail-open= 転んだら従来どおり
+
+
+def tone_rewrite_blocked(fb):
+    """F-3の結果から「話者依存の書き直し(C/D/D-2)を止めるか」を決める**1本**。
+
+    ★判定を2つ持たない(ORG-11)= 呼び元の式に埋めると、検査が見られるのは
+      audit_persona_fallback までで「呼び元がどちらの鍵を読んでいるか」は見えない。
+      ここに名前を付けると、実走の検査がこの1本を差し替えて**旧条件へ戻した時の赤**を
+      実測できる(C-053の変異点)。
+    ★条件= fell_back(名義が既定へ落ちた便すべて)。contradicted(別人格の一人称が在る)は
+      その部分集合= 一人称が1つも出ていない便で旧条件が素通りしたのが 2026-09-20 の改悪。
+    """
+    return bool((fb or {}).get("fell_back"))
 
 
 def _naming_rules():
@@ -10900,8 +10957,13 @@ class Daemon:
                         #   タグも本文の名乗りも無い= **名義は既定人格へ落ちている**。
                         #   その事実を1行残し(A)、本文が別人格を指すなら下の
                         #   書き直し(C/D/D-2)を止める(B)。名義も本文も動かさない。
-                        _fb = audit_persona_fallback(self.dept, _speaker, _part, _roster, rec)
-                        _no_rewrite = bool(_fb.get("contradicted"))
+                        #   ★2026-09-20 22時台(人事部門ククールの回送)= 止める条件を
+                        #     **既定へ落ちた便すべて**へ広げた(tone_rewrite_blocked)。
+                        #     一人称が1つも無い便では contradicted が空=旧条件は素通りし、
+                        #     D-2 が既定人格の指紋語尾を全文へ塗った(芽衣「なんだ！！」連打)。
+                        _fb = audit_persona_fallback(self.dept, _speaker, _part, _roster, rec,
+                                                     resolve=_tag_resolve)
+                        _no_rewrite = tone_rewrite_blocked(_fb)
                 # ★_no_rewrite= 名義が怪しい便では**話者依存の書き直しを走らせない**。
                 #   走らせると別人の写像で本文を洗い、名義の食い違いの証拠が消える
                 #   (実物= 18:20:42 tone_fix 俺→あたし x4 → 18:20:47 tone_rewrite)。
