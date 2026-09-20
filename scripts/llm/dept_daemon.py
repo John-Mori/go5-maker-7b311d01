@@ -5925,6 +5925,94 @@ def audit_self_named(dept, persona, text, roster, rec=None):
         return None              # fail-open= 転んだら従来どおり
 
 
+def audit_persona_fallback(dept, persona, text, roster, rec=None):
+    """出力ゲートF-3= **名義が引けず既定人格へ落ちた**便を1行残し、本文が別人格を
+    指しているなら**書き直しを止める**(2026-09-20・研究室HQ シャビ・アロンソの依頼)。
+
+    壊れた実物(2026-09-20 18:18:43〜18:24 研究室HQ・Chami「インシデントです」):
+      アロンソが1行目の `[シャビ・アロンソ]` をコード柵の中へ入れた
+      → `_fenced_lines` が柵の中のタグを名乗りと見なさない(正しい)
+      → split_persona_blocks が解決できる名乗りを1つも見つけられず [(None, 本文)]
+      → gate_speaker(None) → effective_persona() = 部屋の既定人格「アメス」。
+      ★この「落ちた」事実を書く行は **send_audit にも tone_audit にも1行も無かった**。
+        アロンソは3便続けて気づかず、hqの全便がアメス名義で出た。
+
+    ここが直す2つ:
+      (A) 落ちたら必ず1行残す。event="tone"= session_relay が**次の封筒へ突き返す**
+          =書いた本人の画面に出る(ログを見に行く人間を要件にしない=共通規律§3)。
+      (B) 落ちた上に**本文が別人格の一人称で埋まっている**なら、口調・呼称の書き直しを
+          **行わない**。実物では tone_fix が 俺→あたし を4箇所置換し、続く tone_rewrite が
+          LLMを1本焚いて「すまん。」を「すまんわね。」へ寄せた=**名義の食い違いの証拠を
+          機械が洗い流した**。書き直す前に疑って止まる、が要件(アロンソ原文)。
+    ★名義は動かさない。本文も1文字も触らない。**止めるだけ**(沈黙させない=便は出る)。
+      名義を別人へ動かすのはタグという一次証拠が在る時(ゲートF)と、本文の名乗りが在る時
+      (ゲートF-2)だけだ。どちらも無いこの形で名前を推測で動かすと、
+      「他人のアイコンで別人の言葉を出す」=最も害の大きい誤りへ倒れる。
+    ★証拠の判定は misattributed_speaker を**そのまま**使う(判定を2つ持たない・ORG-11)。
+      = 自分の一人称が1つでも在れば黙る / 自分の指紋語尾が在れば黙る / 他人格の
+        識別力のある一人称が**ちょうど1人ぶん**の時だけ名前が返る。引用・コード柵・
+        パス・固有名詞列は数えない。
+    ★単独人格の部屋は対象外(roster が2人未満)= そこでは既定名義が正常な既定だ。
+    返り値: {"fell_back": bool, "contradicted": 別人格名 or ""}。例外時は落ちた印だけ False。
+    """
+    out = {"fell_back": False, "contradicted": ""}
+    try:
+        if not persona or len(roster or ()) < 2:
+            return out
+        out["fell_back"] = True
+        other = ""
+        try:
+            rules = _tone_rules()
+            if _tone_gate is not None and rules:
+                other = _tone_gate.misattributed_speaker(persona, text, rules, roster) or ""
+        except Exception:
+            other = ""                       # 証拠が取れない=(A)だけ残す
+        if other and _tone_gate is not None and _tone_gate._norm(other) == _tone_gate._norm(persona):
+            other = ""
+        out["contradicted"] = other
+        # ★裏付け(判定には使わない)= 本文に立っている同室の別人格名。アロンソが指した
+        #   tone_structure の other_names と同じ数え方(柵も潰さない生の出現数)にしてある。
+        names = {}
+        _t = str(text or "")
+        for nm in roster:
+            if not nm or nm == persona:
+                continue
+            c = _t.count(nm)
+            if c:
+                names[nm] = c
+        mid = str((rec or {}).get("msg_id", ""))
+        if other:
+            log(dept, f"★出力ゲートF-3(名義の疑い): 名乗りが無く既定の{persona}へ落ちたが、"
+                      f"本文の一人称は{other}のもの=**呼称/口調の書き直しを行わない**"
+                      f"(名義も本文も触らない) msg={mid}")
+        else:
+            log(dept, f"★出力ゲートF-3(名義が既定へ落ちた): 1行目に解決できる `[名前]` が無い"
+                      f"=この便は既定の{persona}の名前とアイコンで出る msg={mid}")
+        try:
+            os.makedirs(os.path.dirname(TONE_AUDIT), exist_ok=True)
+            with open(TONE_AUDIT, "a", encoding="utf-8") as f:
+                f.write(json.dumps({
+                    "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                    "dept": dept, "event": "tone",
+                    "persona": str(persona or ""),        # 既定で出る方(fail-safe先)
+                    "to": str(other or ""),               # 本文が指している別人格(在れば)
+                    "marker": (("名乗りが無く既定の%sで出るが、本文の一人称は%sのもの"
+                                "=書き直しを止めた") % (persona, other)) if other else
+                              ("1行目に解決できる `[名前]` が無い"
+                               "=この便は既定の%sの名前とアイコンで出た" % (persona,)),
+                    "reason": ("speaker_contradicts_fallback" if other
+                               else "persona_fallback_default"),
+                    "other_names": names,
+                    "msg_id": mid,
+                    "excerpt": _t[:200],
+                }, ensure_ascii=False) + "\n")
+        except Exception:
+            pass                 # 監査の失敗で配送を巻き添えにしない
+        return out
+    except Exception:
+        return out               # fail-open= 転んだら従来どおり
+
+
 def _naming_rules():
     """呼称ルール.json を読む(読めなければ None=ゲートは無効化)。
 
@@ -10787,6 +10875,7 @@ class Daemon:
                 #   人格の便では `_who or effective_persona()` と1ミリも変わらない。
                 #   変わるのは**機械名義の便だけ**= 誰の口調にも寄せない(第2の口を塞ぐ)。
                 _speaker = self.gate_speaker(_who)
+                _no_rewrite = False     # ★ゲートF-3が「名義が怪しい」と言ったブロックの印
                 # ★★出力ゲートF(名義の取り違え)= C/Dより**先**に走らせる(audit_speaker の説明参照)。
                 #   `[名前]` で名乗った便だけが対象。名義を差し替えてから C/D に渡すので、
                 #   下のゲートは**正しい話者**の写像で判定する=誤った書き直しが起きない。
@@ -10806,7 +10895,20 @@ class Daemon:
                     if _self_who:
                         _who = _self_who
                         _speaker = _self_who
-                _new_part, _applied, _remain = audit_naming(self.dept, _speaker, _part, rec)
+                    else:
+                        # ★★出力ゲートF-3(2026-09-20・研究室HQ アロンソの依頼)=
+                        #   タグも本文の名乗りも無い= **名義は既定人格へ落ちている**。
+                        #   その事実を1行残し(A)、本文が別人格を指すなら下の
+                        #   書き直し(C/D/D-2)を止める(B)。名義も本文も動かさない。
+                        _fb = audit_persona_fallback(self.dept, _speaker, _part, _roster, rec)
+                        _no_rewrite = bool(_fb.get("contradicted"))
+                # ★_no_rewrite= 名義が怪しい便では**話者依存の書き直しを走らせない**。
+                #   走らせると別人の写像で本文を洗い、名義の食い違いの証拠が消える
+                #   (実物= 18:20:42 tone_fix 俺→あたし x4 → 18:20:47 tone_rewrite)。
+                #   ★止めるのは書き直しだけ= 便はそのまま出る(沈黙させない)。
+                _new_part, _applied, _remain = (
+                    audit_naming(self.dept, _speaker, _part, rec) if not _no_rewrite
+                    else (_part, [], []))
                 if _applied:
                     log(self.dept,
                         f"★出力ゲートC(呼称・自動修正): 話者={_speaker} "
@@ -10823,7 +10925,9 @@ class Daemon:
                 #   ★2026-08-12 格上げ= 警告のみ → **違反した便だけ書き直す**(人事部門の発注・HQ裁定)。
                 #     呼称ゲートCと同じ形= 直した分で _part を差し替え、下の送信ループがそれを送る。
                 #   ★書き直しは1回まで/直しきれなければ元の本文を通す=fail-open(audit_tone が保証)。
-                _new_tone, _tfix, _tone = audit_tone(self.dept, _speaker, _part, rec)
+                _new_tone, _tfix, _tone = (
+                    audit_tone(self.dept, _speaker, _part, rec) if not _no_rewrite
+                    else (_part, [], []))
                 if _tfix:
                     log(self.dept,
                         f"★出力ゲートD(口調・書き直し): 話者={_speaker} "
