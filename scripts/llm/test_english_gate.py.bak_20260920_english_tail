@@ -128,13 +128,6 @@ LEGIT_MIXED = (
     "Everything is confirmed. Reporting to Chami now.\n\n---\n\n[オタコン"
 )
 
-# HQ通常応答を模した再現。従来の段落ゲートは英字16字・4語のこの末尾文を素通しした。
-# 日本語本文を残したまま、短い英語ナレーションだけが出口で剥がれることを固定する。
-SHORT_ENGLISH_TAIL = (
-    "調べた。通常応答の日本語本文はここに残す。原因と次の確認点を記録した。"
-    "\n\nDone. Report to Chami."
-)
-
 
 def test_detect():
     _check("実物の英文ダンプを検知", d.detect_english_dump(ENGLISH) is not None)
@@ -329,16 +322,6 @@ def test_mixed_dump():
         _check("D-4 落ちるのは末尾の英語ナレーション1段落だけ",
                bool(_lm) and "Everything is confirmed" not in _lm
                and "Reporting to Chami now" not in _lm)
-        _short = ps.english_backstop(SHORT_ENGLISH_TAIL, "テスト(test_english_gate)", "test")
-        _check("D-4b ★HQ通常応答の短い末尾英文を剥離する",
-               bool(_short) and "Done. Report to Chami." not in _short
-               and "通常応答の日本語本文" in _short)
-        import enjoh
-        _audit = enjoh.scrub_audit_file()
-        _check("D-4b 剥離の発火が enjoh_scrub 台帳へ記録される",
-               os.path.exists(_audit) and any(
-                   '"kind": "english_para"' in line and '"tag": "persona_send"' in line
-                   for line in open(_audit, encoding="utf-8")))
         _check("D-4 ミラー名義(Chami)は英語でも触らない",
                ps.english_backstop(MIXED_DUMP, "Chami(ミラー)", "1") == MIXED_DUMP)
     except Exception as _e:                                 # noqa: BLE001

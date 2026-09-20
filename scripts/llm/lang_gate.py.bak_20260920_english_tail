@@ -564,8 +564,7 @@ def _english_paragraph_spans(text, min_latin=35, min_words=5):
         return []
 
 
-def strip_english_paragraphs(text, min_latin=35, min_words=5, min_jp_left=20,
-                             tail_min_latin=16, tail_min_words=4):
+def strip_english_paragraphs(text, min_latin=35, min_words=5, min_jp_left=20):
     """日本語の便の**末尾/中間に居る純英語の散文段落**を能動的に剥ぐ(純関数・fail-safe)。
 
     なぜ要るか(2026-09-11・実物 system-engineer msg 1547703386911285425):
@@ -584,9 +583,8 @@ def strip_english_paragraphs(text, min_latin=35, min_words=5, min_jp_left=20,
     安全弁(通常返信を1ミリも変えない・迷ったら残す):
       ・日本語が1文字も無い本文は触らない= まるごと英語は `detect_english_dump` と
         呼び側の english_gate(再生成/保留)の持ち場。ここで握り潰さない。
-      ・中間段落は従来どおり英字35字以上・5語以上。末尾だけは英字16字以上・4語以上へ
-        下げ、短い完了ナレーションも止める。日本語0字の段落だけを対象とし、記号が濃い塊、
-        コード柵・インラインコード・URLは除外する。py3langid が在れば en 判定も要る。
+      ・判定は `_english_paragraph_spans` と同一(日本語0字の段落 / 英字35字以上 / 5語以上 /
+        記号が濃くない / py3langid が在れば en だけ)。コード柵・インラインコード・URLは除外。
       ・名乗りタグ `[...]` を含む段落は剥がない= 1行目の `[名前]` が壊れると前置き除去・
         口調監査・監査記録がまとめて抜ける(HQ-0227 の実物と同じ壊れ方)。
       ・剥いだ残りの日本語が min_jp_left(20)字未満なら**何もしない**= 実質まるごと英語は
@@ -600,11 +598,7 @@ def strip_english_paragraphs(text, min_latin=35, min_words=5, min_jp_left=20,
         s = str(text or "")
         if not s or not _JP_RE.search(s):
             return text, info                  # 日本語ゼロ=まるごと非日本語→後段へ委ねる
-        candidates = _english_paragraph_spans(s, tail_min_latin, tail_min_words)
-        spans = [sp for sp in candidates
-                 if ((sp["latin"] >= min_latin and sp["words"] >= min_words)
-                     or not s[sp["end"]:].strip())]
-        spans = [sp for sp in spans
+        spans = [sp for sp in _english_paragraph_spans(s, min_latin, min_words)
                  if not _NAME_TAG_RE.search(s[sp["start"]:sp["end"]])]
         if not spans:
             return text, info

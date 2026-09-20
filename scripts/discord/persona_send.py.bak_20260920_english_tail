@@ -855,14 +855,6 @@ def english_backstop(body, persona, channel):
         if para.get("stripped"):
             _by = ",".join(para.get("by") or [])
             _ex = (para.get("excerpts") or [""])[0][:80]
-            # stderr は上流の capture_output で消える。既存の enjoh_scrub 台帳へ、
-            # persona_send 直通口で剥いだ事実も残す。判定・除去は lang_gate のまま。
-            try:
-                from enjoh import scrub_audit
-                scrub_audit("english_para", "persona_send", para["stripped"],
-                            f"latin={para.get('removed_latin')} by={_by} | {_ex}")
-            except Exception:
-                pass
             print(f"[persona_send] ★英語段落を{para['stripped']}件剥離"
                   f"(英字{para.get('removed_latin')}・判定{_by})→日本語本文だけ送る。"
                   f"冒頭=…{_ex}…", file=sys.stderr)
