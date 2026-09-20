@@ -72,52 +72,15 @@ from leasequeue import LeaseQueue  # noqa: E402
 # ★codex_enabled.txt が無い間はこの経路を丸ごと素通し=現状と完全同一(回帰ゼロ)。
 sys.path.insert(0, os.path.join(ROOT, "scripts", "llm"))
 try:
-    from codex_trigger import is_codex_mentioned, is_codex_author  # noqa: E402
+    from codex_trigger import is_codex_mentioned  # noqa: E402
 except Exception:
     def is_codex_mentioned(_content):   # 依存が無くても gateway は動く
         return False
-
-    def is_codex_author(author_id="", author_name=""):
-        return False                     # 判定できない時は取り込まない(bot一括除外のまま)
 CODEX_ENABLE_FLAG = os.path.join(LOCAL, "codex_enabled.txt")
 
 
 def _codex_summon_on():
     return os.path.exists(CODEX_ENABLE_FLAG)
-
-
-def codex_intake_decision(is_bot=False, webhook_id=None, author_id="", author_name="",
-                          dept="", self_id=None):
-    """この bot/webhook 発言を「Codex便」として取り込むか。(取り込む?, 理由) を返す。
-
-    ★2026-09-20 イージス研究室(人事部門ククール便 msg 1551235369209430038 / 起点=Chami
-      msg 1551232720326369301「ボス(Codex)の内容って届いてないよね？ちゃんと認識できる
-      ようにならない？」)。
-    何が壊れていたか= 受信入口の `if m.author.bot or m.webhook_id: ... return` が
-      **Codexの回答ごと**捨てていた。@ボス召喚の往路(dept→codex付け替え)はあるのに、
-      復路(Codexの回答)を依頼元の部屋が便として拾う口が1つも無かった。
-    ★bot を全開放しない= 下の条件を全部満たした1種類だけを通す。判定材料は純粋な値だけ
-      (discord.Message を受け取らない)= Discordへ繋がずに実行で検査できる。
-      ・Codex bot 本人である(識別の正本= codex_trigger.is_codex_author)
-      ・自分(このgatewayのbot)ではない= 自分の投稿で自分を起こさない
-      ・webhook 名義ではない(Codexは bot token で直接投稿する。webhookは鳩のミラー等)
-      ・その部屋の dept が 'codex' ではない= Codex専用部屋へCodexが書いたものを入れると
-        codex_responder が拾って**自分の回答に自分で答える**輪ができる
-    ★召喚フラグ(codex_enabled.txt)では門を閉めない= セッションが自分の判断で
-      `codex_run.py --ask-file` に委任した時の回答は、召喚経路を通らずに部屋へ出る。
-      そこが今まさに落ちている便なので、フラグの有無に関係なく取り込む。
-    """
-    if not (is_bot or webhook_id):
-        return False, "人の発言(通常経路)"
-    if self_id is not None and str(author_id or "") == str(self_id):
-        return False, "自分の投稿"
-    if not is_codex_author(author_id, author_name):
-        return False, "Codex以外のbot/webhook"
-    if webhook_id:
-        return False, "webhook名義(Codex本人はbot tokenで投稿する)"
-    if str(dept or "") == "codex":
-        return False, "Codex専用部屋(responderが自分の回答に答える輪になる)"
-    return True, "Codex便"
 
 
 def route_codex_summon(rec):
@@ -898,199 +861,6 @@ def run_realtime_watch(kind):
             log(f"★実時間スタンプ({kind}) 起動に失敗(朝8時の巡回が後詰め): {type(e).__name__}: {e}")
 
 
-async def handle_message(m, chan_map, q, self_id=None):
-    """受信1通の処理本体(旧 on_message の中身をそのまま外へ出したもの)。
-
-    ★2026-09-20 イージス研究室= run_gateway のクロージャから module直下へ移した。
-      自由変数は chan_map と q の2つだけだったので、引数2つで等価に外へ出る。
-      なぜ出すか= 受信入口の分岐(とくにCodex便の取り込み)を**Discordへ繋がずに実行で**
-      検査できるようにするため。ソース文字列の一致で「入っている」を確かめる検査にしない
-      (C-053)。回帰ガード= scripts/queue/test_codex_intake.py。
-    """
-    _touch_pulse()  # 実メッセージが処理経路を通った証跡(job_pulseの45秒より高解像度)
-    from_codex = False
-    if m.author.bot or m.webhook_id:
-        # ★Codex(ボス)便だけは bot一括除外から切り出して**便にする**(2026-09-20)。
-        #   判断は codex_intake_decision 1本(理由はそこに書いてある)。取り込む時だけ
-        #   下の通常経路へ落ちる= 部屋のdeptのままenqueueされ、依頼元セッション/巡回が拾う。
-        _cinfo = chan_map.get(str(getattr(m.channel, "id", "") or "")) or {}
-        from_codex, _why = codex_intake_decision(
-            is_bot=bool(getattr(m.author, "bot", False)),
-            webhook_id=getattr(m, "webhook_id", None),
-            author_id=getattr(m.author, "id", ""),
-            author_name=getattr(m.author, "name", ""),
-            dept=str(_cinfo.get("dept", "")),
-            self_id=self_id)
-        if from_codex:
-            log(f"★Codex便を取り込む [{_cinfo.get('name', '?')}] msg={m.id} "
-                f"dept={_cinfo.get('dept', '')} ({_why})")
-    if (m.author.bot or m.webhook_id) and not from_codex:
-        # 鳩と同じ例外 (2026-07-18 Chami指示): Chamiミラーには送信印だけ押す (enqueueしない)。
-        # jobsゲート内=シャドウ無副作用の原則維持。鳩と並走中は同一絵文字が1個に収束=無害。
-        if (ACTIVE_JOBS and m.webhook_id
-                and str(getattr(m.author, "name", "")).startswith("Chami(")):
-            try:
-                # ミラーには rec が無いので、召喚の判定だけ本経路と同じ関数で取る
-                # (@ボス と書かれたChami便のミラーにも Codex印が付く=表示が本経路と揃う)。
-                # ★2026-09-12: 召喚でない時は**その部屋のdept**を渡す(旧= 空文字)。
-                #   優依の部屋(llm-growth)はミラー便にも印を押さない= 押下点が2つある
-                #   のに片方だけ直すと「本体には付かないがミラーには付く」で再発する(C-064)。
-                #   空文字でも llm-growth 以外の挙動は1つも変わらない(下の分岐は codex と
-                #   NO_SENT_MARK_DEPTS しか見ていない)。
-                _mdept = ("codex" if (_codex_summon_on()
-                                      and is_codex_mentioned(m.content or ""))
-                          else str((chan_map.get(str(m.channel.id)) or {}).get("dept", "")))
-                # ★2026-09-20 添付も渡す= 字だけの便には押す部屋(imagetag)が増えたので、
-                #   ミラー側にも同じ材料を渡さないと本体と表示が割れる(C-064)。
-                emoji = sent_mark_for(m.guild, _mdept, m.content or "",
-                                      _mirror_attachment_urls(m))
-                if emoji is None:
-                    return          # ★押さない部屋(ミラーもenqueueしないのでここで終わり)
-                await m.add_reaction(emoji)
-            except Exception as e:
-                log(f"ミラー送信印失敗(継続): {type(e).__name__}")
-        return  # Bot/Webhookの発言は無視 (自分の返信でループしない=鳩と同じ方針)
-    cid = str(m.channel.id)
-    if cid not in chan_map:
-        # ★黙って捨てない(2026-07-20)。ここは「人が話しかけたのに何も起きない」唯一の分岐で、
-        #   キュー行が生まれない=未配送監視もorphan監視も反応しない完全な沈黙点だった。
-        #   ch単位で1回だけ記録する(同じ部屋の連投でログを埋めない)。
-        seen = handle_message.__dict__.setdefault("unknown_ch", set())
-        if cid not in seen:
-            seen.add(cid)
-            log(f"★台帳外chへの発言を破棄: #{getattr(m.channel, 'name', cid)} (id={cid}) "
-                f"from={getattr(m.author, 'name', '?')} — 台帳未登録かgatewayが未追従")
-        return
-    # ★集中ウィンドウのDiscordトリガー(2026-07-21 Chami要望)。
-    #   人間の発言(bot/webhookは上で除外済み)が「集中」「focus」で始まる時だけ、
-    #   デーモンの見張り間隔を速くする札(local/llm/focus_until.txt)を立てる。
-    #   「集中60」「focus 90」で分指定・「集中off」で終了。誤爆しないよう**先頭一致**に限定。
-    _txt = (m.content or "").strip()
-    _low = _txt.lower()
-    # ★集中ウィンドウは2026-07-21に廃止(常時2秒)。このトリガーは無効化した。
-    #   放置すると「集中オフだった場合は…」のような**普通の文**が先頭一致で誤爆し、
-    #   さらに文中の数字(「10時間前」の10)を分数として拾って札を立てていた(実測)。
-    #   Chamiは「作動してそう」と正しく疑い、HQは誤ったgrep(存在しないパス)で否定した。
-    if False:
-        try:
-            import re as _re
-            arg = _txt[2:].strip() if _low.startswith("集中") else _txt[5:].strip()
-            focus_file = os.path.join(LOCAL, "llm", "focus_until.txt")
-            if arg in ("off", "終了", "0", "オフ"):
-                try:
-                    os.remove(focus_file)
-                except OSError:
-                    pass
-                msg = "集中ウィンドウ終了(平常=遅い間隔)"
-            else:
-                mm = _re.search(r"\d+", arg)
-                minutes = int(mm.group(0)) if mm else 60
-                os.makedirs(os.path.dirname(focus_file), exist_ok=True)
-                with open(focus_file, "w", encoding="utf-8") as f:
-                    f.write(str(time.time() + minutes * 60))
-                msg = f"集中ウィンドウ開始 {minutes}分(この間デーモンは速く拾う)"
-            log(f"集中トリガー[{chan_map[cid].get('name', cid)}]: {msg}")
-            try:
-                emoji = discord.utils.get(m.guild.emojis, name="着手") or "⚡"
-                await m.add_reaction(emoji)
-            except Exception:
-                pass
-        except Exception as e:
-            log(f"集中トリガー失敗(継続): {type(e).__name__}")
-        return   # 集中コマンドは会話ではないのでenqueueしない
-    rec = record_from_message(m, chan_map[cid])
-    # ★@ボス(Codex)召喚= 名指しされた発言だけ dept を 'codex' へ付け替える(部屋は乗っ取らない)。
-    #   codex_enabled.txt が無い間は素通し=回帰ゼロ。実応答は codex_responder→codex_run が返す。
-    if from_codex:
-        # ★Codex便には出どころを載せる= 拾う側(セッション/巡回)が「ボスの回答だ」と
-        #   見分けられる1枚。author(Codex_SnakeBot)だけに頼らない。
-        rec["from_codex"] = True
-    elif _codex_summon_on() and rec.get("dept") != "codex" and is_codex_mentioned(rec.get("content", "")):
-        # ★Codex便は召喚判定へ**入れない**= 回答文の中に「@ボス」等が書かれていると
-        #   dept が codex へ戻り、ボスが自分の回答に答え続ける輪になる(ループ防止の要)。
-        log(f"@ボス召喚[{rec['channel']}] msg={rec['msg_id']} dept={rec['dept']}→codex")
-        rec = route_codex_summon(rec)
-    # ★引用元が展開されなかった時だけ**1回だけ**取りに行く (2026-07-27)。
-    #   実測方針: 通常のリプライは Gateway の MESSAGE_CREATE に referenced_message が同梱され、
-    #   `m.reference.resolved` で本文まで取れる=**ここへは来ない**。来るのは
-    #   「引用元が古い/キャッシュ外」の例外だけなので、その時だけAPIを1回叩く。
-    #   ★失敗しても便は落とさない。失敗したことを note に足して**取れなかったと分かる形**で残す。
-    _rt = rec.get("reply_to")
-    if _rt and not _rt.get("resolved") and _rt.get("msg_id", "").isdigit():
-        try:
-            src = await m.channel.fetch_message(int(_rt["msg_id"]))
-            got = _quote_of(src)
-            if got:
-                rec["reply_to"] = got
-                log(f"引用元を再取得 msg={rec['msg_id']} ref={_rt['msg_id']}")
-            else:
-                _rt["note"] += " / 再取得しても本文が無い"
-        except Exception as e:
-            _rt["note"] += f" / 再取得も失敗({type(e).__name__})"
-            log(f"引用元の再取得に失敗(継続) msg={rec['msg_id']}: {type(e).__name__}")
-    if rec["attachments"]:
-        # P4相当: CDN失効前にlocalへ写す。to_thread=イベントループを塞がない (OpenClaw #4864の教訓)
-        try:
-            paths = await asyncio.to_thread(_stash_attachments, rec["attachments"], rec["msg_id"])
-            if paths:
-                rec["attachments_local"] = paths
-        except Exception as e:
-            log(f"添付退避失敗(URLのみで続行): {type(e).__name__}")
-    added = q.enqueue(json.dumps(rec, ensure_ascii=False), msg_id=rec["msg_id"], dept=rec["dept"])
-    st = q.stats()
-    log(f"受信[{rec['channel']}] msg={rec['msg_id']} {'enqueue' if added else '重複無視'} "
-        f"(ready={st['ready']} leased={st['leased']})")
-    # ★画像生成ルーム(imagegen)= 優依を花海咲季(Claude)へ**並走**させる (中野五月 DISPATCH 2026-09-09)。
-    #   上の enqueue(dept=imagegen)は花海咲季(dept_daemon)が claim する経路で**無傷**。
-    #   ここは*追加*で、同じChami便を優依の生きた受付箱(discord_inbox_llm.jsonl=
-    #   local_responder が毎巡回ドレイン)へも1回だけ写す。優依側は channel==画像生成ルーム を
-    #   handle_image_request へ直行させる。bot/webhookは上流(Bot/Webhook無視の分岐)で除外済=
-    #   人間(Chami)便のみ。二重写しは専用台帳(imagegen_fanout.seen)で防ぐ(再接続リプレイ対策)。
-    #   ★これは優依を*足すだけ*。花海咲季の切替はイージス研究室(aegis-gl)が発火条件成立後に握る。
-    #   ★2026-09-14 研究室HQ: ここを1室固定から**画像ルームの集合**へ広げた
-    #     (Chami直令 msg 1548842898773123105= LoRA別の2室を新設)。集合の正本は
-    #     scripts/imagegen/rooms.py。読めなければ従来どおり imagegen 1室だけに戻す
-    #     (=画像が増えないだけで、gateway本体は絶対に止めない・fail-open)。
-    #   ★2026-09-20 Codex便はここへ流さない= この写しは「Chami便のみ」を前提に書かれている
-    #     (上の一文のとおり)。ボスの回答を優依の受付箱へ入れる意味は無い。
-    if rec.get("dept") in _image_depts() and not from_codex:
-        _fan_seen = os.path.join(LOCAL, "imagegen_fanout.seen")
-        if rec["msg_id"] not in _ledger_load(_fan_seen):
-            _ledger_append(_fan_seen, rec["msg_id"])
-            try:
-                with open(os.path.join(LOCAL, "discord_inbox_llm.jsonl"), "a",
-                          encoding="utf-8") as _f:
-                    _f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-                log(f"優依並走: 画像便({rec.get('dept')})を優依受付箱へ写した msg={rec['msg_id']} "
-                    f"(花海咲季のqueueは無傷)")
-            except OSError as _e:
-                log(f"優依並走の写しに失敗(花海咲季経路は継続): {type(_e).__name__}")
-    if from_codex:
-        # ★Codex便には印を押さない(Chami直令 msg 1551232720326369301=
-        #   「Claude側の既読とかは要らんからさ」)。要るのは中身が便として認識される配線で、
-        #   ボスの投稿へ印を足すことではない。押さなかったと分かる形でだけ残す。
-        log(f"Codex便=送信印は押さない msg={rec['msg_id']} dept={rec['dept']}")
-    elif ACTIVE_JOBS and added and _dept_allowed(rec["dept"]):
-        # A2: 送信印 (3段印の1段目=「届いた」の即可視化・裁定2026-07-18で移植)。
-        # 並走中は鳩と二重押しになるが、同一Bot同一絵文字はDiscord側で1個に収束=無害。
-        try:
-            # ★受け手がCodexなら Codex印(uptsukiyomi)。札は enqueue に使った rec["dept"]
-            #   そのもの= 拾う側(codex_responder)と同じ1枚を見る(上 sent_mark_for 参照)。
-            emoji = sent_mark_for(m.guild, rec["dept"], rec.get("content") or "",
-                                  rec.get("attachments"))
-            if rec["dept"] == "codex":
-                log(f"送信印=Codex msg={rec['msg_id']} → {emoji}")
-            if emoji is None:
-                # ★2026-09-12 押さない部屋(優依の自室)。**黙って飛ばさない**=
-                #   「印が付かない」を事故と見分けられるよう、意図した非押下だと残す。
-                #   2026-09-16 「生成依頼」便もここを通る(部屋ではなく便ごとの非押下)。
-                log(f"送信印=押さない({rec['dept']}) msg={rec['msg_id']}")
-                return
-            await m.add_reaction(emoji)
-        except Exception as e:
-            log(f"送信印失敗(配達は継続): {type(e).__name__}")
-
-
 def run_gateway():
     import asyncio
     import threading
@@ -1260,7 +1030,159 @@ def run_gateway():
 
     @client.event
     async def on_message(m):
-        await handle_message(m, chan_map, q, self_id=getattr(client.user, "id", None))
+        _touch_pulse()  # 実メッセージが処理経路を通った証跡(job_pulseの45秒より高解像度)
+        if m.author.bot or m.webhook_id:
+            # 鳩と同じ例外 (2026-07-18 Chami指示): Chamiミラーには送信印だけ押す (enqueueしない)。
+            # jobsゲート内=シャドウ無副作用の原則維持。鳩と並走中は同一絵文字が1個に収束=無害。
+            if (ACTIVE_JOBS and m.webhook_id
+                    and str(getattr(m.author, "name", "")).startswith("Chami(")):
+                try:
+                    # ミラーには rec が無いので、召喚の判定だけ本経路と同じ関数で取る
+                    # (@ボス と書かれたChami便のミラーにも Codex印が付く=表示が本経路と揃う)。
+                    # ★2026-09-12: 召喚でない時は**その部屋のdept**を渡す(旧= 空文字)。
+                    #   優依の部屋(llm-growth)はミラー便にも印を押さない= 押下点が2つある
+                    #   のに片方だけ直すと「本体には付かないがミラーには付く」で再発する(C-064)。
+                    #   空文字でも llm-growth 以外の挙動は1つも変わらない(下の分岐は codex と
+                    #   NO_SENT_MARK_DEPTS しか見ていない)。
+                    _mdept = ("codex" if (_codex_summon_on()
+                                          and is_codex_mentioned(m.content or ""))
+                              else str((chan_map.get(str(m.channel.id)) or {}).get("dept", "")))
+                    # ★2026-09-20 添付も渡す= 字だけの便には押す部屋(imagetag)が増えたので、
+                    #   ミラー側にも同じ材料を渡さないと本体と表示が割れる(C-064)。
+                    emoji = sent_mark_for(m.guild, _mdept, m.content or "",
+                                          _mirror_attachment_urls(m))
+                    if emoji is None:
+                        return          # ★押さない部屋(ミラーもenqueueしないのでここで終わり)
+                    await m.add_reaction(emoji)
+                except Exception as e:
+                    log(f"ミラー送信印失敗(継続): {type(e).__name__}")
+            return  # Bot/Webhookの発言は無視 (自分の返信でループしない=鳩と同じ方針)
+        cid = str(m.channel.id)
+        if cid not in chan_map:
+            # ★黙って捨てない(2026-07-20)。ここは「人が話しかけたのに何も起きない」唯一の分岐で、
+            #   キュー行が生まれない=未配送監視もorphan監視も反応しない完全な沈黙点だった。
+            #   ch単位で1回だけ記録する(同じ部屋の連投でログを埋めない)。
+            seen = on_message.__dict__.setdefault("unknown_ch", set())
+            if cid not in seen:
+                seen.add(cid)
+                log(f"★台帳外chへの発言を破棄: #{getattr(m.channel, 'name', cid)} (id={cid}) "
+                    f"from={getattr(m.author, 'name', '?')} — 台帳未登録かgatewayが未追従")
+            return
+        # ★集中ウィンドウのDiscordトリガー(2026-07-21 Chami要望)。
+        #   人間の発言(bot/webhookは上で除外済み)が「集中」「focus」で始まる時だけ、
+        #   デーモンの見張り間隔を速くする札(local/llm/focus_until.txt)を立てる。
+        #   「集中60」「focus 90」で分指定・「集中off」で終了。誤爆しないよう**先頭一致**に限定。
+        _txt = (m.content or "").strip()
+        _low = _txt.lower()
+        # ★集中ウィンドウは2026-07-21に廃止(常時2秒)。このトリガーは無効化した。
+        #   放置すると「集中オフだった場合は…」のような**普通の文**が先頭一致で誤爆し、
+        #   さらに文中の数字(「10時間前」の10)を分数として拾って札を立てていた(実測)。
+        #   Chamiは「作動してそう」と正しく疑い、HQは誤ったgrep(存在しないパス)で否定した。
+        if False:
+            try:
+                import re as _re
+                arg = _txt[2:].strip() if _low.startswith("集中") else _txt[5:].strip()
+                focus_file = os.path.join(LOCAL, "llm", "focus_until.txt")
+                if arg in ("off", "終了", "0", "オフ"):
+                    try:
+                        os.remove(focus_file)
+                    except OSError:
+                        pass
+                    msg = "集中ウィンドウ終了(平常=遅い間隔)"
+                else:
+                    mm = _re.search(r"\d+", arg)
+                    minutes = int(mm.group(0)) if mm else 60
+                    os.makedirs(os.path.dirname(focus_file), exist_ok=True)
+                    with open(focus_file, "w", encoding="utf-8") as f:
+                        f.write(str(time.time() + minutes * 60))
+                    msg = f"集中ウィンドウ開始 {minutes}分(この間デーモンは速く拾う)"
+                log(f"集中トリガー[{chan_map[cid].get('name', cid)}]: {msg}")
+                try:
+                    emoji = discord.utils.get(m.guild.emojis, name="着手") or "⚡"
+                    await m.add_reaction(emoji)
+                except Exception:
+                    pass
+            except Exception as e:
+                log(f"集中トリガー失敗(継続): {type(e).__name__}")
+            return   # 集中コマンドは会話ではないのでenqueueしない
+        rec = record_from_message(m, chan_map[cid])
+        # ★@ボス(Codex)召喚= 名指しされた発言だけ dept を 'codex' へ付け替える(部屋は乗っ取らない)。
+        #   codex_enabled.txt が無い間は素通し=回帰ゼロ。実応答は codex_responder→codex_run が返す。
+        if _codex_summon_on() and rec.get("dept") != "codex" and is_codex_mentioned(rec.get("content", "")):
+            log(f"@ボス召喚[{rec['channel']}] msg={rec['msg_id']} dept={rec['dept']}→codex")
+            rec = route_codex_summon(rec)
+        # ★引用元が展開されなかった時だけ**1回だけ**取りに行く (2026-07-27)。
+        #   実測方針: 通常のリプライは Gateway の MESSAGE_CREATE に referenced_message が同梱され、
+        #   `m.reference.resolved` で本文まで取れる=**ここへは来ない**。来るのは
+        #   「引用元が古い/キャッシュ外」の例外だけなので、その時だけAPIを1回叩く。
+        #   ★失敗しても便は落とさない。失敗したことを note に足して**取れなかったと分かる形**で残す。
+        _rt = rec.get("reply_to")
+        if _rt and not _rt.get("resolved") and _rt.get("msg_id", "").isdigit():
+            try:
+                src = await m.channel.fetch_message(int(_rt["msg_id"]))
+                got = _quote_of(src)
+                if got:
+                    rec["reply_to"] = got
+                    log(f"引用元を再取得 msg={rec['msg_id']} ref={_rt['msg_id']}")
+                else:
+                    _rt["note"] += " / 再取得しても本文が無い"
+            except Exception as e:
+                _rt["note"] += f" / 再取得も失敗({type(e).__name__})"
+                log(f"引用元の再取得に失敗(継続) msg={rec['msg_id']}: {type(e).__name__}")
+        if rec["attachments"]:
+            # P4相当: CDN失効前にlocalへ写す。to_thread=イベントループを塞がない (OpenClaw #4864の教訓)
+            try:
+                paths = await asyncio.to_thread(_stash_attachments, rec["attachments"], rec["msg_id"])
+                if paths:
+                    rec["attachments_local"] = paths
+            except Exception as e:
+                log(f"添付退避失敗(URLのみで続行): {type(e).__name__}")
+        added = q.enqueue(json.dumps(rec, ensure_ascii=False), msg_id=rec["msg_id"], dept=rec["dept"])
+        st = q.stats()
+        log(f"受信[{rec['channel']}] msg={rec['msg_id']} {'enqueue' if added else '重複無視'} "
+            f"(ready={st['ready']} leased={st['leased']})")
+        # ★画像生成ルーム(imagegen)= 優依を花海咲季(Claude)へ**並走**させる (中野五月 DISPATCH 2026-09-09)。
+        #   上の enqueue(dept=imagegen)は花海咲季(dept_daemon)が claim する経路で**無傷**。
+        #   ここは*追加*で、同じChami便を優依の生きた受付箱(discord_inbox_llm.jsonl=
+        #   local_responder が毎巡回ドレイン)へも1回だけ写す。優依側は channel==画像生成ルーム を
+        #   handle_image_request へ直行させる。bot/webhookは上流(Bot/Webhook無視の分岐)で除外済=
+        #   人間(Chami)便のみ。二重写しは専用台帳(imagegen_fanout.seen)で防ぐ(再接続リプレイ対策)。
+        #   ★これは優依を*足すだけ*。花海咲季の切替はイージス研究室(aegis-gl)が発火条件成立後に握る。
+        #   ★2026-09-14 研究室HQ: ここを1室固定から**画像ルームの集合**へ広げた
+        #     (Chami直令 msg 1548842898773123105= LoRA別の2室を新設)。集合の正本は
+        #     scripts/imagegen/rooms.py。読めなければ従来どおり imagegen 1室だけに戻す
+        #     (=画像が増えないだけで、gateway本体は絶対に止めない・fail-open)。
+        if rec.get("dept") in _image_depts():
+            _fan_seen = os.path.join(LOCAL, "imagegen_fanout.seen")
+            if rec["msg_id"] not in _ledger_load(_fan_seen):
+                _ledger_append(_fan_seen, rec["msg_id"])
+                try:
+                    with open(os.path.join(LOCAL, "discord_inbox_llm.jsonl"), "a",
+                              encoding="utf-8") as _f:
+                        _f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+                    log(f"優依並走: 画像便({rec.get('dept')})を優依受付箱へ写した msg={rec['msg_id']} "
+                        f"(花海咲季のqueueは無傷)")
+                except OSError as _e:
+                    log(f"優依並走の写しに失敗(花海咲季経路は継続): {type(_e).__name__}")
+        if ACTIVE_JOBS and added and _dept_allowed(rec["dept"]):
+            # A2: 送信印 (3段印の1段目=「届いた」の即可視化・裁定2026-07-18で移植)。
+            # 並走中は鳩と二重押しになるが、同一Bot同一絵文字はDiscord側で1個に収束=無害。
+            try:
+                # ★受け手がCodexなら Codex印(uptsukiyomi)。札は enqueue に使った rec["dept"]
+                #   そのもの= 拾う側(codex_responder)と同じ1枚を見る(上 sent_mark_for 参照)。
+                emoji = sent_mark_for(m.guild, rec["dept"], rec.get("content") or "",
+                                      rec.get("attachments"))
+                if rec["dept"] == "codex":
+                    log(f"送信印=Codex msg={rec['msg_id']} → {emoji}")
+                if emoji is None:
+                    # ★2026-09-12 押さない部屋(優依の自室)。**黙って飛ばさない**=
+                    #   「印が付かない」を事故と見分けられるよう、意図した非押下だと残す。
+                    #   2026-09-16 「生成依頼」便もここを通る(部屋ではなく便ごとの非押下)。
+                    log(f"送信印=押さない({rec['dept']}) msg={rec['msg_id']}")
+                    return
+                await m.add_reaction(emoji)
+            except Exception as e:
+                log(f"送信印失敗(配達は継続): {type(e).__name__}")
 
     try:
         client.run(token, log_handler=None)

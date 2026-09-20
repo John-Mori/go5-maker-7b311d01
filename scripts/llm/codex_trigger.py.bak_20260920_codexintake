@@ -27,40 +27,11 @@ BOT_ID_FILE = os.path.join(LOCAL, "discord_codex_bot_id.txt")   # 任意(あれ�
 TOKENS = ("codex", "コーデックス", "コーデクス", "ネイキッド・スネーク", "ネイキッド", "スネーク", "ボス")
 
 
-# --- Codex本人の発言かの判定(2026-09-20 イージス研究室・人事部門ククール便 1551235369209430038) ---
-# なぜ要るか= gateway の受信入口は bot/webhook を**一括で**捨てている。Codex(ボス)の回答は
-# Codex bot 本人の投稿(codex_run.dc_send)なので、そこで落ちて enqueue されない=
-# Discord には見えているのに依頼元セッションは便として認識できない
-# (Chami msg 1551232720326369301「ボス(Codex)の内容って届いてないよね？ちゃんと認識できる
-#  ようにならない？Claude側の既読とかは要らんからさ」)。
-# ★botを全開放するのではなく **Codex発だけ**を識別する。識別の正本はここ1か所に置く(ORG-11)。
-#   一次= bot id(local/discord_codex_bot_id.txt= 実メンション召喚と同じ1枚を使い回す)。
-#   退避= username。表示名(ニック)は後から変えられるので使わない
-#         (実測 2026-09-05 set_codex_nick.py: username=Codex_SnakeBot / 表示名=スネーク🐍Codex)。
-CODEX_BOT_USERNAMES = ("Codex_SnakeBot",)
-
-
-def codex_bot_ids():
-    """Codex bot の user id 集合(台帳が無ければ空集合)。"""
+def _mention_ids():
     try:
-        return {open(BOT_ID_FILE, encoding="utf-8").read().strip()} - {""}
+        return {open(BOT_ID_FILE, encoding="utf-8").read().strip()}
     except OSError:
         return set()
-
-
-def is_codex_author(author_id="", author_name=""):
-    """その発言の主が Codex bot 本人か。★純関数= Discord接続なしで検査できる。
-
-    id が台帳にあれば id だけで決める。id 台帳が無い/空の時だけ username を見る。
-    """
-    aid = str(author_id or "").strip()
-    if aid and aid in codex_bot_ids():
-        return True
-    return str(author_name or "").strip() in CODEX_BOT_USERNAMES
-
-
-def _mention_ids():
-    return codex_bot_ids()
 
 
 # ★2026-09-05 デブライネ実測(イージス研究室)= 本番7日分600便(dispatch便除く)に
