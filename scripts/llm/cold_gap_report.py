@@ -175,6 +175,20 @@ def summary(hours=168.0):
     #   脈の本数= 間隔を保温周期で割った数-1(最初の1回は元々温かい)。
     net_save = sum(extra - max(0.0, r[0] / (WARM_MIN * 60.0) - 1.0) * pulse
                    for r in cold if r[0] <= be_sec and not r[4]) if pulse else 0.0
+
+    # ★★2026-09-20 イージス研究室: net_save は**勝った便だけ**を足した数だ。
+    #   どの便が冷えるかは打つ前には分からない=脈は「冷えなかった便(温)」や
+    #   「圧縮で救えない冷え」の間隔にも打つことになる。その取りこぼしを入れないと
+    #   「プラス=保温が安い」と読めてしまい、裁定(保温は不採用)がひっくり返りかねない。
+    #   実施できる形の方策を2つ、同じ便に並べる= A 全部の間隔で脈を打つ /
+    #   B 分岐(be_sec)まで打って越えたら諦める。
+    def _pl(g):
+        return max(0.0, g / (WARM_MIN * 60.0) - 1.0)
+
+    net_all = (sum(extra for r in cold if not r[4])
+               - sum(_pl(r[0]) * pulse for r in rows)) if pulse else 0.0
+    net_cap = (sum(extra for r in cold if not r[4] and r[0] <= be_sec)
+               - sum(_pl(min(r[0], be_sec)) * pulse for r in rows)) if pulse else 0.0
     L += ["",
           "  ■ 冷えの原因の内訳",
           "  → 冷え便のうち **直前に圧縮を挟んでいたもの= %d/%d (%.1f%%)** = 保温では救えない"
@@ -186,8 +200,11 @@ def summary(hours=168.0):
             L.append("  %-22s 冷え%4d  うち圧縮%4d (%3.0f%%)" % (name, len(g), c, 100.0 * c / len(g)))
     L.append("  ★★保温で本当に救えた冷え(**分岐未満** かつ 圧縮でない)= **%d/%d (%.1f%%)**"
              % (n_save, len(cold), 100.0 * n_save / max(1, len(cold))))
-    L.append("  ★その集合を実際に保温した時の収支= **%s**(重み付き・プラスなら保温が安い)"
-             % format(net_save, "+,.0f"))
+    L.append("  ★その集合だけを足した収支= **%s**(重み付き)= ★**勝った便だけの数**であって"
+             "「保温が安い」という意味ではない。" % format(net_save, "+,.0f"))
+    L.append("  ★★実施できる方策の収支(どの便が冷えるかは打つ前に分からない=温い便にも脈が要る)"
+             " / A 全間隔で保温= **%s** / B 分岐まで保温= **%s**  → マイナス= 保温のほうが高い"
+             % (format(net_all, "+,.0f"), format(net_cap, "+,.0f")))
     L.append("  ★2026-09-17 以前の行の savable は向きが逆(分岐**超え**)= 行同士を並べる時は"
              " savable_rule の有無で見分ける。")
     d = {"hours": hours, "n": len(rows), "cold": len(cold), "warm": len(warm),
@@ -213,7 +230,12 @@ def summary(hours=168.0):
          # ★行を自己申告にする= 過去行(このキーが無い)は旧い逆向きの定義だと分かる。
          #   黙って意味だけ入れ替えると、次に比べた人が気づけない。
          "savable_rule": "gap<=breakeven & not compact (2026-09-17 修正)",
-         "savable_net": round(net_save)}
+         "savable_net": round(net_save),
+         # ★savable_net は勝った便だけの best-case。裁定を比べる時に見るのはこの2本。
+         "policy_all_net": round(net_all),
+         "policy_breakeven_net": round(net_cap),
+         "policy_rule": "A=all gaps warmed / B=warm up to breakeven then give up"
+                        " (2026-09-20 追加・分母は境目すべて)"}
     return "\n".join(L), d
 
 
