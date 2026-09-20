@@ -750,6 +750,20 @@ except Exception as _e:                        # 正本が読めない時も送�
         return body
 
 
+# ★地の文の裸バッククォート・ゲート(2026-09-21・起点=Chami msg 1551266364231000136
+#   「余計なコードブロックいらんて」)。正本は md_ticks.py 1本を persona_send と bot_send の
+#   両方から呼ぶ(md_tail と同じ型)。★末尾ゲートの**後ろ**に置く= 先に末尾を落としてから
+#   本文の中を見る(逃がした柵 \` を末尾判定に食わせない)。
+try:
+    from md_ticks import literal_tick_backstop as _md_ticks_gate
+except Exception as _e:                        # 正本が読めない時も送信は殺さない(fail-open)
+    print(f"[persona_send] 裸バッククォート・ゲートの正本 md_ticks.py を読めない({type(_e).__name__})=素通し。",
+          file=sys.stderr)
+
+    def _md_ticks_gate(body, tag="persona_send", quiet=False):
+        return body
+
+
 def enjoh_backstop(body, quiet=False):
     """Discordへ出る本文の炎上表記ゲート(実装は enjoh.py が正本)。
 
@@ -794,6 +808,7 @@ def apply_text_gates(body, persona=None, dept=None, tag="persona_send", audit=Tr
     body = enjoh_backstop(body, quiet=not audit)
     body = _homo_gate(body, persona=persona, dept=dept, tag=tag, audit=audit)
     body = _md_tail_gate(body, tag=tag, quiet=not audit)
+    body = _md_ticks_gate(body, tag=tag, quiet=not audit)
     # ★構造監査(軸②/軸③)は**3ゲートの後**= 実際に投稿される文字列をそのまま数える。
     #   audit=False(突合の再現)では書かない= 同じ便を2行数えたら分布が歪む。
     if audit:

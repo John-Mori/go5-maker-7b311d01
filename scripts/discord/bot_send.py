@@ -69,6 +69,18 @@ except Exception as _e:                        # fail-open
     def trailing_md_backstop(body, tag="bot_send", quiet=False):
         return body
 
+# ★地の文の裸バッククォート・ゲート(2026-09-21・起点=Chami msg 1551266364231000136)。正本= md_ticks.py。
+#   文字として書かれた柵(「```」/ 前後が空白の孤立柵)を逃がす= 柵の対合がずれて地の文が
+#   コード扱いになるのを止める。OUT口は2つ在る= md_tail と同じく先に両方へ通す。
+try:
+    from md_ticks import literal_tick_backstop
+except Exception as _e:                        # fail-open
+    print(f"[bot_send] 裸バッククォート・ゲートの正本 md_ticks.py を読めない({type(_e).__name__})=素通し。",
+          file=sys.stderr)
+
+    def literal_tick_backstop(body, tag="bot_send", quiet=False):
+        return body
+
 # ★共通の送信ログ(2026-09-02・研究室HQからの恒久依頼)。この口には送信ログが1行も無く、
 #   事故便 msg 1544669455995637771 の**出所が追えなかった**。正本= send_audit.py 1本だけ。
 try:
@@ -172,6 +184,7 @@ def main():
     body = homoglyph_backstop(body, dept=(key if by_dept else None), tag="bot_send",
                               channel=(None if by_dept else key))
     body = trailing_md_backstop(body, tag="bot_send")
+    body = literal_tick_backstop(body, tag="bot_send")
     req = urllib.request.Request(
         f"https://discord.com/api/v10/channels/{ch['id']}/messages",
         data=json.dumps({"content": body[:1900]}).encode("utf-8"),
