@@ -31,6 +31,9 @@
   --out     出力先ファイル(UTF-8)。既定は標準出力
 
 ★読むだけ。Discordへは一切書き込まない(押し直しはしない)。
+★数える印は react.py から引く(下の _build_marks)。@ボス(Codex)便は3印が差し替わるので、
+  写経した表を持つと**印が付いているのに「生存印なし」と誤報する**。回帰ガード=
+  scripts/discord/test_audit_marks_codex.py。
 """
 import argparse
 import json
@@ -52,14 +55,42 @@ LOCAL = os.path.join(ROOT, "local")
 API = "https://discord.com/api/v10"
 JST = timezone(timedelta(hours=9))
 
-# react.py と**同じ**呼び名→絵文字の対応表を持つ(あちらが押し、こちらが読む)。
-# サーバー絵文字(chakusyu等)とUnicode代用(👀等)の**両方**を1つの印として数える。
-MARKS = {
-    "送信": ("sendms", "送信", "📮"),
-    "既読": ("kidoku", "既読", "✅"),
-    "着手": ("chakusyu", "着手", "👀"),
-    "即答": ("sokutou", "即答", "💬"),
-}
+# 呼び名→絵文字の対応は **react.py から引く**(あちらが押し、こちらが読む)。
+# ★2026-09-09(イージス研究室 第55世代)= ここは元々 react.py の表を**書き写して**いた。
+#   その結果 2026-09-05 に入った CODEX_OVERRIDE(@ボス便だけ 送信→uptsukiyomi / 既読→‼️ /
+#   着手→🐍 に差し替わる・正本 00_AI-HQ/docs/departments/kaizen-analyst/絵文字管理台帳.md §A.1)を
+#   この測定器だけが知らないまま残り、**印が実際に付いている @ボス便を「生存印なし」と誤報**した
+#   (実測 2026-09-09 11:37 JST: goods-afi/manga-shorts/otacon-radio の34通中9通が全部この誤報)。
+#   A1(配下の無警報滞留0件)を測る唯一の器がこれなので、誤報はそのまま誤った安心になる。
+#   → 写経をやめて import する。押す側に印が増えたら読む側も自動で追随する(ORG-11)。
+sys.path.insert(0, HERE)
+import react as _react  # noqa: E402  ※main()ガード済み・import時に副作用なし
+
+
+def _build_marks():
+    """react.py の ALIAS(サーバー絵文字名)+ FALLBACK(Unicode代用)+ CODEX_OVERRIDE(@ボス便の
+    差し替え3印)を1つの印として畳む。押す側が撃ち得る名前は**全部**同じ印として数える。"""
+    out = {}
+    for label in ("送信", "既読", "着手", "即答"):
+        names = set(_react.ALIAS.get(label) or [label])
+        names.add(label)
+        fb = _react.FALLBACK.get(label)
+        if fb:
+            names.add(fb)
+        ov = _react.CODEX_OVERRIDE.get(label)
+        # ★引退した印(CODEX_RETIRED)も同じ印として畳む(2026-09-20 追加)。
+        #   差し替えた日より前の@ボス便には**古い絵文字が付いたまま**残る。読む側が退避表を
+        #   知らないと、差し替えた瞬間に過去便が一斉に「着手なし」へ落ちる=誤報が戻る。
+        for name, _id in ([ov] if (ov and ov[0]) else []) + list(
+                getattr(_react, "CODEX_RETIRED", {}).get(label) or []):
+            names.add(name)
+            # 異体字セレクタ(U+FE0F)の有無はDiscordの返す name で揺れるので両方入れる。
+            names.add(name.replace("️", ""))
+        out[label] = tuple(sorted(n for n in names if n))
+    return out
+
+
+MARKS = _build_marks()
 CHAMI_ID_FILE = os.path.join(LOCAL, "chami_discord_id.txt")
 
 

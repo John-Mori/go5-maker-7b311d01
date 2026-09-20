@@ -33,8 +33,17 @@ except Exception:
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
-LOCAL = os.path.join(ROOT, "local")
+LOCAL = os.environ.get("GO5_LOCAL_DIR") or os.path.join(ROOT, "local")
 API = "https://discord.com/api/v10"
+# 印の解決(絵文字の実名照合)に使ってよい時間の上限。
+# ★なぜ本文のPUTと別の予算にするか(2026-09-06 実測・イージス研究室):
+#   呼び側(codex_run.mark_sent / codex_responder.mark)は subprocess を **timeout=30** で切る。
+#   一方このスクリプトの api() は 1回20秒×3試行。解決で2往復すると最悪120秒超になり、
+#   **呼び側の30秒に必ず負ける**=印が押されないまま無言で殺される。
+#   解決は anchor_id という正解を既に持っている上での上乗せ(fail-open)なので、短く切ってよい。
+#   PUT本体はこの制限を受けない(押せる時は必ず押す)。
+RESOLVE_TIMEOUT = 6
+RESOLVE_TRIES = 1
 FALLBACK = {"着手": "👀", "既読": "✅", "送信": "📮", "即答": "💬",
             "再発": "🔁", "改悪": "📉"}  # サーバー絵文字が未登録/引けない時だけの代用
 # 呼び名(日本語) → Chami登録の実際の絵文字名。どちらで指定しても解決する
@@ -61,7 +70,19 @@ EMOJI_NAME = {"着手": "chakusyu", "既読": "kidoku", "送信": "sendms",
 CODEX_OVERRIDE = {
     "送信": ("uptsukiyomi", "1522060098355069139"),   # sendms → uptsukiyomi(§B業務印と意味二重化=文脈で判別)
     "既読": ("‼️", None),                                # kidoku → ‼️(unicode直撃・2026-09-05トトリ経由Chami指示=followok撤去)
-    "着手": ("🐍", None),                                # chakusyu → 🐍(unicode。ギルド素材を作らない)
+    # ★2026-09-20 Chamiが Codex専用の着手カスタム絵文字を作成(msg 1551192982567387210
+    #   「ボス(Codex)の着手スタンプこれにしてね」)。🐍(unicode代用)→ ギルド素材の実物へ差し替え。
+    #   意味・種別は改善提案部門が §A.1 の着手Codex列で確定済(当室は配線=C-015)。
+    #   id を持つので sendms/uptsukiyomi と同じ経路(実名照合→ID)で custom を撃つ=劣化しない。
+    "着手": ("Chakusyu_Boss", "1551192017495785492"),  # chakusyu → Chakusyu_Boss(Codex専用素材)
+}
+# ★引退した印(**読む側だけ**が使う退避表)。押す側は絶対にここから撃たない。
+#   なぜ要るか(2026-09-20 実測・イージス研究室): 着手を🐍から差し替えた瞬間、
+#   **過去の@ボス便に付いている🐍**を audit_marks(生存印を読む唯一の器)が着手として読めなくなり、
+#   `test_audit_marks_codex.py` が2件赤になった= 2026-09-09 の「生存印なし」誤報9件と同じ形。
+#   印は消さずに退避する(C-003)。押す側に印が増減したら、読む側はここも畳んで追随する(ORG-11)。
+CODEX_RETIRED = {
+    "着手": [("🐍", None)],        # 2026-09-05〜2026-09-20 に押した分(過去便にそのまま残る)
 }
 
 
@@ -82,14 +103,14 @@ def resolve_channel(spec):
     return ""
 
 
-def api(path, token, method="GET"):
+def api(path, token, method="GET", timeout=20, tries=3):
     req = urllib.request.Request(
         API + path, method=method, data=(b"" if method == "PUT" else None),
         headers={"Authorization": "Bot " + token, "User-Agent": "go5-org-react (personal, v1)"},
     )
-    for _ in range(3):
+    for _ in range(max(1, tries)):
         try:
-            with urllib.request.urlopen(req, timeout=20) as r:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
                 body = r.read().decode("utf-8")
                 return json.loads(body) if body else True
         except urllib.error.HTTPError as e:
@@ -121,10 +142,11 @@ def resolve_emoji(token, cid, name, codex=False):
             return alt_name                         # 🐍 等=ギルド素材が無い unicode はそのまま撃つ
         want_name, anchor_id = alt_name, alt_id
     try:
-        ch = api(f"/channels/{cid}", token)
+        ch = api(f"/channels/{cid}", token, timeout=RESOLVE_TIMEOUT, tries=RESOLVE_TRIES)
         gid = str((ch or {}).get("guild_id", "") or "")
         if gid:
-            emojis = api(f"/guilds/{gid}/emojis", token) or []
+            emojis = api(f"/guilds/{gid}/emojis", token,
+                         timeout=RESOLVE_TIMEOUT, tries=RESOLVE_TRIES) or []
             # 差し替え時は代替の実名を、通常時は ALIAS(実名→呼び名)を照合する
             wants = [want_name] if (codex and name in CODEX_OVERRIDE) else ALIAS.get(name, [name])
             for want in wants:
