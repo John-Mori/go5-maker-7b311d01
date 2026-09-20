@@ -91,7 +91,13 @@ DAEMON = os.path.join(ROOT, "scripts", "llm", "dept_daemon.py")
 #   場所としよう!メンバーは五月とカスミの2人で。トラブル時はカスミ対応で。配線回しといて」の回送
 #   (中野五月[llm-qa]→ローカル研究室→DISPATCH-aegis-gl-1789632995432)。部屋(1550050574886764584)は
 #   Chamiが16:47に自分で作っていて発言0件・常駐0体だった。★会話専用=rooms.py の画像配線は足さない。
-DEPTS = ["hq","research-room", "aegis-gl", "keiei-kikaku", "hr-room", "hr-context", "qa-reviewer", "system-engineer", "product-scout", "shorts-analyst", "copy-director", "learning-coach", "learning-coach-2", "data-org", "frontend", "ai-office", "llm-edu", "llm-qa", "platform-se", "consult-intel", "past-room", "future-room", "kaizen-analyst", "incident", "system-engineer-b", "dream-care", "health-log", "report-notify", "imagegen", "manga-shorts", "kukuru-nakama", "gunji", "soudan-room", "goods-afi", "someday-room", "web-research", "otacon-radio", "imagegen-fusoh-v0", "imagegen-fusoh-v2", "local-lab", "astro-room", "imagegen-itsumono", "hansei-ekurabe", "imagetag-talk"]
+# ★2026-09-20 fm-lab / system-build を追加(44→46体)。久留米産直送(EC)の2室=Chami直令
+#   msg 1551145477867835443「暫定で三笘、アメスを配置して」。台帳登録=研究室HQ、配線=イージス研究室
+#   (HQ便 msg 1551148063580626988)。部屋もカテゴリもChami本人が先に作っていて発言0件・常駐0体だった。
+#   ★DEPT_CONF・org_registry.yml・discord_channels.json と**同じ手番で**揃えた=
+#     部屋だけ在って受け手が居ない時間(INC-110の形)を作らない。
+#   ★常駐の名義はアメス。**三笘にはしない**(2026-07-22 Chami既決)。
+DEPTS = ["hq","research-room", "aegis-gl", "keiei-kikaku", "hr-room", "hr-context", "qa-reviewer", "system-engineer", "product-scout", "shorts-analyst", "copy-director", "learning-coach", "learning-coach-2", "data-org", "frontend", "ai-office", "llm-edu", "llm-qa", "platform-se", "consult-intel", "past-room", "future-room", "kaizen-analyst", "incident", "system-engineer-b", "dream-care", "health-log", "report-notify", "imagegen", "manga-shorts", "kukuru-nakama", "gunji", "soudan-room", "goods-afi", "someday-room", "web-research", "otacon-radio", "imagegen-fusoh-v0", "imagegen-fusoh-v2", "local-lab", "astro-room", "imagegen-itsumono", "hansei-ekurabe", "imagetag-talk", "fm-lab", "system-build"]
 BACKOFF_START = 10
 BACKOFF_CAP = 300
 HEALTHY_SEC = 60               # これ以上生きたら健康=バックオフリセット
