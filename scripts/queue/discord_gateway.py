@@ -110,9 +110,11 @@ def route_codex_summon(rec):
 #   react.py が読めない環境でも gateway は起動する(fail-open。値は台帳と同じものを退避に置く)。
 sys.path.insert(0, os.path.join(ROOT, "scripts", "discord"))
 try:
-    from react import CODEX_OVERRIDE as _REACT_CODEX, EMOJI_NAME as _REACT_NAME  # noqa: E402
+    from react import (CODEX_OVERRIDE as _REACT_CODEX,      # noqa: E402
+                       EMOJI_ID as _REACT_ID, EMOJI_NAME as _REACT_NAME)
 except Exception:
     _REACT_CODEX = {"送信": ("uptsukiyomi", "1522060098355069139")}
+    _REACT_ID = {"送信": "1527369203819085864"}
     _REACT_NAME = {"送信": "sendms"}
 SENT_MARK_FALLBACK = "\U0001F4EE"      # 📮 = カスタム絵文字が引けない時だけの退避(Claude側のみ)
 # ★2026-09-12 **印を押さない部屋**(Chami直接指示・llm-edu msg 1548006584809168931 01:25:30)
@@ -226,6 +228,14 @@ def sent_mark_for(guild, dept, content="", attachments=None):
       落とすと**Claude印が混じる**=直そうとしている症状そのものが再発する。
     ★discord.utils は使わない= この関数はモジュール読込時に在る必要があり、
       discord の import は run_gateway() の中(遅延)だから。
+
+    ★2026-09-20 Claude印もIDアンカーへ揃えた(改善提案部門 DISPATCH-aegis-gl-1789904135462)。
+      実物= Chamiがギルド絵文字の実名を sendms → Send_MS へ改称した(id 1527369203819085864 は不変)。
+      Codex枝はID照合を持っていたので無傷、Claude枝だけが**実名照合のみ**だったため
+      改称の瞬間に 📮 へ落ちた(msg 1551193260301746318「なんで<:Send_MS:>じゃないんや」)。
+      非対称そのものが不具合だったので、Claude枝もCodex枝と同じ順へ揃える=
+        ①ID一致 → ②実名(保険) → ③IDで custom 直撃 → ④📮
+      📮へ落ちるのは **EMOJI_ID に送信印のIDが無い時だけ**。改称では二度と落ちない。
     """
     if str(dept or "") in NO_SENT_MARK_DEPTS and not _talk_mail(dept, content, attachments):
         return None                      # ★押さない(Claude専用の印を優依の部屋へ出さない)
@@ -238,11 +248,17 @@ def sent_mark_for(guild, dept, content="", attachments=None):
             if (eid and str(getattr(e, "id", "")) == str(eid)) or getattr(e, "name", "") == name:
                 return e
         return f"{name}:{eid}" if eid else name
-    for want in (_REACT_NAME.get("送信", "sendms"), "送信"):
+    eid = _REACT_ID.get("送信")
+    for e in emojis:                     # ①ID一致=実名が何であっても撃つ(改称に強い)
+        if eid and str(getattr(e, "id", "")) == str(eid):
+            return e
+    for want in (_REACT_NAME.get("送信", "sendms"), "送信"):   # ②実名は保険(IDを持たない印用)
         for e in emojis:
             if getattr(e, "name", "") == want:
                 return e
-    return SENT_MARK_FALLBACK
+    if eid:                              # ③ギルドを1件も引けなくてもIDで custom を直撃
+        return f"{_REACT_NAME.get('送信', 'sendms')}:{eid}"
+    return SENT_MARK_FALLBACK            # ④IDもギルド実名も無い時だけ 📮 へ退避
 
 
 TOKEN_FILE = os.path.join(LOCAL, "discord_bot_token.txt")

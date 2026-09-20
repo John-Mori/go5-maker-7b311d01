@@ -24,6 +24,8 @@
   python scripts/queue/test_gateway_sendmark.py --mutate main    # 人間便の印を殺す→赤になるはず
   python scripts/queue/test_gateway_sendmark.py --mutate mirror  # ミラー便の印を殺す
   python scripts/queue/test_gateway_sendmark.py --mutate failopen  # 握り潰しを外す
+  python scripts/queue/test_gateway_sendmark.py --mutate sendmsid  # Claude印のID照合を殺す
+  python scripts/queue/test_gateway_sendmark.py --mutate sendmsanchor  # ID直撃を殺す
 終了コード: 0=全PASS / 1=FAILあり / 2=変異が当たらなかった(試験自体が無効)
 """
 import asyncio
@@ -100,6 +102,14 @@ MUTATIONS = {
     # ミラー便の押下点が本文を渡さなくなる (押下点が2つある型の再発。C-064)
     "cuemirror": ('emoji = sent_mark_for(m.guild, _mdept, m.content or "")',
                   'emoji = sent_mark_for(m.guild, _mdept)  # MUTANT'),
+    # ★2026-09-20 追加: Claude印のID照合を殺す(実名照合だけへ戻る型=改称でまた📮へ落ちる)
+    "sendmsid": ('        if eid and str(getattr(e, "id", "")) == str(eid):\n'
+                 '            return e',
+                 '        if False:  # MUTANT\n'
+                 '            return e'),
+    # ギルドを1件も引けない時のID直撃を殺す(照合が全滅した瞬間に📮へ落ちる旧形)
+    "sendmsanchor": ('    if eid:                              # ③',
+                     '    if False:  # MUTANT ③'),
 }
 
 PASS = FAIL = 0
@@ -288,10 +298,28 @@ def main(argv):
         asyncio.run(on_message(m5))
         check("4 sendmsが無ければ旧名『送信』へ", m5.pushed[:1] == [old_name])
 
+        # ★2026-09-20 改訂(DISPATCH-aegis-gl-1789904135462)= ギルドの実名照合が全滅しても
+        #   📮へは落ちない。送信印は確定IDを持つので Codex印と同じくID直撃で custom を撃つ。
+        #   旧期待値は「どちらも無ければ📮」だったが、その形のままだと**実名を変えただけで
+        #   印が消える**(実物= sendms → Send_MS 改称で全部屋が📮になった)。
         m6 = FakeMsg(6, "カスタム絵文字が無い鯖", chami, ch, FakeGuild([]))
         asyncio.run(on_message(m6))
-        check("4 どちらも無ければ📮へ退避", m6.pushed[:1] == ["\U0001F4EE"],
-              "-> %r" % (m6.pushed,))
+        check("4 実名が1つも引けなくてもIDアンカーで撃つ",
+              m6.pushed[:1] == ["sendms:1527369203819085864"], "-> %r" % (m6.pushed,))
+        check("4 引けない時も📮へは落ちない", "\U0001F4EE" not in m6.pushed)
+
+        # 📮が残るのは「**IDもギルド実名も無い印**」だけ= 送信印からIDを抜いて実行で示す。
+        _keep_id = dict(mod._REACT_ID)
+        try:
+            mod._REACT_ID = {}
+            m6b = FakeMsg(61, "IDも実名も無い鯖", chami, ch, FakeGuild([]))
+            asyncio.run(on_message(m6b))
+            check("4 IDもギルド実名も無い時だけ📮へ退避",
+                  m6b.pushed[:1] == ["\U0001F4EE"], "-> %r" % (m6b.pushed,))
+        finally:
+            mod._REACT_ID = _keep_id
+        check("4 後始末: 送信印のIDを戻した",
+              mod._REACT_ID.get("送信") == "1527369203819085864")
 
         # ---- [5] fail-open: 押せなくても配達は死なない ----
         print("[5] 押せない時 (fail-open)")
@@ -401,6 +429,41 @@ def main(argv):
         asyncio.run(on_message(m19))
         check("8 LoRA部屋以外では合図語があっても従来どおり sendms",
               m19.pushed[:1] == [sendms], "-> %r" % (m19.pushed,))
+
+        # ---- [9] ギルド実名の改称に耐える (2026-09-20 DISPATCH-aegis-gl-1789904135462) ----
+        # ★壊れた実物= Chamiがギルド絵文字の実名を sendms → Send_MS へ改称した
+        #   (id 1527369203819085864 は不変)。Claude印だけ実名照合しか持たず📮へ落ちた
+        #   (msg 1551193260301746318「なんで<:Send_MS:>じゃないんや」)。Codex印はID照合を
+        #   持っていたので無傷= **非対称そのものが不具合**。ここはその非対称の再発を止める。
+        print("[9] ギルド実名の改称 (sendms → Send_MS)")
+        newname = FakeEmoji("Send_MS", 1527369203819085864)      # 実名だけ変わった現物
+        gr = FakeGuild([FakeEmoji("kidoku", 1), newname, FakeEmoji("chakusyu", 2)])
+        m20 = FakeMsg(20, "改称後の鯖", chami, ch, gr)
+        asyncio.run(on_message(m20))
+        check("9 実名がSend_MSでもID一致で送信印を撃つ", m20.pushed[:1] == [newname],
+              "-> %r" % (m20.pushed,))
+        check("9 改称では📮へ落ちない", "\U0001F4EE" not in m20.pushed)
+
+        m21 = FakeMsg(21, "改称後のミラー", FakeAuthor("Chami(main)", 222, bot=True), ch, gr,
+                      webhook_id=777)
+        asyncio.run(on_message(m21))
+        check("9 ミラー便も改称に耐える", m21.pushed[:1] == [newname], "-> %r" % (m21.pushed,))
+
+        # 実名を**もう一度**別名へ変えても、IDが在る限り撃てる(改名を追いかける運用を作らない)
+        another = FakeEmoji("zzz_whatever", 1527369203819085864)
+        m22 = FakeMsg(22, "また改称された鯖", chami, ch, FakeGuild([another]))
+        asyncio.run(on_message(m22))
+        check("9 さらに改名してもIDが在れば撃てる", m22.pushed[:1] == [another],
+              "-> %r" % (m22.pushed,))
+
+        # 改称耐性がCodex側を侵していないこと(ID一致の枝を足しただけ=撃ち分けは不変)
+        m23 = FakeMsg(23, "@ボス 改称後に召喚", chami, ch,
+                      FakeGuild([newname, FakeEmoji("uptsukiyomi", 1522060098355069139)]))
+        asyncio.run(on_message(m23))
+        check("9 Codex便は改称後も uptsukiyomi のまま",
+              bool(m23.pushed) and getattr(m23.pushed[0], "name", "") == "uptsukiyomi",
+              "-> %r" % (m23.pushed,))
+        check("9 Codex便にClaude印(Send_MS)は混ざらない", newname not in m23.pushed)
 
         print("\n%d PASS / %d FAIL" % (PASS, FAIL))
         return 1 if FAIL else 0
