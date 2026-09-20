@@ -130,6 +130,63 @@ SENT_MARK_FALLBACK = "\U0001F4EE"      # 📮 = カスタム絵文字が引け�
 #     .drain_queue)で、Claudeの常駐は立てていない。押せば「Claudeの処理系に乗った」という
 #     同じ嘘になる(部屋が増えた分だけ嘘が増える、ではなく、理由が同じなら同じ表に載せる)。
 NO_SENT_MARK_DEPTS = ("llm-growth", "imagetag")   # 優依の自室 / 優依が拾うタグ部屋
+# ★2026-09-20 Chami直令(部屋「プロンプト変換と学習」msg 1551147604241420370)=
+#   「**字のチャットを送った時は送信既読着手とかいつもどおりスタンプ絵文字押すようによろしく**」。
+#   あの部屋は同日から**受け手が2人**になった(DISPATCH-aegis-gl-1789845665234)=
+#     画像の便   → 優依(local_responder.handle_tag_request)= Claudeの処理系に**乗らない**
+#     字だけの便 → カスミ(dept_daemon の imagetag-talk)= Claudeの処理系に**乗る**
+#   だから「押さない」の札を dept 1枚から **dept + 便の中身**へ割る。嘘の印を押さないという
+#   2026-09-12 の理由(上)はそのまま=乗った便にだけ乗った印を付ける、が元々の意味だ。
+#   ★llm-growth はここに入れない= あちらは受け手が優依しか居ない(部屋ごと無印のまま)。
+#   ★分かれ目の正本は local_responder.handle_tag_request(画像の添付が在るか)。ここへ
+#     拡張子の表を写経しない= imagegen/wd14_tag.IMAGE_EXT を読むだけ(ORG-11)。
+TALK_MARK_DEPTS = ("imagetag",)   # 便の種別で撃ち分ける部屋(字だけならClaude印を押す)
+
+
+def _has_image_attachment(attachments):
+    """この便に**画像の添付**が在るか(=優依が拾う便か)。
+
+    ★判定材料は local_responder.tag_image_paths と同じ wd14_tag.is_image_path 1本。
+      あちらは実体を落としてから見るが、こちらは配達の0.1秒で決める必要があるので
+      URL(クエリを落とした拡張子)だけを見る= 同じ表を2か所に持たない。
+    ★読めない時は **True**(=画像便とみなして押さない)へ倒す。印が1つ出ないのは
+      取りこぼしだが、乗っていない経路に乗った印を付けるのは**嘘**で、そちらが重い。
+    """
+    try:
+        sys.path.insert(0, os.path.join(ROOT, "scripts", "imagegen"))
+        import wd14_tag                       # noqa: E402
+        for u in (attachments or []):
+            if wd14_tag.is_image_path(str(u or "").split("?", 1)[0]):
+                return True
+        return False
+    except Exception:
+        return True
+
+
+def _talk_mail(dept, content, attachments):
+    """この便は「字だけの便」= Claude(カスミ)が返す便か。TALK_MARK_DEPTS の部屋だけの分岐。"""
+    if str(dept or "") not in TALK_MARK_DEPTS:
+        return False
+    if attachments is None:
+        return False        # ★添付を渡さない呼び側= 種別が不明= 従来どおり押さない(嘘を作らない)
+    if not str(content or "").strip():
+        return False        # ★本文が空= 誰も起きない(優依も黙る)。起きない便に印は付けない
+    return not _has_image_attachment(attachments)
+
+
+def _mirror_attachment_urls(m):
+    """Chamiミラー便に載っている画像のURLを集める(添付＋埋め込み)。
+
+    ★ミラーは webhook の写しで、元の添付が embed(image/thumbnail)側に入ることがある。
+      両方見ないと「本体には印が付かないがミラーには付く」= C-064の片肺再発になる。
+    """
+    urls = [getattr(a, "url", "") for a in (getattr(m, "attachments", None) or [])]
+    for e in (getattr(m, "embeds", None) or []):
+        for part in ("image", "thumbnail"):
+            u = getattr(getattr(e, part, None), "url", None)
+            if u:
+                urls.append(u)
+    return urls
 
 
 def _local_pipeline_order(dept, content):
@@ -151,7 +208,7 @@ def _local_pipeline_order(dept, content):
         return False
 
 
-def sent_mark_for(guild, dept, content=""):
+def sent_mark_for(guild, dept, content="", attachments=None):
     """配達時に押す送信印を1つ選ぶ。dept=='codex' なら Codex印、それ以外は従来どおり。
 
     ★戻りが None なら**何も押さない**(2026-09-12 追加。上の NO_SENT_MARK_DEPTS が経緯)。
@@ -159,6 +216,9 @@ def sent_mark_for(guild, dept, content=""):
       「押さない部屋」の表を押下点の数だけ写さない。
     ★content= その便の本文。**部屋ではなく便ごと**に押さない条件(「生成依頼」で始まる注文)
       が2026-09-16に増えたので受ける。既定は空文字= 渡さない呼び側の挙動は1つも変わらない。
+    ★attachments= その便の添付URL列。2026-09-20、逆向き(**部屋ごと押さないの中から便ごとに
+      押す**)の条件が増えたので受ける(TALK_MARK_DEPTS を読め)。既定 None= 渡さない呼び側の
+      挙動は1つも変わらない(_talk_mail は添付不明なら「画像便」へ倒す=従来どおり押さない)。
 
     ★Codex側は 📮 へ落とさない= react.py の「IDアンカー」と同じ考え方。
       確定IDを持つ印は、ギルドの実名照合が1件も当たらなくても custom を撃つ
@@ -167,7 +227,7 @@ def sent_mark_for(guild, dept, content=""):
     ★discord.utils は使わない= この関数はモジュール読込時に在る必要があり、
       discord の import は run_gateway() の中(遅延)だから。
     """
-    if str(dept or "") in NO_SENT_MARK_DEPTS:
+    if str(dept or "") in NO_SENT_MARK_DEPTS and not _talk_mail(dept, content, attachments):
         return None                      # ★押さない(Claude専用の印を優依の部屋へ出さない)
     if _local_pipeline_order(dept, content):
         return None                      # ★押さない(「生成依頼」便=描くのはローカル・2026-09-16)
@@ -965,7 +1025,10 @@ def run_gateway():
                     _mdept = ("codex" if (_codex_summon_on()
                                           and is_codex_mentioned(m.content or ""))
                               else str((chan_map.get(str(m.channel.id)) or {}).get("dept", "")))
-                    emoji = sent_mark_for(m.guild, _mdept, m.content or "")
+                    # ★2026-09-20 添付も渡す= 字だけの便には押す部屋(imagetag)が増えたので、
+                    #   ミラー側にも同じ材料を渡さないと本体と表示が割れる(C-064)。
+                    emoji = sent_mark_for(m.guild, _mdept, m.content or "",
+                                          _mirror_attachment_urls(m))
                     if emoji is None:
                         return          # ★押さない部屋(ミラーもenqueueしないのでここで終わり)
                     await m.add_reaction(emoji)
@@ -1085,7 +1148,8 @@ def run_gateway():
             try:
                 # ★受け手がCodexなら Codex印(uptsukiyomi)。札は enqueue に使った rec["dept"]
                 #   そのもの= 拾う側(codex_responder)と同じ1枚を見る(上 sent_mark_for 参照)。
-                emoji = sent_mark_for(m.guild, rec["dept"], rec.get("content") or "")
+                emoji = sent_mark_for(m.guild, rec["dept"], rec.get("content") or "",
+                                      rec.get("attachments"))
                 if rec["dept"] == "codex":
                     log(f"送信印=Codex msg={rec['msg_id']} → {emoji}")
                 if emoji is None:

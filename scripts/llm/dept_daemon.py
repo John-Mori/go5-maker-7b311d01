@@ -1161,11 +1161,18 @@ def is_local_pipeline_order(rec):
         return False
 
 
-# ★2026-09-20 Chami直令(研究室HQ DISPATCH-aegis-gl-1789845665234)=
-#   「既読とかの絵文字スタンプもいらない」。部屋「プロンプト変換と学習」に**印を一切出さない**。
-#   ★gateway側(NO_SENT_MARK_DEPTS)は**別の口**で、そちらは台帳のdept(=imagetag)を見ている。
-#     ここで塞ぐのは常駐が押す 既読✅/着手👀/束ね印/走行中の既読 の4口(C-064= OUT口は全数同時に塞ぐ)。
-NO_MARK_DEPTS = ("imagetag-talk",)
+# ★2026-09-20 Chami直令(部屋「プロンプト変換と学習」msg 1551147604241420370)=
+#   「**字のチャットを送った時は送信既読着手とかいつもどおりスタンプ絵文字押すようによろしく**」。
+#   → `imagetag-talk` をこの表から**外した**(同日の旧指示「既読とかの絵文字スタンプもいらない」
+#     DISPATCH-aegis-gl-1789845665234 を、Chami本人が字の便について上書きしたもの)。
+#   ★嘘の印を押さない線は1ミリも緩めていない= この dept へ来るのは**字だけの便**しかなく
+#     (入口は local_responder.handle_tag_request の「添付が無い」分岐1本)、それは実際に
+#     Claudeの処理系(カスミの常駐)に乗る便だ。画像便はここへ1行も来ない=優依のまま無印。
+#   ★gateway側(送信印📮)は**別の口**で、そちらは便の種別で撃ち分ける(NO_SENT_MARK_DEPTS +
+#     TALK_MARK_DEPTS を読め)。ここで見るのは常駐が押す 既読✅/着手👀/束ね印/走行中の既読 の4口。
+#   ★表そのものは残す= 「部屋ごと印を出さない」需要は次に来た時にここへ足せる(空タプルは
+#     `in` で常に False= marks_muted の判定は壊れない)。
+NO_MARK_DEPTS = ()
 
 
 def marks_muted(rec):
@@ -4534,8 +4541,11 @@ DEPT_CONF = {
     #     画像便は今までどおり優依だけが claim して WD14 のタグ列を返す=画像でClaudeは起きない。
     #   ★返信の宛先は便の `channel`(= persona_send --channel)なので、台帳にdept行が無くても
     #     同じ部屋へ返る。dead-letter通知だけは `--dept` を使う口で、そこは届かない(記録は残る)。
-    #   ★印(既読✅/着手👀)は NO_MARK_DEPTS で全口を塞いである。gateway の送信印📮は
-    #     元から NO_SENT_MARK_DEPTS に `imagetag` が居るので押されない(押下点の判定は台帳のdept)。
+    #   ★印(既読✅/着手👀)は**いつもどおり押す**(2026-09-20 Chami直令 msg 1551147604241420370
+    #     「字のチャットを送った時は送信既読着手とかいつもどおりスタンプ絵文字押すようによろしく」)。
+    #     同日の旧指示「既読とかの絵文字スタンプもいらない」を、Chami本人が**字の便について**
+    #     上書きしたものだ= NO_MARK_DEPTS から外してある。画像便は優依の側で無印のまま。
+    #     gateway の送信印📮も同じ日に便の種別で割った(NO_SENT_MARK_DEPTS / TALK_MARK_DEPTS)。
     #   ★費用(DEF-hq-e64f0bbee0・週間枠)= conversation_only で回送も work生成もしない/
     #     relay_model を sonnet-5 に落とす/ coalesce_sec で連投を1回にまとめる/ 返事は短く(boot_note)。
     #     ★正直に書く= `work_relay_model` の自動値下げは**この部屋では効かない**(C-014=Chami便は
