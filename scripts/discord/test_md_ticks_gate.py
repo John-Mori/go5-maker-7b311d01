@@ -215,6 +215,18 @@ try:
 finally:
     md_ticks._fence_re = _real
 
+print("== 層6= 配線した後に実際に出た便で、地の文を飲む塊が1つも無い(生きた見張り) ==")
+# ★改悪スタンプ(Chami msg 1551266364231000136)の④= 「次の変更で壊れたら赤くなる検査」。
+#   層1〜4はコードの振る舞いを見る= 配線を外されても層3で赤くなる。ここはその外側で、
+#   **本番へ実際に出た便**を見る= ゲートを迂回する新しいOUT口が生えた時にも赤くなる。
+WIRED_AT = "2026-09-21T01:33:46"                   # 配線 commit 1eedfde の時刻(JST)
+_after = [r for r in ROWS if str(r.get("ts", "")) >= WIRED_AT]
+_swal = [(r.get("msg_id"), md_ticks.prose_swallowed(r["body"])) for r in _after]
+_swal = [x for x in _swal if x[1] > 0]
+check("★配線後の実便%d件に、地の文を飲む便は0件" % len(_after), not _swal, repr(_swal[:3]))
+check("見張りが空回りしていない(配線後の実便が台帳に在る)", len(_after) > 0,
+      "配線後の便がまだ1件も無い= この層はまだ何も見ていない")
+
 print("== 層5= 本番の台帳へ1バイトも書いていない(mtime+size の前後比較) ==")
 for _p, _before in PROD.items():
     check("不変 %s 実測=%r" % (os.path.basename(_p), _stat(_p)), _stat(_p) == _before)
