@@ -15,6 +15,7 @@
 """
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -59,28 +60,54 @@ class Harness(object):
       どちらの手が呼ばれたかは、ここが唯一の記録になる。
     """
 
-    def __init__(self, tagger_stdout=None, tagger_rc=0):
+    def __init__(self, tagger_stdout=None, tagger_rc=0, persona_rc=0, persona_stdout=""):
         self.tagger_stdout = json.dumps(REAL_OUTPUT, ensure_ascii=False) \
             if tagger_stdout is None else tagger_stdout
         self.tagger_rc = tagger_rc
+        # 人格の口(persona_send)が落ちた時の退避を測るための細工。
+        #   persona_stdout に "送信OK" が在る=1通は出た後の失敗= 退避してはいけない形。
+        self.persona_rc = persona_rc
+        self.persona_stdout = persona_stdout
         self.sent = []          # bot_send へ渡した argv
         self.tagged = []        # タガーへ渡した argv
         self.other = []         # どちらでもない外部起動(在ってはいけない)
         self.logged = []
         self.appended = []
+        self.queued = []        # 使い捨てキューへ積まれた行(msg_id, dept, body)
         self._orig = {}
 
     def __enter__(self):
-        self._orig = {"run": subprocess.run, "log": lr.log, "append_line": lr.append_line}
+        self._orig = {"run": subprocess.run, "log": lr.log, "append_line": lr.append_line,
+                      "qdb": lr.QDB}
         subprocess.run = self._run
         lr.log = lambda d: self.logged.append(d)
         lr.append_line = lambda p, l: self.appended.append((p, l))
+        # ★キューは**使い捨てのDB**へ向ける(2026-09-20)。
+        #   ここを本物(local/queue/inbox.db)のままにしていたら、字だけの便の検体
+        #   「このプロンプトどう思う?」が本番のキューへ入り、カスミの常駐が拾って
+        #   **実際に部屋へ投稿した**(17:45:12 msg 1551152242030288935)。
+        #   検査は本番の部屋を鳴らしてはいけない(共通規律「本番でテストしない」)。
+        #   ★積む手そのものは本物のまま(LeaseQueue を実際に呼ぶ)= 行き先だけを移す。
+        self._qdir = tempfile.mkdtemp(prefix="tagroom_q_")
+        lr.QDB = os.path.join(self._qdir, "inbox.db")
+        sys.path.insert(0, os.path.join(ROOT, "scripts", "queue"))
+        from leasequeue import LeaseQueue
+        LeaseQueue(lr.QDB).close()          # 空の台帳を作る(handoff_to_talk は在ることを確かめてから積む)
         return self
 
     def __exit__(self, *a):
         subprocess.run = self._orig["run"]
         lr.log = self._orig["log"]
         lr.append_line = self._orig["append_line"]
+        try:                                # 捨てる前に積まれた行を手元へ写す
+            import sqlite3
+            con = sqlite3.connect(lr.QDB)
+            self.queued = list(con.execute("SELECT msg_id, dept, body FROM queue"))
+            con.close()
+        except Exception:
+            self.queued = []
+        lr.QDB = self._orig["qdb"]
+        shutil.rmtree(self._qdir, ignore_errors=True)
         return False
 
     def _run(self, argv, **kw):
@@ -89,7 +116,10 @@ class Harness(object):
         if "_wd14_runner.py" in joined:
             self.tagged.append(argv)
             return _Proc(self.tagger_stdout, self.tagger_rc)
-        if "bot_send.py" in joined or "persona_send.py" in joined:
+        if "persona_send.py" in joined:
+            self.sent.append(argv)
+            return _Proc(self.persona_stdout, self.persona_rc)
+        if "bot_send.py" in joined:
             self.sent.append(argv)
             return _Proc()
         self.other.append(argv)
@@ -174,19 +204,55 @@ class TestTagRoomAnswers(unittest.TestCase):
     def test_it_is_logged_as_tagged(self):
         self.assertIn("tagged", deliver(images=1).modes())
 
-    def test_the_bot_mouth_is_used_not_the_persona_mouth(self):
-        # 口調ゲートのある persona_send に乗せると英語のタグ列が削られ得る。
+    def test_the_reply_wears_the_yui_name(self):
+        # ★2026-09-20 Chami直令 msg 1551158137002795042「あとマルチエージェントじゃなくて
+        #   優依が出してください」= 生のBot名義で出さない。
+        #   素のBot APIは投稿者名を上書きできない(Discordの仕様)ので、名義を替える口は
+        #   webhook=persona_send だけだ。旧検査(bot_send を使うこと)はこの直令で失効した。
+        #   ★乗り換えの前提「口調ゲートは英語のタグ列を削らない」は実測で確かめてある
+        #     (local/_work/_tagreply_gate_probe.py・4形とも本文は1文字も変わらない)。
         argv = deliver(images=1).sent[0]
-        self.assertTrue(any(a.endswith("bot_send.py") for a in argv), argv)
-        self.assertFalse(any("persona_send" in a for a in argv), argv)
+        self.assertTrue(any(a.endswith("persona_send.py") for a in argv), argv)
+        self.assertFalse(any(a.endswith("bot_send.py") for a in argv), argv)
+        self.assertEqual(argv[argv.index("--persona") + 1], lr.PERSONA)
+        self.assertEqual(argv[argv.index("--suffix") + 1], lr.PERSONA_SUFFIX)
+
+    def test_the_tag_list_reaches_the_mouth_untouched(self):
+        # 名義を替えても本文は痩せない= 柵の中身は組み立てたプロンプトそのままで口へ渡る。
+        argv = deliver(images=1).sent[0]
+        self.assertEqual(h_inner(argv[-1]), wd14_tag.prompt_of(REAL_OUTPUT["items"][0]))
+
+    def test_a_dead_persona_mouth_falls_back_to_the_bot_mouth(self):
+        # 人格の口が落ちた時に黙るとタグ列そのものが消える。出し直す先は素のBotの口。
+        h = deliver(images=1, h=Harness(persona_rc=4))
+        self.assertEqual(len(h.sent), 2, h.sent)
+        self.assertTrue(any(a.endswith("bot_send.py") for a in h.sent[1]), h.sent[1])
+        self.assertEqual(h.sent[1][-1], h.sent[0][-1])          # 同じ本文を出し直す
+
+    def test_a_half_sent_persona_mouth_does_not_double_post(self):
+        # 分割連投の途中で落ちた(=1通は部屋に出ている)形で退避すると二重投稿になる。
+        h = deliver(images=1, h=Harness(persona_rc=3, persona_stdout="送信OK → プロンプト変換と学習"))
+        self.assertEqual(len(h.sent), 1, h.sent)
 
 
 class TestTheTriggerIsTheAttachment(unittest.TestCase):
     """引き金は「画像の添付そのもの」= 合図語を実装側で発明しない(研究室HQ裁定)。"""
 
-    def test_text_without_an_image_says_nothing(self):
+    def test_text_without_an_image_is_not_answered_by_yui(self):
+        # 優依が喋るのは画像便だけ= この線は動かさない。
+        # ★2026-09-20 Chami直令(DISPATCH-aegis-gl-1789845665234)で、字の便は黙殺ではなく
+        #   同じ部屋のカスミ(TALK_DEPT)へ積み直す形になった= 旧 mode=tag_no_image は
+        #   「本文も添付も空の便」だけに残る。
         h = deliver(content="このプロンプトどう思う?", images=0)
         self.assertEqual(h.sent, [])
+        self.assertIn("tag_talk_handoff", h.modes())
+        self.assertEqual([d for _, d, _ in h.queued], [lr.TALK_DEPT])
+
+    def test_an_empty_envelope_wakes_nobody(self):
+        # 本文も添付も無い便(スタンプだけ等)は誰も起こさない=積み直しもしない。
+        h = deliver(content="", images=0)
+        self.assertEqual(h.sent, [])
+        self.assertEqual(h.queued, [])
         self.assertIn("tag_no_image", h.modes())
 
     def test_the_cue_word_alone_does_not_trigger(self):

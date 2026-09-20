@@ -923,16 +923,42 @@ def handle_image_request(rec, raw_line, content, channel, dept=None):
     return True
 
 
-def send_plain(dept, text):
-    """人格の名義を付けずBotの口から1本出す(タグ列=機械の出力なので人格を着せない)。
+def send_tag_reply(dept, text):
+    """タグ列を**優依の名義**で1本出す。
 
-    ★persona_send ではなく bot_send を使う理由= あちらには口調ゲート(D/D-2・末尾英文除去)が
-      乗っていて、**英語のタグ列は削られ得る**。この部屋の本体は英語のタグ列そのものだ。
+    ★2026-09-20 Chami直令(msg 1551158137002795042「あとマルチエージェントじゃなくて優依が
+      出してください」・カスミ便 DISPATCH-aegis-gl-1789895897585)で bot_send から乗り換えた。
+      素のBot APIは投稿者名を上書きできない(Discordの仕様)= 名義を変える道はwebhook=
+      persona_send しかない。「username だけ差し替える軽い口」を bot_send 側に足す案は
+      **作れない**(足すなら結局 webhook を生やすことになり、口が3本目に増えるだけだ・C-064)。
+    ★旧実装が避けていた「口調ゲートが英語のタグ列を削る」懸念は、実物の本文で実測して
+      **起きない**ことを確かめた(2026-09-20・local/_work/_tagreply_gate_probe.py):
+        ・english_backstop= lang_gate の `_dump_core` がコード柵の中身を判定から除くので
+          英字0字と見える=発火しない。剥ぐ側(strip_english_paragraphs)も「日本語ゼロの本文は
+          触らない」安全弁で素通し。1枚/複数枚/失敗便/タグ220個の4形で全部同一だった。
+        ・apply_text_gates(口調/炎上表記/同形異字)も4形とも1文字も変わらない。
+      ★この結論は本文が**コード柵の中のタグ列**であることに依っている。format_reply の形を
+        変える時(柵の外に英文の説明を足す等)は、上の probe をもう一度回してから変えろ。
+    ★長さの扱いはむしろ良くなった= bot_send は `body[:1900]` で**黙って切る**(INC-92 の形)。
+      persona_send は split_body で分割して連投する=長いタグ列を失わない。
+    ★名義は質問系と同じ `優依` + `(LLM)`(2026-07-27 Chami裁定「表記は優依(LLM)にして」)。
+      suffix を persona 本体へ混ぜない理由は PERSONA_SUFFIX の宣言部を見ろ。
     """
-    r = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "discord", "bot_send.py"),
-                        "--dept", dept, text],
-                       capture_output=True, text=True, encoding="utf-8", errors="replace")
-    return r.returncode == 0
+    argv = [sys.executable, os.path.join(ROOT, "scripts", "discord", "persona_send.py"),
+            "--dept", dept, "--persona", PERSONA, "--suffix", PERSONA_SUFFIX, text]
+    r = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if r.returncode == 0:
+        return True
+    # ★人格の口が落ちた時だけ、素のBotの口へ退避する= タグ列そのものを失わない。
+    #   ただし「1通でも出た後」の失敗(分割連投の途中で切れた等)では出さない= 二重投稿を作らない。
+    if "送信OK" in (r.stdout or ""):
+        return False
+    log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "tag_persona_fallback", "dept": dept,
+         "err": ((r.stderr or r.stdout or "").strip()[-300:])})
+    r2 = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "discord", "bot_send.py"),
+                         "--dept", dept, text],
+                        capture_output=True, text=True, encoding="utf-8", errors="replace")
+    return r2.returncode == 0
 
 
 def tag_image_paths(rec):
@@ -1033,7 +1059,7 @@ def handle_tag_request(rec, raw_line):
         return False
     got = wd14_tag.tag_files(paths)
     body = wd14_tag.format_reply(got, names=[os.path.basename(p) for p in paths])
-    sent = send_plain(TAG_DEPT, body)
+    sent = send_tag_reply(TAG_DEPT, body)
     append_line(PROCESSED, raw_line)
     log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
          "mode": "tagged" if got.get("ok") else "tag_failed",
