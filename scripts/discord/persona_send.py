@@ -736,6 +736,20 @@ except Exception as _e:                        # 正本が読めない時も送�
         return "", "unavailable"
 
 
+# ★末尾マークダウン片ゲート(2026-09-20・型=改善提案部門/トトリ・起点=Chami msg 1551230317585760277)。
+#   正本は md_tail.py 1本を persona_send と bot_send の両方から呼ぶ(炎上/同形異字と同じ型・C-064)。
+#   ★口が2つ在るのに片方にだけ入れて割れた 2026-09-01 の型を繰り返さないため先に両方へ通す
+#     (実測では stray 12件は全て persona_send 経由= bot_send 側は予防)。
+try:
+    from md_tail import trailing_md_backstop as _md_tail_gate
+except Exception as _e:                        # 正本が読めない時も送信は殺さない(fail-open)
+    print(f"[persona_send] 末尾マークダウン片ゲートの正本 md_tail.py を読めない({type(_e).__name__})=素通し。",
+          file=sys.stderr)
+
+    def _md_tail_gate(body, tag="persona_send", quiet=False):
+        return body
+
+
 def enjoh_backstop(body, quiet=False):
     """Discordへ出る本文の炎上表記ゲート(実装は enjoh.py が正本)。
 
@@ -759,7 +773,11 @@ def apply_text_gates(body, persona=None, dept=None, tag="persona_send", audit=Tr
     ★ゲートごとに突合側で対処してはいけない(ゲートは3つ在り、また増える)。
       **合流点を1本にして、判定する側はそこを呼ぶ**(ORG-11= 同じ判定を2箇所に持たない・C-064)。
 
-    順序は main() の従来どおり 口調 → 炎上表記 → 同形異字。★勝手に入れ替えない。
+    順序は main() の従来どおり 口調 → 炎上表記 → 同形異字 → 末尾マークダウン片。★勝手に入れ替えない。
+    ★末尾マークダウン片ゲート(2026-09-20)を**最後**に置く理由= 上の3ゲートは本文を書き換える
+      (口調の直し・🔥の置換・同形異字の正規化)。片を落とすのは**実際に投稿される最終形**に
+      対してでなければ、書き換えで生えた/ずれた末尾を見落とす。_audit_structure の**前**=
+      数えるのは削った後の形(投稿される形)。
     ★english_backstop はここに**含めない**= あれは本文を直すだけでなく「送らない(None)」を
       返す関門で、判定の意味が違う(突合の再現に使うと、送らない便を再現できなくなる)。
     ★audit=False= 変換は同じまま台帳とstderrへ出さない。突合の再現で二重記帳しないため。
@@ -775,6 +793,7 @@ def apply_text_gates(body, persona=None, dept=None, tag="persona_send", audit=Tr
     body = tone_backstop(body, persona, dept, audit=audit)
     body = enjoh_backstop(body, quiet=not audit)
     body = _homo_gate(body, persona=persona, dept=dept, tag=tag, audit=audit)
+    body = _md_tail_gate(body, tag=tag, quiet=not audit)
     # ★構造監査(軸②/軸③)は**3ゲートの後**= 実際に投稿される文字列をそのまま数える。
     #   audit=False(突合の再現)では書かない= 同じ便を2行数えたら分布が歪む。
     if audit:

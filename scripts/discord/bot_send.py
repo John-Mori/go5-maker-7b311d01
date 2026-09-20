@@ -33,13 +33,16 @@ LOCAL = os.path.join(ROOT, "local")
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 try:
-    from enjoh import enjoh_backstop
+    from enjoh import ack_backstop, enjoh_backstop
 except Exception as _e:                        # 正本が読めない時も送信は殺さない(fail-open)
     print(f"[bot_send] 炎上表記ゲートの正本 enjoh.py を読めない({type(_e).__name__})=素通し。",
           file=sys.stderr)
 
     def enjoh_backstop(body, tag="bot_send"):
         return body
+
+    def ack_backstop(body, tag="bot_send", peel=None, quiet=False):
+        return False                           # 判定が読めない= 落とさない側へ倒す
 
 # ★同形異字(ホモグリフ)ゲート(2026-09-04・依頼=人事部門ククール)。正本= homoglyph.py。
 #   本文中の人格名が キリルК/ラテンK 等へ化けたまま出る事故(実物 msg 1545137710820360214)。
@@ -51,6 +54,19 @@ except Exception as _e:                        # fail-open
           file=sys.stderr)
 
     def homoglyph_backstop(body, persona=None, dept=None, tag="", channel=None):
+        return body
+
+# ★末尾マークダウン片ゲート(2026-09-20・型=改善提案部門/トトリ)。正本= md_tail.py。
+#   本文末尾に残る対応の無いバッククォート片(空コード span / 孤立フェンス)を落とす。
+#   実測 stray 12件は全て persona_send 経由だったが、OUT口は2つ在る= 先に両方へ通す
+#   (片方だけ入れて割れた 2026-09-01 の型を繰り返さない)。
+try:
+    from md_tail import trailing_md_backstop
+except Exception as _e:                        # fail-open
+    print(f"[bot_send] 末尾マークダウン片ゲートの正本 md_tail.py を読めない({type(_e).__name__})=素通し。",
+          file=sys.stderr)
+
+    def trailing_md_backstop(body, tag="bot_send", quiet=False):
         return body
 
 # ★共通の送信ログ(2026-09-02・研究室HQからの恒久依頼)。この口には送信ログが1行も無く、
@@ -141,10 +157,21 @@ def main():
     if not ch:
         print(f"チャンネル未登録: {key} (local/discord_channels.json を確認)")
         sys.exit(2)
+    # ★2026-09-10 定型ack denylist(依頼= 改善提案部門トトリ)。「受け取った。処理を開始する。」
+    #   のような**意味は空だが文としては非空**の一次ackを、この口でも空便として落とす。
+    #   炎上表記ゲートと同じ型= 正本(enjoh.ack_only_reason)を全ての口から呼ぶ。片方だけに
+    #   置いた実装は必ずもう片方と割れる(2026-09-01 の部分適用事故)。
+    #   止めた便も台帳に残す(event="blocked")= 黙って消えた便を後から辿れる。
+    if ack_backstop(body, tag="bot_send"):
+        _audit(body=body, event="blocked", status="ack_only", channel=key)
+        print("内容の無い一次ackは沈黙より悪い(共通規律§2)ので送信しません。\n"
+              "  作業の結果か、今わかっている実物を本文にしてください。")
+        sys.exit(4)
     # ★POSTの直前=この口の最後の一点で正規化する(呼び出し元が何本あっても必ず通る)。
     body = enjoh_backstop(body, tag="bot_send")
     body = homoglyph_backstop(body, dept=(key if by_dept else None), tag="bot_send",
                               channel=(None if by_dept else key))
+    body = trailing_md_backstop(body, tag="bot_send")
     req = urllib.request.Request(
         f"https://discord.com/api/v10/channels/{ch['id']}/messages",
         data=json.dumps({"content": body[:1900]}).encode("utf-8"),
