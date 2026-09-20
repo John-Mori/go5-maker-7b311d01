@@ -368,9 +368,20 @@ def api_get(path, token):
 import urllib.parse
 
 REACT_SENT_NAME = "送信"          # 呼び名(表示用)
-# Chami登録の実際の絵文字名。呼び名(送信)と実名(sendms)の両方で解決する
-REACT_SENT_NAMES = ("sendms", "送信")
-REACT_SENT_FALLBACK = "📮"    # 📮(未登録時の代用)
+# ★2026-09-20 イージス研究室: 実名照合だけだと**Chamiが絵文字を改称した瞬間に📮へ落ちる**
+#   (実物= sendms → Send_MS への改称で送信印が📮になった。discord_gateway 側は commit ee110f9
+#    で同じ形を直し、msg 1551209811666935849 で <:Send_MS:...> の実描画を確認済)。
+#   ここは退役済みのファイルだが、**表が2つあると次に読んだ者が古い方を写す**(ORG-11)ので
+#   同じIDアンカーへ揃えておく。表の正本は react.py だけ=ここで写経しない。
+_REACT_ID, _REACT_NAME = {}, {}
+try:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from react import EMOJI_ID as _REACT_ID, EMOJI_NAME as _REACT_NAME  # noqa: E402
+except Exception:
+    pass
+# 実名は保険(IDを持たない印用)。当てる順は ①ID一致 → ②実名 → ③IDでcustom直撃 → ④📮。
+REACT_SENT_NAMES = (_REACT_NAME.get("送信", "sendms"), "送信")
+REACT_SENT_FALLBACK = "📮"    # 📮(IDも実名も引けない時だけの代用)
 _react = {"guild": "", "emoji": "", "at": 0.0}
 
 
@@ -407,14 +418,23 @@ def resolve_sent_emoji_(token, any_cid):
         if not _react["guild"]:
             ch = api_get(f"/channels/{any_cid}", token)
             _react["guild"] = str((ch or {}).get("guild_id", "") or "")
+        eid = _REACT_ID.get("送信")
         if _react["guild"]:
             emojis = api_get(f"/guilds/{_react['guild']}/emojis", token) or []
-            for want in REACT_SENT_NAMES:      # sendms(実名) → 送信(呼び名) の順で探す
+            for e in emojis:                   # ①ID一致=実名が何であっても当てる(改称に強い)
+                if eid and str(e.get("id") or "") == str(eid):
+                    _react["emoji"] = f"{e.get('name')}:{e['id']}"
+                    print(f"{time.strftime('%H:%M:%S')} 送信絵文字を解決(ID一致): :{e.get('name')}:")
+                    return _react["emoji"]
+            for want in REACT_SENT_NAMES:      # ②実名は保険(IDを持たない印用)
                 for e in emojis:
                     if e.get("name") == want and e.get("id"):
                         _react["emoji"] = f"{e['name']}:{e['id']}"
                         print(f"{time.strftime('%H:%M:%S')} 送信絵文字を解決: :{e['name']}:")
                         return _react["emoji"]
+        if eid:                                # ③ギルドを1件も引けなくてもIDで custom を直撃
+            _react["emoji"] = f"{_REACT_NAME.get('送信', 'sendms')}:{eid}"
+            return _react["emoji"]
     except Exception:
         pass
     _react["emoji"] = REACT_SENT_FALLBACK
