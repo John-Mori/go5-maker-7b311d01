@@ -61,6 +61,10 @@ _AUDIT_TMP = tempfile.mkdtemp(prefix="enjoh_audit_")
 AUDIT_SANDBOX = os.path.join(_AUDIT_TMP, "llm", "send_audit.jsonl")
 PROD_AUDIT = _sa.AUDIT
 PROD_AUDIT_BEFORE = os.path.getsize(PROD_AUDIT) if os.path.exists(PROD_AUDIT) else 0
+# ★検査便の受け皿(2026-09-13 追加の TEST_AUDIT)も共有の実ファイル= ここも汚さない。
+PROD_TEST_AUDIT = getattr(_sa, "TEST_AUDIT", None)
+PROD_TEST_BEFORE = (os.path.getsize(PROD_TEST_AUDIT)
+                    if PROD_TEST_AUDIT and os.path.exists(PROD_TEST_AUDIT) else 0)
 
 # --- A 正本(enjoh.py)の振る舞い -------------------------------------------------
 # A-1 Chamiが指摘した表記そのもの。「🔥炎上 9件」→「<:enjoh:…>恒久 9件」。
@@ -102,11 +106,19 @@ def run_bot_send(mod, body, audit_to=AUDIT_SANDBOX):
     ★送信ログ(send_audit)の書き先も砂場へ向ける。mod.LOCAL の差し替えでは届かない
       (send_audit は別モジュールとして自分で書き先を持つ)。audit_to=None を渡すと
       向け直さない= 汚していた頃の振る舞い。must-fail(E-2)でだけ使う。
+    ★AUDIT だけでは届かない(2026-09-20 実測)。send_audit は 2026-09-13 から
+      `_is_test_entry()`= 起動スクリプト名が test_ で始まる走行を **TEST_AUDIT**
+      (local/llm/send_audit_test.jsonl)へ振り分ける。この検査はまさにそれに当たるので、
+      AUDIT を向け直しても行は共有の send_audit_test.jsonl へ落ちていた=砂場は0行。
+      書き先は**2本とも**砂場へ向ける。
     """
     tmp = tempfile.mkdtemp(prefix="enjoh_gate_")
     audit_real = _sa.AUDIT
+    test_audit_real = getattr(_sa, "TEST_AUDIT", None)
     if audit_to:
         _sa.AUDIT = audit_to
+        if test_audit_real is not None:
+            _sa.TEST_AUDIT = audit_to
     try:
         with io.open(os.path.join(tmp, "discord_bot_token.txt"), "w", encoding="utf-8") as f:
             f.write("dummy-token-not-a-secret")
@@ -140,6 +152,8 @@ def run_bot_send(mod, body, audit_to=AUDIT_SANDBOX):
         return seen.get("content")
     finally:
         _sa.AUDIT = audit_real
+        if test_audit_real is not None:
+            _sa.TEST_AUDIT = test_audit_real
         shutil.rmtree(tmp, ignore_errors=True)
 
 
@@ -160,7 +174,11 @@ ok("enjoh_backstop" in bot_send.main.__code__.co_names, "B-3 bot_send.main() が
 
 # B-4 webhook側(persona_send)の配線が生きたままであること(既存の担保を壊していない)。
 import persona_send as ps  # noqa: E402
-ok("enjoh_backstop" in ps.main.__code__.co_names, "B-4 persona_send.main() の配線が残っている")
+# ★2026-09-09 HQ-0253= persona_send の3ゲートは apply_text_gates() 1本へ寄った。
+#   main()→合流点、合流点→enjoh の両方を見る(片方だけだと切れても緑になる)。
+ok("apply_text_gates" in ps.main.__code__.co_names, "B-4 persona_send.main() の配線が残っている")
+ok("enjoh_backstop" in ps.apply_text_gates.__code__.co_names,
+   "B-4 合流点 apply_text_gates がゲートを呼ぶ")
 ok(ps.enjoh_backstop(real).startswith(ENJOH + "恒久 9件"), "B-4 persona_send側も同じ結果を返す")
 
 
@@ -245,21 +263,48 @@ if os.path.exists(AUDIT_SANDBOX):
         _rows = [json.loads(x) for x in f if x.strip()]
 ok(len(_rows) == 3 and all(r.get("dept") == "dummy" for r in _rows),
    f"E-1 検査が出した3行は砂場に落ちている(dept=dummy / 実際は{len(_rows)}行)")
+_prod_test_after = (os.path.getsize(PROD_TEST_AUDIT)
+                    if PROD_TEST_AUDIT and os.path.exists(PROD_TEST_AUDIT) else 0)
+ok(_prod_test_after == PROD_TEST_BEFORE,
+   f"E-1 検査便の共有受け皿(send_audit_test.jsonl)も増えていない"
+   f"({PROD_TEST_BEFORE} → {_prod_test_after} bytes)")
 
-# E-2 must-fail: 書き先を向け直さない版(=2026-09-03朝まで動いていた汚す実装)なら、
-#     その時点の台帳が1行増える。★本番では試さない= 偽の本番ファイルを一時に作って撃つ。
+# E-2 must-fail: 書き先を向け直さない版(=2026-09-03朝まで動いていた汚す実装)を再現する。
+#     ★本番では試さない= 偽の本番ファイルを一時に作って撃つ。
+#     ★主張は 2026-09-20 に実測へ合わせた。2026-09-13 に send_audit が検査便ルート
+#       (TEST_AUDIT)を持ったので、向け直さなくても **本番の送信台帳(AUDIT)は汚れない**=
+#       行は検査便の受け皿へ落ちる。それでも砂場には1行も来ない= E-1 の「砂場に3行」は
+#       run_bot_send の向け直しが本当に効いているから緑になっている、と言える。
 _fake_prod = os.path.join(_AUDIT_TMP, "fake_prod_send_audit.jsonl")
-with io.open(_fake_prod, "w", encoding="utf-8") as f:
-    f.write("")
+_fake_test = os.path.join(_AUDIT_TMP, "fake_prod_send_audit_test.jsonl")
+for _p in (_fake_prod, _fake_test):
+    with io.open(_p, "w", encoding="utf-8") as f:
+        f.write("")
+_sandbox_before = len(_rows)
 _sa.AUDIT = _fake_prod
+if PROD_TEST_AUDIT is not None:
+    _sa.TEST_AUDIT = _fake_test
 try:
     run_bot_send(bot_send, watchdog, audit_to=None)      # ← 逃がさない旧実装の再現
 finally:
     _sa.AUDIT = PROD_AUDIT
+    if PROD_TEST_AUDIT is not None:
+        _sa.TEST_AUDIT = PROD_TEST_AUDIT
+with io.open(AUDIT_SANDBOX, encoding="utf-8") as f:
+    _sandbox_after = len([x for x in f if x.strip()])
+ok(_sandbox_after == _sandbox_before,
+   f"E-2 must-fail 向け直さないと砂場には落ちない({_sandbox_before} → {_sandbox_after}行"
+   "・E-1は本当に効いている)")
+_dirty = []
+if os.path.exists(_fake_test):
+    with io.open(_fake_test, encoding="utf-8") as f:
+        _dirty = [x for x in f if x.strip()]
 with io.open(_fake_prod, encoding="utf-8") as f:
-    _dirty = [x for x in f if x.strip()]
-ok(len(_dirty) == 1 and json.loads(_dirty[0]).get("channel") == "検査用ダミー",
-   f"E-2 must-fail 逃がさないと台帳が汚れる(={len(_dirty)}行増えた・E-1は本当に効いている)")
+    _dirty_prod = [x for x in f if x.strip()]
+ok(len(_dirty) == 1 and json.loads(_dirty[0]).get("channel") == "検査用ダミー"
+   and not _dirty_prod,
+   f"E-2 その1行は消えずに検査便ルートへ落ちる(受け皿{len(_dirty)}行 / "
+   f"本番想定{len(_dirty_prod)}行= 2026-09-13 の二重の網)")
 
 shutil.rmtree(_AUDIT_TMP, ignore_errors=True)
 
