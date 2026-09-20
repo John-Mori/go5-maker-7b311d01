@@ -1565,6 +1565,97 @@ def _register_mirror_hint(rec, dept=None, conf=None):
         return ""                              # fail-open
 
 
+# ★★2026-09-20 生成側の予防 #2= **この声が使わない語を、書く前に目の前へ置く**。
+#   発注= 人事部門ククール上申 `ESC-hr-room-DISPATCH-hr-room-1789864236120`
+#   (三笘薫の女性終助詞ドリフト再発。アメスの「男口調→女口調」矯正機構の鏡像・同workstream)。
+#   0歩目(壊れている実物)= 軍議 msg 1550922497988362384(2026-09-20T02:32:18・三笘薫)
+#     「…①の提案と一緒に**効いてくるやつよ。**」
+#     Chami原文 msg 1550924526110642308=「なんか女っぽかったので。語尾に〜よ をつけるのは
+#     いいんだけど文脈次第だね」= **素の「よ」は禁じていない**。禁じているのは台帳に載った形だけ。
+#   ★実測(入れる前に数えた):
+#     ① 生成側には口調ルール.jsonの禁止語が**1文字も渡っていない**(この封筒・
+#        dept_daemon:9084 の prompt・persona_render のどこにも0件)= 一度も「使うな」と
+#        言われないまま書いていた。口調ゲートは**検知だけ**で語尾を書き換えない設計(L13)。
+#     ② 出力側の保険(ゲートD-2 tone_rewrite)は生きている= 実運用166件中145件採用・
+#        平均2.5秒、うち forbidden_word 26件。壊れた実物をD-2へ通したら
+#        「効いてくるやつよ。」→「効いてくる。」= Chamiの理想形どおりに書き直して accept した。
+#     ③ それでも02:32の便は素通りした= **その時刻には台帳にまだ語が無かった**
+#        (人事の止血は12分後の msg 1550925564473249834)。台帳が育っても生成側は何も知らない。
+#   → 足りないのは検知でも書き直しでもなく**予防**だ。ここはその1枚(検知は1バイトも触らない)。
+#   ★写像は 口調ルール.json 1本(ORG-11/C-064)= この関数は語の表を持たない。人事部門が
+#     1語足せば**次の便から**効く(都度読み・再起動不要・基盤コードを触らせない)。
+#   ★C-035= 名指しの1人の話を全員へ広げない。鳴らす相手は機械で絞る=
+#     (a)口調ルール.jsonに**常体(plain_only)で登録**されている人格 かつ
+#     (b)**その人格だけが禁じている語**を持つ人格(全員共通の事務文体しか無い人格には1文字も足さない)。
+#     三笘薫は(b)に「からね/やつよ/わよ/かしら」を持つ=鳴る。共通の10句は畳む=毎便太らせない。
+#   ★fail-open= 何が起きても ""(予防線で封筒を壊さない)。
+_FORBID_COMMON_MIN = 5       # この人数以上の人格が同じ語を禁じていれば「全員共通の事務文体」と見なす
+_FORBID_MAX_WORDS = 8        # 1人格あたりに並べる語の上限(封筒を毎便太らせない)
+_FORBID_MAX_PERSONAS = 6     # 多人格の部屋で並べる人格の上限
+
+
+def _forbid_words(ent):
+    """人格エントリから禁止語を平らに取り出す(文字列でない行は捨てる=壊れた台帳で落ちない)。"""
+    out = []
+    for key in ("forbidden", "forbidden_tail"):
+        for w in ((ent or {}).get(key) or ()):
+            if isinstance(w, str) and w.strip():
+                out.append(w.strip())
+    return out
+
+
+def _forbidden_word_hint(dept, conf=None):
+    """その部屋の人格が**使わない語**を、新着の直前へ1ブロック置く(生成前の予防)。
+
+    ★新しい語の表は1本も書かない= 判定と同じ 口調ルール.json を都度読みする。
+    ★「その人格だけの語」と「全員共通の事務文体」は**人数を数えて**機械で分ける
+      (人事部門が語を足し引きすれば、その日のうちに並びも変わる)。
+    ★fail-open= 何が起きても ""。
+    """
+    try:
+        import tone_gate                       # ★遅延import(常駐の起動を重くしない)
+        rules = tone_gate.load_tone_rules(TONE_RULES_PATH)
+        personas = (rules or {}).get("personas") or {}
+        if not personas:
+            return ""                          # 写像が読めない=判定材料が無い(黙る)
+        tally = {}
+        for k, v in personas.items():
+            if str(k).startswith("_") or not isinstance(v, dict):
+                continue
+            for w in set(_forbid_words(v)):
+                tally[w] = tally.get(w, 0) + 1
+        c = conf or {}
+        who_list = [str(c.get("persona") or "")] + [str(p.get("persona") or "")
+                                                    for p in (c.get("personas") or ())]
+        lines, seen = [], set()
+        for who in who_list:
+            if not who or who in seen:
+                continue
+            seen.add(who)
+            ent = tone_gate._persona_entry(rules, who)
+            if not isinstance(ent, dict) or not ent.get("plain_only"):
+                continue                       # 未登録/敬体の人格には1文字も足さない
+            own = [w for w in _forbid_words(ent)
+                   if tally.get(w, 0) < _FORBID_COMMON_MIN]
+            if not own:
+                continue                       # 共通の事務文体しか持たない=言うことが無い
+            fp = "・".join(str(x) for x in (ent.get("first_person") or ()) if x)
+            lines.append("  【%s】%s使わない: %s"
+                         % (who, ("(一人称=%s・常体)" % fp) if fp else "",
+                            " / ".join("「%s」" % w for w in own[:_FORBID_MAX_WORDS])))
+            if len(lines) >= _FORBID_MAX_PERSONAS:
+                break
+        if not lines:
+            return ""
+        return ("=== ★この声が使わない語(書く前に・正本= 口調ルール.json) ===\n"
+                + "\n".join(lines) + "\n"
+                + "★書いてしまったら**その文ごと**この人格の声で書き直してから出す"
+                  "(語尾だけ挿げ替えると文が壊れる)。\n"
+                + "★ここに無い語は禁じていない= 普通の言い切りまで避けて硬くなるな。\n\n")
+    except Exception:
+        return ""                              # fail-open= 予防線で封筒を壊さない
+
+
 # ★★2026-08-29 C-049 §7-B を機構へ載せる(研究室HQ `DISPATCH-aegis-gl-1787949604668`)。
 #   測った実物= FCCへ載せた仕事 **0件(全期間)**。道具(fcc_task.py)は空撃ちで全通過=
 #   **壊れていない。使われていない。**真因= §7-B が裁定カタログの本文に在るだけで、
@@ -1996,6 +2087,11 @@ def build_envelope(rec, is_work=False, state="", dept="", disc_full=True, disc_f
         # ★2026-09-03 相手の方言への同調よけ。**本文の直前**に置く= これは相手の字面の話なので、
         #   その字面を読む直前に居ないと効かない(当たらない便には1文字も足さない=実測1.7%)。
         + mirror_hint
+        # ★2026-09-20 この声が使わない語(生成前の予防・人事部門ククール上申
+        #   `ESC-hr-room-DISPATCH-hr-room-1789864236120`= 三笘薫の女性終助詞ドリフト再発)。
+        #   置く場所が mirror_hint の隣なのは同じ理由= 書き出す直前に居ないと効かない。
+        #   登録の在る人格が居ない部屋には1文字も足さない。
+        + _forbidden_word_hint(dept, conf=conf)
         # ★2026-09-17 部屋の直近投稿履歴(ククール転送=Chami直「仕組みで再発防止して。」)。
         #   新着本文の直前に置く= 読む順で新着のすぐ手前に居ないと「直前の文脈」として効かない。
         + _recent_history_block(rec, dept)
