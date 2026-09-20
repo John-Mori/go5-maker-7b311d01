@@ -283,7 +283,12 @@ def _aggregate(rows, end, window, since=None):
     agg = collections.defaultdict(
         lambda: {"count": 0, "days": set(), "personas": set(),
                  "reasons": collections.Counter(), "expected": [],
-                 "first": "", "last": "", "voc": 0, "judgeable": 0})
+                 "first": "", "last": "", "voc": 0, "judgeable": 0,
+                 # ★しきい値を測る側の棚(2026-09-20・理由は vocative_count)。
+                 #   生の count/days/personas とは**別に**持つ= 引いた分を消さない。
+                 "voc_rows": 0, "unjudged": 0, "voc_days": set(),
+                 "voc_personas": set(), "voc_reasons": collections.Counter(),
+                 "voc_first": "", "voc_last": ""})
     for r in rows:
         ts = str(r.get("ts") or "")
         try:
@@ -305,9 +310,24 @@ def _aggregate(rows, end, window, since=None):
         if "voc" in r:
             a["judgeable"] += 1
             try:
-                a["voc"] += int(r.get("voc") or 0)
+                v = int(r.get("voc") or 0)
             except (TypeError, ValueError):
-                pass
+                v = 0
+            a["voc"] += v
+            hit = v >= 1
+            if hit:
+                a["voc_rows"] += 1
+        else:
+            # ★判定できない行(旧ゲート)は**数える側**へ倒す= fail-open。
+            #   0として落とすと、台帳が古いほど静かに「呼びかけ0=健康」へ倒れる。
+            a["unjudged"] += 1
+            hit = True
+        if hit:
+            a["voc_days"].add(ts[:10])
+            a["voc_personas"].add(str(r.get("persona") or ""))
+            a["voc_reasons"][str(r.get("reason") or "")] += 1
+            a["voc_first"] = min(a["voc_first"] or ts, ts)
+            a["voc_last"] = max(a["voc_last"], ts)
         if not a["expected"]:
             a["expected"] = list(r.get("expected") or [])
         a["first"] = min(a["first"] or ts, ts)
@@ -348,6 +368,31 @@ def _all_mention(a, min_count=MIN_COUNT):
     return a.get("judgeable", 0) >= min_count and a.get("voc", 0) == 0
 
 
+def vocative_count(a):
+    """★しきい値を測る数= **呼びかけの行**＋**判定できない行**(2026-09-20・イージス研究室)。
+
+    発注= 人事部門ククール msg DISPATCH-aegis-gl-1789893838042
+      「naming_drift_check が voc:0 の足場メタ言及を Chami>Chami に混ぜて68件へ水増ししてる。
+        集計を voc>=1(実呼びかけ)で絞ってくれ」。
+
+    当室で数え直した(窓14日・台帳 local/llm/naming_audit.jsonl):
+      Chami>Chami            生68 / 判定68 / **呼びかけ 1**(カスミ 2026-09-20T17:31:49)
+      ケヴィン・デブライネ>ケヴィン  生32 / 判定32 / **呼びかけ 2**(どちらも Chami の投稿原文の引用)
+      一ノ瀬怜>怜さん          生 6 / 判定 6 / **呼びかけ 1**(アメス 2026-09-13T23:46:50)
+    → ククールの見立てのとおりだ。残りは全部**地の文・足場メタ**(「Chami直令」等)。
+
+    何が壊れていたか= `_all_mention()` は「呼びかけが**1件も無い**組」しか黙らせない。
+    呼びかけが1件でも混じると組ごと通り、**件数は生の数のまま**人事部門へ出ていた=
+    「68件の誤呼称が居座っている」と読める便が、実体は1件だ。
+    ★外すべき層は組ではなく**行**だ(SELF_REPORT_HEAD の時と同じ誤り方をしていた)。
+
+    ★「呼びかけ1件で黙るのは危なくないか」= しきい値の意味は最初から**持続**だ
+      (件5/日3/人2・C-041= 一度の観測を状態の代理にしない)。1件は持続ではない。
+      黙らせた呼びかけは捨てず `near_misses()` が必ず画面へ出す= 埋もれない。
+    """
+    return a.get("voc_rows", 0) + a.get("unjudged", 0)
+
+
 def span_days(rows=None, since=None, end=None, window=WINDOW_DAYS):
     """窓が実際に何日ぶんか(0なら窓が空)。
 
@@ -383,6 +428,11 @@ def counts(rows=None, since=None, end=None, window=WINDOW_DAYS):
             "personas": sorted(p for p in a["personas"] if p),
             "first": a["first"], "last": a["last"],
             "voc": a["voc"], "judgeable": a["judgeable"],
+            # ★呼びかけで数え直した分(理由は vocative_count)。生の count と並べて出す=
+            #   どちらか片方だけ見せると、是正の効きを窓の差や除外と取り違える。
+            "count_voc": vocative_count(a), "voc_days": len(a["voc_days"]),
+            "voc_personas": sorted(p for p in a["voc_personas"] if p),
+            "mention": a["count"] - vocative_count(a), "unjudged": a["unjudged"],
             "unreadable": _unreadable(dict(a, target=target, found=found)),
             "all_mention": _all_mention(a),
         })
@@ -425,7 +475,11 @@ def scan(rows=None, end=None, window=WINDOW_DAYS,
          since=None):
     """持続ドリフトを件数の多い順で返す。
 
-    戻り値= [{"target","found","expected","count","days","personas","first","last","reasons"}]
+    ★件数・日数・人格数は**呼びかけの行だけ**で測る(2026-09-20・理由は vocative_count)。
+      生の数は `count_all` / `days_all` / `personas_all`、落とした地の文は `mention` に残す。
+
+    戻り値= [{"target","found","expected","count","days","personas","first","last","reasons",
+             "count_all","mention","days_all","personas_all","voc","judgeable","unjudged"}]
     ★`since` で窓を狭めた時、返り値が空でも「直った」ではない= 窓の日数が min_days に
       届かなければ**何が起きていても空**になる。狭い窓で測るなら `counts()` を見ろ。
     """
@@ -437,17 +491,63 @@ def scan(rows=None, end=None, window=WINDOW_DAYS,
         # ★地の文の言及しか無い組は人事へ回さない(直す先が無い・理由は `_all_mention`)。
         if _all_mention(a, min_count):
             continue
-        if (a["count"] >= min_count and len(a["days"]) >= min_days
-                and len(a["personas"]) >= min_personas):
+        # ★数えるのは**呼びかけの行**だけ(2026-09-20・理由は vocative_count)。
+        #   地の文・足場メタの言及は件数にも日数にも人格数にも入れない。
+        n = vocative_count(a)
+        if (n >= min_count and len(a["voc_days"]) >= min_days
+                and len(a["voc_personas"]) >= min_personas):
             out.append({
                 "target": target, "found": found, "expected": a["expected"],
-                "count": a["count"], "days": len(a["days"]),
-                "personas": sorted(p for p in a["personas"] if p),
-                "first": a["first"], "last": a["last"],
+                "count": n, "days": len(a["voc_days"]),
+                "personas": sorted(p for p in a["voc_personas"] if p),
+                "first": a["voc_first"], "last": a["voc_last"],
                 "voc": a["voc"], "judgeable": a["judgeable"],
-                "reasons": dict(a["reasons"]),
+                "unjudged": a["unjudged"],
+                # ★引いた分を便へ持っていくために持ち歩く(0件に見せない義務は残る)。
+                "count_all": a["count"], "mention": a["count"] - n,
+                "days_all": len(a["days"]),
+                "personas_all": sorted(p for p in a["personas"] if p),
+                # ★理由の内訳も**数えた行だけ**から作る= banned() が地の文の理由で立たない。
+                "reasons": dict(a["voc_reasons"]),
             })
     out.sort(key=lambda d: (-d["count"], d["target"], d["found"]))
+    return out
+
+
+def near_misses(rows=None, end=None, window=WINDOW_DAYS,
+                min_count=MIN_COUNT, min_days=MIN_DAYS,
+                min_personas=MIN_PERSONAS, since=None):
+    """★呼びかけは**出ているが持続に届かない**組(2026-09-20)。
+
+    ここが無いと、voc で絞った瞬間に「本物の呼びかけ1件」が画面から消える=
+    黙らせた分を見えないところへ捨てる、この機構が一番やってはいけない倒し方だ
+    (self_reports / full_name_hits / mentions と同じ役目の4つめの窓口)。
+    ★鳴らしはしない= 1件は持続ではない(C-041)。だが**読める場所には必ず出す**。
+    """
+    rows = load_rows() if rows is None else rows
+    out = []
+    for (target, found), a in _aggregate(rows, end, window, since=since).items():
+        if _unreadable(dict(a, target=target, found=found)):
+            continue
+        n = vocative_count(a)
+        if n < 1:
+            continue
+        if (n >= min_count and len(a["voc_days"]) >= min_days
+                and len(a["voc_personas"]) >= min_personas):
+            continue                     # ★鳴っている組はここに出さない(二重計上しない)
+        why = []
+        if n < min_count:
+            why.append("件%d<%d" % (n, min_count))
+        if len(a["voc_days"]) < min_days:
+            why.append("日%d<%d" % (len(a["voc_days"]), min_days))
+        if len(a["voc_personas"]) < min_personas:
+            why.append("人%d<%d" % (len(a["voc_personas"]), min_personas))
+        out.append({"target": target, "found": found, "expected": a["expected"],
+                    "count": n, "days": len(a["voc_days"]),
+                    "personas": sorted(p for p in a["voc_personas"] if p),
+                    "mention": a["count"] - n, "unjudged": a["unjudged"],
+                    "last": a["voc_last"], "why": "・".join(why)})
+    out.sort(key=lambda d: (-d["count"], d["last"]), reverse=False)
     return out
 
 
@@ -620,31 +720,34 @@ def main(argv=None):
             print("この窓には1件も無い。★ただし**日数が %d 日しか無い**= "
                   "『直った』の証拠にはならない(是正前の窓と比べるなら件/日で)" % n)
         for c in cs:
-            print("- %s を **%s** と呼んでいる(正=%s): 件%d 日%d 人%d = **%.2f件/日**"
-                  "(判定%d/呼%d)%s%s"
+            print("- %s を **%s** と呼んでいる(正=%s): 呼びかけ%d件 日%d 人%d = "
+                  "**%.2f件/日**(生%d件/判定%d/地の文%d)%s%s"
                   % (c["target"], c["found"], "/".join(c["expected"]) or "?",
-                     c["count"], c["days"], len(c["personas"]),
-                     (c["count"] / n) if n else 0.0,
-                     c["judgeable"], c["voc"],
+                     c["count_voc"], c["voc_days"], len(c["voc_personas"]),
+                     (c["count_voc"] / n) if n else 0.0,
+                     c["count"], c["judgeable"], c["mention"],
                      "(鳴らせない)" if c["unreadable"] else "",
                      "(鳴らさない)" if c["all_mention"] else ""))
         return 0
     ds = scan(rows, window=ns.days)
     un = unreadable(rows, window=ns.days)
     mt = mentions(rows, window=ns.days)
+    nm = near_misses(rows, window=ns.days)
     if ns.json:
-        print(json.dumps({"drifts": ds, "unreadable": un, "mentions": mt},
-                         ensure_ascii=False, indent=2))
+        print(json.dumps({"drifts": ds, "unreadable": un, "mentions": mt,
+                          "near_misses": nm}, ensure_ascii=False, indent=2))
         return 0
-    print("台帳の判定行 %d / 窓%d日 / しきい値 件%d 日%d 人%d"
+    print("台帳の判定行 %d / 窓%d日 / しきい値 **呼びかけ**件%d 日%d 人%d"
+          "(★地の文・足場メタの言及は数えない)"
           % (len(rows), ns.days, MIN_COUNT, MIN_DAYS, MIN_PERSONAS))
     if not ds:
         print("持続ドリフトなし")
     for d in ds:
-        print("- %s を **%s** と呼んでいる(正=%s): 件%d 日%d 人%d [%s〜%s]"
+        print("- %s を **%s** と呼んでいる(正=%s): 呼びかけ%d件 日%d 人%d [%s〜%s]"
+              "(地の文%d件は数えていない・生%d件)"
               % (d["target"], d["found"], "/".join(d["expected"]) or "?",
                  d["count"], d["days"], len(d["personas"]),
-                 d["first"][:10], d["last"][:10]))
+                 d["first"][:10], d["last"][:10], d["mention"], d["count_all"]))
         print("    使っている人格= %s" % "、".join(d["personas"]))
     if un:
         # ★鳴らさない分を**見えるところに**残す。0件に見せると、次に読む者が
@@ -669,6 +772,14 @@ def main(argv=None):
                  "、".join("%s>%s(判定%d/呼%d)"
                           % (m["target"], m["found"], m["judgeable"], m["voc"])
                           for m in mt)))
+    if nm:
+        # ★voc で絞った結果**鳴らなくなった呼びかけ**を必ず見せる(理由は near_misses)。
+        #   ここを出さないと、絞り込みが「本物を静かに落とす」側へ倒れる。
+        print("(鳴らすには足りない %d件= 呼びかけは出ているが持続ではない: %s)"
+              % (sum(m["count"] for m in nm),
+                 "、".join("%s>%s(呼%d・地の文%d・%s・最終%s)"
+                          % (m["target"], m["found"], m["count"], m["mention"],
+                             m["why"], m["last"][:10]) for m in nm[:8])))
     return 0
 
 

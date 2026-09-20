@@ -285,6 +285,8 @@ def build_drift_body(ndc, drifts, un, dup=None, fn=None, focus=None):
     lines.append("`local/llm/naming_audit.jsonl` の直近%d日を読んだ。"
                  "★件数だけでは鳴らさない= 「%d件以上 / %d日以上にまたがる / %d人格以上が使う」の"
                  "3つが揃った形だけを持続ドリフトと呼ぶ(常に鳴る安全網は無視されるから)。"
+                 "★数えるのは**相手へ呼びかけた行だけ**だ(2026-09-20 改修・発注=人事部門ククール)="
+                 "「Chami直令」のような地の文・足場メタの言及は件数にも日数にも人格数にも入れない。"
                  % (ndc.WINDOW_DAYS, ndc.MIN_COUNT, ndc.MIN_DAYS, ndc.MIN_PERSONAS))
     if focus:
         lines.append("")
@@ -303,11 +305,13 @@ def build_drift_body(ndc, drifts, un, dup=None, fn=None, focus=None):
         if key and ndc.pair_key(d) not in key:
             old.append("%s%s" % (ndc.pair_key(d), "!" if ndc.banned(d) else ""))
             continue
-        lines.append("- %s**%s** を「%s」と呼んでいる(正=**%s**): %d件 / %d日 / %d人格 [%s〜%s]"
+        lines.append("- %s**%s** を「%s」と呼んでいる(正=**%s**): **呼びかけ%d件** / %d日 / %d人格"
+                     " [%s〜%s](地の文の言及%d件は数えていない・台帳の生の行は%d)"
                      % ("★【禁止後の再発】" if ndc.banned(d) else "",
                         d["target"], d["found"], "・".join(d["expected"]) or "?",
                         d["count"], d["days"], len(d["personas"]),
-                        d["first"][:10], d["last"][:10]))
+                        d["first"][:10], d["last"][:10],
+                        d.get("mention", 0), d.get("count_all", d["count"])))
         lines.append("    使っている人格= %s" % "、".join(d["personas"]))
     if old:
         lines.append("- (既報 %d組= %s ★末尾の「!」=禁止後の再発。内訳は下のコマンドで見られる)"

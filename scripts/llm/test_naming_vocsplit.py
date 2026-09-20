@@ -14,8 +14,15 @@
   ★危ないのは②が静かに効きすぎることだ= 本物の誤呼称まで黙ると、計器は
     「0件=健康」を出しながら壊れる。ここで釘付けにするのは主にその境界:
       - 旧ゲートが書いた行(voc 無し)は **判定できない=鳴らす側へ倒す**(fail-open)
-      - 呼びかけが1件でもあれば鳴る
       - 黙らせた分は捨てず `mentions()` に残る
+
+★2026-09-20 改訂(発注= 人事部門ククール msg DISPATCH-aegis-gl-1789893838042)。
+  ②は**組ごと**黙らせるだけで、呼びかけが1件でも混じると件数は**生の数のまま**出ていた=
+  Chami>Chami が「68件」で人事部門へ渡り、実体は呼びかけ1件だった。
+  外す層を組から**行**へ落とした(`naming_drift_check.vocative_count`)=
+  しきい値(件5/日3/人2)は呼びかけの行だけで測る。
+  ★これは「割合で黙らせる」ではない= 呼びかけが持続すれば地の文が何件あろうと鳴る。
+    届かない呼びかけは捨てず `near_misses()` が画面へ出す(埋もれさせない)。
 """
 import os
 import sys
@@ -83,12 +90,22 @@ def main():
     check("黙らせた分は mentions() に残る(捨てない)",
           len(mt) == 1 and mt[0]["count"] == 9 and mt[0]["judgeable"] == 9)
 
-    print("\n[3] 呼びかけが混じれば鳴る")
-    # ★比率で黙らせない= 19本が地の文でも**呼びかけ1本**で鳴らす。
-    #   「ほとんど地の文だから」で落とすと、本物の誤呼称が多数の言及に埋もれる。
+    print("\n[3] 数えるのは呼びかけの行だけ(地の文は件数にも入れない)")
+    # ★実物(2026-09-20 の台帳)と同じ形= 地の文19 + 呼びかけ1。
+    #   旧実装はこれを「件20の持続ドリフト」として人事部門へ出していた。
     mix = rows(19, voc=0) + rows(1, voc=1)
-    check("19本が地の文でも1本でも呼びかけがあれば鳴る",
-          len(dc.scan(mix, window=14)) == 1)
+    check("地の文19＋呼びかけ1は鳴らさない(1件は持続ではない)",
+          not dc.scan(mix, window=14))
+    nm = dc.near_misses(mix, window=14)
+    check("その呼びかけ1件は near_misses() に残る(黙って捨てない)",
+          len(nm) == 1 and nm[0]["count"] == 1 and nm[0]["mention"] == 19)
+    # 呼びかけ側がしきい値を満たせば、地の文が何件あろうと鳴る(割合では黙らせない)。
+    loud = rows(19, voc=0) + rows(6, voc=1)
+    ds = dc.scan(loud, window=14)
+    check("呼びかけが件5/日3/人2を満たせば鳴る", len(ds) == 1)
+    check("鳴った時の件数は呼びかけの数(地の文を混ぜない)",
+          ds and ds[0]["count"] == 6 and ds[0]["count_all"] == 25
+          and ds[0]["mention"] == 19)
 
     print("\n[4] 旧ゲートの行は判定できない= 鳴らす側へ倒す(fail-open)")
     old = rows(9, voc=None)
@@ -123,12 +140,28 @@ def _mut_voc_only():
     dc._all_mention = lambda a, min_count=dc.MIN_COUNT: a.get("voc", 0) == 0
 
 
-def _mut_ratio():
-    """件数に対する割合で黙らせる(voc が全体の1割未満なら地の文扱い)。
-    ★これも動く。だが**呼びかけが混じっても黙る**= 本物を1件取りこぼす。"""
-    dc._all_mention = (lambda a, min_count=dc.MIN_COUNT:
-                       a.get("judgeable", 0) >= min_count
-                       and a.get("voc", 0) * 10 < a.get("judgeable", 0))
+def _mut_raw_count():
+    """しきい値を**生の行**で測る(=2026-09-20 より前の実装そのもの)。
+    ★動く。だが呼びかけが1件混じった組は地の文ごと件数・日数・人格数に乗る=
+      「Chami>Chami 68件」の水増しが戻る。
+    ★件数だけ差し替えても足りない= 日数と人格数も生の棚を見ていた。変異は
+      **旧実装と同じ形**にする(C-053= もっともらしく動く別実装)。"""
+    orig = dc._aggregate
+
+    def raw(rows, end, window, since=None):
+        agg = orig(rows, end, window, since=since)
+        for a in agg.values():
+            a["voc_rows"], a["unjudged"] = a["count"], 0
+            a["voc_days"], a["voc_personas"] = a["days"], a["personas"]
+            a["voc_first"], a["voc_last"] = a["first"], a["last"]
+        return agg
+    dc._aggregate = raw
+
+
+def _mut_drop_unjudged():
+    """判定できない行(voc 欄が無い=旧ゲート)を**数えない**。
+    ★動く。だが台帳が古いほど静かに「呼びかけ0=健康」へ倒れる= fail-open が外れる。"""
+    dc.vocative_count = lambda a: a.get("voc_rows", 0)
 
 
 def _mut_gate_all():
@@ -142,8 +175,10 @@ def _mut_gate_all():
 MUTANTS = (
     ("voc==0 だけで黙らせる(judgeable を見ない)", _mut_voc_only,
      "voc を持たない行だけの組は今までどおり鳴る"),
-    ("割合で黙らせる(呼びかけ1割未満)", _mut_ratio,
-     "19本が地の文でも1本でも呼びかけがあれば鳴る"),
+    ("しきい値を生の件数で測る(2026-09-20 以前)", _mut_raw_count,
+     "地の文19＋呼びかけ1は鳴らさない(1件は持続ではない)"),
+    ("判定できない行を数えない(fail-open を外す)", _mut_drop_unjudged,
+     "voc を持たない行だけの組は今までどおり鳴る"),
     ("ゲート: 全出現を呼びかけと数える", _mut_gate_all,
      "地の文: 「アロンソとオタコンで詰めた」は voc=0"),
 )
@@ -152,6 +187,8 @@ MUTANTS = (
 def mutate():
     bad = 0
     saved_dc = dc._all_mention
+    saved_vc = dc.vocative_count
+    saved_agg = dc._aggregate
     saved_ng = ng._is_vocative
     for name, fn, want_red in MUTANTS:
         del results[:]
@@ -164,6 +201,8 @@ def mutate():
                 print("  (検査が例外で止まった: %s)" % e)
         finally:
             dc._all_mention = saved_dc
+            dc.vocative_count = saved_vc
+            dc._aggregate = saved_agg
             ng._is_vocative = saved_ng
         red = [n for n, c in results if not c]
         hit = want_red in red
