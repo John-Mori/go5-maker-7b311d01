@@ -342,7 +342,7 @@ def main(argv):
         #   (Chami直命 msg 1551219293058768959 / 発注 改善提案部門 msg 1551220560619503711)。
         #   uptsukiyomi は §E「月詠みアップ済」の本来意味へ戻った=ここで撃ったら回帰。
         print("[6] Codex宛の配達 (@ボス召喚)")
-        boss_ms = FakeEmoji("Send_MS_Boss", 1551218921170927649)
+        boss_ms = FakeEmoji("Send_MS_Boss", 1551219696743878756)  # ★作り直し後の生きたID
         upt = FakeEmoji("uptsukiyomi", 1522060098355069139)      # 旧印(押さなくなった側)
         gc = FakeGuild([FakeEmoji("kidoku", 1), sendms, FakeEmoji("chakusyu", 2), upt, boss_ms])
         m8 = FakeMsg(8, "@ボス これ見てくれ", chami, ch, gc)
@@ -363,7 +363,7 @@ def main(argv):
         m10 = FakeMsg(10, "@スネーク たのむ", chami, ch, FakeGuild([sendms]))
         asyncio.run(on_message(m10))
         check("6 Send_MS_Bossが引けなくてもIDアンカーで撃つ",
-              m10.pushed[:1] == ["Send_MS_Boss:1551218921170927649"], "-> %r" % (m10.pushed,))
+              m10.pushed[:1] == ["Send_MS_Boss:1551219696743878756"], "-> %r" % (m10.pushed,))
         check("6 引けない時もsendms/📮へは落ちない",
               sendms not in m10.pushed and "\U0001F4EE" not in m10.pushed)
 
@@ -463,7 +463,7 @@ def main(argv):
 
         # 改称耐性がCodex側を侵していないこと(ID一致の枝を足しただけ=撃ち分けは不変)
         m23 = FakeMsg(23, "@ボス 改称後に召喚", chami, ch,
-                      FakeGuild([newname, FakeEmoji("Send_MS_Boss", 1551218921170927649)]))
+                      FakeGuild([newname, FakeEmoji("Send_MS_Boss", 1551219696743878756)]))
         asyncio.run(on_message(m23))
         check("9 Codex便は改称後も Send_MS_Boss のまま",
               bool(m23.pushed) and getattr(m23.pushed[0], "name", "") == "Send_MS_Boss",

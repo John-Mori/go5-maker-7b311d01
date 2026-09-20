@@ -5,7 +5,11 @@
 発注= 改善提案部門(トトリ)msg 1551220560619503711。芯=
   【Chami直命】msg 1551219293058768959
   「これ、ボスに送った時の送信スタンプね。今まで <:uptsukiyomi:1522060098355069139> だったから
-    これからはこれに置き換えて」→ 新規カスタム <:Send_MS_Boss:1551218921170927649>。
+    これからはこれに置き換えて」→ 新規カスタム <:Send_MS_Boss:…>。
+★ID訂正(2026-09-20 22:13 msg 1551219827127881830「ちょっと編集して変えた」)= Chamiが同じ名前で
+  素材を作り直したのでIDが変わった。当初伝わった 1551218921170927649 は**削除済=無効**。
+  生きているIDは 1551219696743878756(ギルド /guilds/…/emojis を22:29に実測して確認)。
+  絵文字は「名前」ではなく**IDで描画される**= 死んだIDを撃つと画面に何も出ない。
 意味・種別の正本= `00_AI-HQ/docs/departments/kaizen-analyst/絵文字管理台帳.md` §A.1(送信Codex列)。
 当室は配線だけ(C-015)。uptsukiyomi は §E「月詠みアップ済」の本来意味へ戻る。
 
@@ -23,6 +27,7 @@
   python scripts/discord/test_send_ms_boss.py --mutant old        # 既定を uptsukiyomi のまま
   python scripts/discord/test_send_ms_boss.py --mutant nameonly   # 名前照合だけへ戻す
   python scripts/discord/test_send_ms_boss.py --mutant noretired  # 退役棚を空にする
+  python scripts/discord/test_send_ms_boss.py --mutant deadid     # 作り直し前の無効IDのまま
 終了コード: 0=全PASS / 1=FAILあり / 2=変異が当たらなかった(試験自体が無効)
 """
 import json
@@ -44,7 +49,8 @@ _fails = []
 _ran = []          # ★合計は数えた実物で出す(手で TOTAL を書くとズレる)
 
 BOSS_NAME = "Send_MS_Boss"
-BOSS_ID = "1551218921170927649"
+BOSS_ID = "1551219696743878756"                     # ★ギルド実測で生きているID(2026-09-20 22:29)
+DEAD_ID = "1551218921170927649"                     # ★作り直し前の無効ID(削除済=押すと壊れる)
 OLD_NAME = "uptsukiyomi"                            # 2026-09-05〜09-20 の Codex送信印(退役)
 OLD_ID = "1522060098355069139"
 CLAUDE_NAME = "sendms"                              # Claude側の送信印(触らない)
@@ -218,6 +224,21 @@ def run(gw):
        "E-5 退役棚に旧印が畳まれている=消さずに退避(C-003)(実測 %s)"
        % (react.CODEX_RETIRED.get("送信"),))
 
+    # --- F 死んだID(作り直し前)を撃っていない ----------------------------------------
+    #   ★絵文字はIDで描画される= 名前が合っていても削除済みIDを撃つと画面に何も出ない。
+    #     「実名照合が当たるから動いている」は本番のAPIが引けている間だけの幸運=IDが正でなければ
+    #     B/D群の退避経路(ギルドを引けない時のID直撃)が丸ごと無効になる。
+    ok(react.CODEX_OVERRIDE["送信"][1] == BOSS_ID,
+       "F-1 押下側のIDが生きている方(%s)(実測 %s)" % (BOSS_ID, react.CODEX_OVERRIDE["送信"][1]))
+    ok(DEAD_ID not in str(react.CODEX_OVERRIDE["送信"]),
+       "F-2 削除済IDの %s を押下側が持っていない" % DEAD_ID)
+    got = gw.sent_mark_for(FakeGuild([]), "codex")
+    ok(DEAD_ID not in str(got),
+       "F-3 gateway のID直撃も生きたIDで撃つ(実測 %r)" % (got,))
+    # ★ここだけは定数の残骸を見る= importに失敗した時の退避既定値は実行経路に出ないため。
+    ok(DEAD_ID not in open(GW_SRC, encoding="utf-8").read(),
+       "F-4 gateway の退避既定値にも削除済IDが残っていない(import失敗時に撃たれる値)")
+
     return not _fails
 
 
@@ -229,6 +250,8 @@ def mutate(which):
         react.CODEX_OVERRIDE["送信"] = (BOSS_NAME, None)
     elif which == "noretired":                      # 退役棚を空にする=過去便が読めなくなる
         react.CODEX_RETIRED = {}
+    elif which == "deadid":                         # 作り直し前の無効IDのまま=画面に何も出ない
+        react.CODEX_OVERRIDE["送信"] = (BOSS_NAME, DEAD_ID)
     else:
         print("未知の変異体: " + which)
         sys.exit(2)

@@ -42,7 +42,7 @@ GUILD_EMOJIS = [
     {"name": "saihatsu", "id": "1531748428827201772"},
     {"name": "kaiaku", "id": "1541110670748156014"},
     {"name": BOSS_NAME, "id": BOSS_ID},             # ★Chamiが2026-09-20に作った新素材
-    {"name": "Send_MS_Boss", "id": "1551218921170927649"},   # ★同日夜に作った送信印(Codex専用)
+    {"name": "Send_MS_Boss", "id": "1551219696743878756"},   # ★同日夜に作った送信印(Codex専用・作り直し後のID)
 ]
 
 
@@ -103,7 +103,7 @@ def run():
     react.api, _ = fake_api()
     ok(react.resolve_emoji("tok", CID, "既読", codex=True) == "‼️",
        "D-1 Codexの既読は ‼️ のまま(unicode直撃)")
-    ok(react.resolve_emoji("tok", CID, "送信", codex=True) == "Send_MS_Boss:1551218921170927649",
+    ok(react.resolve_emoji("tok", CID, "送信", codex=True) == "Send_MS_Boss:1551219696743878756",
        "D-2 Codexの送信は Send_MS_Boss(2026-09-20 に uptsukiyomi から差し替え)")
     ok(react.resolve_emoji("tok", CID, "既読", codex=False) == "kidoku:1527252197597777971",
        "D-3 Claudeの既読は kidoku のまま")
