@@ -1338,17 +1338,42 @@ REINJECT_EVERY = 8                       # 初期値。8〜12ターン劣化の�
 _VOICE_MARKERS = ("一人称", "口調:", "口調=", "声の型", "呼び方", "語尾", "芯1", "芯2", "芯3")
 
 
+def _relay_turn_path():
+    """通し番号の保存先。★`test_*.py` から呼ばれた時だけ scratch へ逃がす。
+
+    ★理由(2026-09-21 実測)= `build_envelope()` は**呼ぶだけで**本番の通し番号を
+      1つ進めて書き戻す(下の `_bump_relay_turn`)。つまり回帰を1回走らせるたびに
+      「声の芯の再注入が何便目で鳴るか」が本番でズレる。build_envelope を呼ぶ回帰は
+      test_relay_rate_note / test_relay_rate_slow / test_room_scope_guard /
+      test_tone_feedback / test_verdict_resend_short / queue/test_empty_reply の6本あり、
+      **どれも通し番号を退避していなかった**(実測= aegis-gl の番号が試験のたびに進む)。
+    ★各試験の作法で止めると必ず取りこぼす(C-038= 人が気をつける以外の方法で止める)。
+      だから入口1本=ここで逃がす。本番の経路(常駐 dept_daemon / session_relay)は
+      argv[0] が test_ で始まらないので、挙動は1バイトも変わらない。
+    """
+    try:
+        import sys                              # ★遅延import(常駐の起動を重くしない)
+        base = os.path.basename(str(sys.argv[0] or "")).lower()
+    except Exception:
+        return RELAY_TURN_STATE
+    if base.startswith("test_"):
+        return os.path.join(LOCAL, "_work", "relay_turn_state_test.json")
+    return RELAY_TURN_STATE
+
+
 def _bump_relay_turn(dept):
     """この部屋へ渡した封筒の通し番号を1つ進めて返す(読めない/書けない時は0)。
 
     ★0へ倒す=再注入**しない**側へ倒す(封筒は素のまま組み上がる)。
+    ★保存先は `_relay_turn_path()`= 回帰から呼ばれた時は本番の番号を動かさない。
     """
     try:
         d = str(dept or "").strip()
         if not d:
             return 0
+        path = _relay_turn_path()
         try:
-            with open(RELAY_TURN_STATE, encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 st = json.load(f)
         except Exception:
             st = {}
@@ -1357,8 +1382,8 @@ def _bump_relay_turn(dept):
         n = int(st.get(d) or 0) + 1
         st[d] = n
         try:
-            os.makedirs(os.path.dirname(RELAY_TURN_STATE), exist_ok=True)
-            with open(RELAY_TURN_STATE, "w", encoding="utf-8") as f:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
                 json.dump(st, f, ensure_ascii=False)
         except Exception:
             return 0                      # 数えられない=毎便鳴らないように黙る側へ
@@ -1475,8 +1500,9 @@ def _reinject_event(dept):
             return ""                     # ★対応表に居ない部屋= 判定材料が無いので黙る
         gen = int(entry.get("generation") or 0)
         cc = int(entry.get("compact_count") or 0)
+        path = _relay_turn_path()         # ★回帰から呼ばれた時は本番の記憶を動かさない
         try:
-            with open(RELAY_TURN_STATE, encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 st = json.load(f)
         except Exception:
             st = {}
@@ -1495,8 +1521,8 @@ def _reinject_event(dept):
         seen[d] = {"gen": gen, "cc": cc}
         st["_seen"] = seen
         try:
-            os.makedirs(os.path.dirname(RELAY_TURN_STATE), exist_ok=True)
-            with open(RELAY_TURN_STATE, "w", encoding="utf-8") as f:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
                 json.dump(st, f, ensure_ascii=False)
         except Exception:
             return ""                     # 覚えられない=毎便鳴らないように黙る側へ

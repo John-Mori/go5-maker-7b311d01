@@ -11,6 +11,7 @@
     short_without_ids    : 短文から裁定番号の一覧を落とす        → 層2が落ちる
     no_recovery          : VERDICT_FULL_EVERY の保険を殺す      → 層3が落ちる
     disc_resend_removed  : 規律側の圧縮直後の全文再送まで外す    → 層4が落ちる
+    relay_turn_live      : 通し番号の逃がし先を本番へ戻す        → 層6-0が落ちる
 
 使い方:
     python scripts/llm/test_verdict_resend_short.py
@@ -38,13 +39,29 @@ BODY = "床の固定費を測りたい。圧縮直後の封筒に裁定の見出
 
 
 def envelope(verdict_full, ids):
-    """本物の build_envelope を1回通す(規律は3行側に固定=見たいのは裁定だけ)。"""
+    """本物の build_envelope を1回通す(規律は3行側に固定=見たいのは裁定だけ)。
+
+    ★ここで偽物にするのは「声の芯の再注入」の2本だけ= `_bump_relay_turn`(通し番号)と
+      `_reinject_event`(世代交代/圧縮の検知)。理由は2つあり、どちらも実測だ:
+        ① build_envelope は**呼ぶだけで**本番の通し番号を進め、世代/圧縮回数を
+           「見た」と記録する= 回帰を走らせると本番の再注入がズレる/食われる。
+           (入口側は `_relay_turn_path()` で scratch へ逃がしたが、ここでも止める)
+        ② 8便に1回の「声の芯」ブロックは **1,969字**。これが2本の封筒のどちらに
+           載るかで層5-5の差が 2,745 / 776 / 4,714 と揺れた(実測・09-21)。
+           測りたいのは裁定の取り分だけなので、両方の封筒から等しく外す。
+    """
     rec = {"content": BODY, "author": "chami_fusoh", "msg_id": "TEST-VRS",
            "channel": "テスト部屋", "ts": "2026-09-21T12:00:00"}
-    return sr.build_envelope(rec, is_work=False, state="", dept="aegis-gl",
-                             disc_full=False, disc_fp="x",
-                             verdict_full=verdict_full, verdict_fp="y",
-                             verdict_added=(), verdict_ids=ids)
+    _bump, _event = sr._bump_relay_turn, sr._reinject_event
+    sr._bump_relay_turn = lambda _d: 1        # ★8の倍数でない=定期の再注入は鳴らない
+    sr._reinject_event = lambda _d: ""
+    try:
+        return sr.build_envelope(rec, is_work=False, state="", dept="aegis-gl",
+                                 disc_full=False, disc_fp="x",
+                                 verdict_full=verdict_full, verdict_fp="y",
+                                 verdict_added=(), verdict_ids=ids)
+    finally:
+        sr._bump_relay_turn, sr._reinject_event = _bump, _event
 
 
 def run(mutant=""):
@@ -119,10 +136,19 @@ def run(mutant=""):
        "層5-4 C-015発注先の表は**どちらの便でも**毎便フル(C-060の裁定)")
     省 = len(env_full) - len(env_short)
     ok(省 > 2000, "層5-5 圧縮直後1便あたり %d字 減る" % 省)
+    # ★同じ測り方を2回やって同じ値になること= 測定そのものが揺れていないことの確認
+    #   (09-21の実測で 2,745 / 776 / 4,714 と揺れた。原因は8便に1回の声の芯1,969字)
+    ok(len(envelope(True, ())) - len(envelope(False, ids)) == 省,
+       "層5-6 同じ測り方をもう一度やっても同じ値=測定が揺れていない")
 
     # --- 層6 この試験はディスクへ1バイトも書いていない --------------------------------
+    #   ★relay_turn_state.json を足した(2026-09-21)= build_envelope は呼ぶだけで
+    #     本番の通し番号を進め、世代/圧縮を「見た」と記録していた=声の芯の再注入が
+    #     一番要る瞬間(交代直後・圧縮直後)を回帰が食う事故になる。
+    ok(os.path.abspath(sr._relay_turn_path()) != os.path.abspath(sr.RELAY_TURN_STATE),
+       "層6-0 通し番号の逃がし先が本番を向いていない(test_ から呼ばれている)")
     for p in ("local/llm/room_sessions.json", "local/llm/request_log.jsonl",
-              "local/llm/send_audit.jsonl"):
+              "local/llm/send_audit.jsonl", "local/llm/relay_turn_state.json"):
         f = os.path.join(_HERE, "..", "..", p)
         ok(not os.path.exists(f) or os.path.getmtime(f) < _T0,
            "層6 本番の台帳へ書いていない: " + p)
@@ -144,6 +170,11 @@ def apply_mutant(name):
     elif name == "disc_resend_removed":
         global _SRC_OVERRIDE
         _SRC_OVERRIDE = True
+    elif name == "relay_turn_live":
+        # ★通し番号の逃がし先を本番へ戻す= 回帰が本番の番号を進める世界。
+        #   ★must-fail 自身は本番へ1バイトも書かない(封筒側の退避は残す)=
+        #     層6-0 が「逃がし先が本番を向いている」ことだけで赤くする。
+        sr._relay_turn_path = lambda: sr.RELAY_TURN_STATE
     else:
         print("unknown mutant: " + name)
         sys.exit(2)

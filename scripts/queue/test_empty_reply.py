@@ -76,8 +76,13 @@ def drive(seq, entry=None, dept="qa-empty-test"):
     saved = {}
 
     def fake_run(prompt, token, session_id=None, model=None, timeout=None,
-                 hard_timeout=None, on_soft=None):
-        calls.append({"prompt": prompt, "sid": session_id})
+                 hard_timeout=None, on_soft=None, **kw):
+        # ★`**kw` は飾りではない(2026-09-21 実測)= 本物の `_run_claude` に `dept=""` が
+        #   足された時、ここが固定の引数並びだったので TypeError になり、relay() の
+        #   `except Exception` がそれを飲み込んで claude 0回で戻っていた。試験は
+        #   `calls[1]` の IndexError で落ちるだけで、理由は1文字も出ていなかった。
+        #   → 引数の増減で黙って死なないようにし、握り潰しは下の LAST_ERROR で名指しする。
+        calls.append({"prompt": prompt, "sid": session_id, "kw": dict(kw)})
         d, rc, out = seq[len(calls) - 1]
         return d, rc, out, 1.0
 
@@ -180,9 +185,20 @@ def main():
         ("★口座エラー(rc=1)は催促も交代もせず1回で諦める",
          [(CREDIT, 1, json.dumps(CREDIT, ensure_ascii=False))], 1),
     ):
+        sr.LAST_ERROR.pop("qa-empty-test", None)
         reply, ok, calls, ent = drive(seq)
+        err = sr.LAST_ERROR.get("qa-empty-test") or ""
         print(f"  [{name}] _run_claude {len(calls)}回 / ok={ok} / 世代={ent.get('generation')}")
+        # ★relay() の `except Exception` は本番では正しい安全網だが、試験ではそれが
+        #   「配線が合っていない」ことを隠す。理由を名指しで赤くする(2026-09-21 追加)。
+        check(f"{name}= relay が例外を握り潰していない(実測: {err or 'なし'})",
+              "配送処理の例外" not in err)
         check(f"{name}= claudeを{want}回だけ回す", len(calls) == want)
+        if len(calls) < want:
+            # ★足りない時に calls[1] を触ると IndexError で試験ごと落ちて、
+            #   残りの検査も、落ちた理由も出ない。赤い行にして先へ進む。
+            check(f"{name}= 呼び出しの中身まで見る(呼び出しが{len(calls)}回=測れない)", False)
+            continue
         if want == 2:
             check("★催促は1回だけ・文面は EMPTY_REPLY_NUDGE そのもの",
                   calls[1]["prompt"] == sr.EMPTY_REPLY_NUDGE)
