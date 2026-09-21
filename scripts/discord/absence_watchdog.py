@@ -223,7 +223,12 @@ UNANSWERED_CONSEC = 2              # C-041: 2回連続で同じ判定の時だ�
 UNANSWERED_ALERT_DEPT = "aegis-gl"  # 鳴らす先=イージス研究室(部門長・A1がKPI)
 UNANSWERED_MARK = "⚠Chamiの便に誰も返していません"   # ←この検査自身の警報の目印(返事に数えない)
 UNANSWERED_OK_MARK = "✅返事が付きました"            # ←解消の知らせ。これも返事に数えない
-UNANSWERED_SKIP_DEPTS = ("router",)  # 通知受付=機械の掲示板。人の返事は元々出ない
+# ★2026-09-22 imagegen-itsumono を追加(Chami直令 msg 1551680397103071355)。
+#   この部屋のClaude常駐は**意図して閉じた**= 合図(「生成依頼」)の無い便には誰も返さないのが
+#   正しい姿で、返らないたびに鳴らすと狼になる(共通規律§3)。閉室の正本=
+#   scripts/imagegen/rooms.py の NO_CLAUDE_DEPTS。★合図付きの便は優依が絵を貼る=
+#   そもそもこの検査は「Chami以外の発言が在るか」を見るので候補にならない。
+UNANSWERED_SKIP_DEPTS = ("router", "imagegen-itsumono")  # 通知受付=機械の掲示板。人の返事は元々出ない
 # ★Chami本人かの判定は `scripts/_common/chami_identity.py` 1本に寄せた(2026-09-16 イージス研究室)。
 #   ここには写しを置かない= ユーザ名かIDが変わった日、直し忘れた写しが黙って誤判定し、
 #   この見張りの場合は「Chamiの発言が無い」と読んで**警報が鳴らなくなる**(沈黙の形で出る)。

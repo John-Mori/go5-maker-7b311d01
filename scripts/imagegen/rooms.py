@@ -236,6 +236,23 @@ CUE_REQUIRED_DEPTS = LORA_DEPTS
 CUE_PREFIXES = ("生成依頼",)
 _CUE_SORTED = tuple(sorted(CUE_PREFIXES, key=len, reverse=True))
 
+# ★★Claudeの常駐応答を閉じた部屋(2026-09-22 Chami直令 msg 1551680397103071355)。
+#   原文=「ここでのClaudeでの配線は閉じて外部から不具合時対応するようにして。
+#          生成の依頼の単語を貼るのを忘れてた時に無駄なトークン使わせたくないし」
+#   = 合図を付け忘れた便(雑談扱い)が Claude を起こして課金される、を止めるのが目的だ。
+#   ★止めるのは**Claudeの口だけ**。優依のローカル生成(「生成依頼」→ handle_image_request →
+#     local_chain.py/ComfyUI)は従来どおり発火する= 下の order_of / local_pipeline_order は
+#     この表を**一切見ない**(見せると生成まで一緒に死ぬ)。
+#   ★この表が正本(ORG-11)。読む側= discord_gateway(queueへ積まない)。
+#     番人の名簿(daemon_keeper.DEPTS)から外すのと**対**で効く=片方だけでは閉じない。
+#   ★戻す時はここから dept を抜き、daemon_keeper.DEPTS へ足し直す(2手で元に戻る)。
+NO_CLAUDE_DEPTS = ("imagegen-itsumono",)
+
+
+def claude_off(dept):
+    """その部屋は Claude(常駐/対話セッション)を起こさないか。判定の正本はこの1本。"""
+    return str(dept or "") in NO_CLAUDE_DEPTS
+
 
 def cue_required(dept):
     """その部屋は合図が要るか。

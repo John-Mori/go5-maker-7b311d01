@@ -85,6 +85,11 @@ ROSTER_OTHER_OWNER = {
     "gemini":      "gemini_responder が所有(ホイミン/ベホップの3人部屋)",
     "llm-growth":  "local_responder(ローカルqwen)が所有=二重claim回避で意図的に外している",
     "meeting-a":   "会議部屋(セッションが直接入る)",
+    # ★2026-09-22 Chami直令 msg 1551680397103071355 で Claude の常駐応答を閉じた部屋。
+    #   「生成依頼」で始まる便は優依(local_responder→ComfyUI)が従来どおり描く=消費者は居る。
+    #   Claudeが居ないのは**意図**で、不具合時は外部から手動対応する(=ここで鳴らすと狼になる)。
+    #   閉室の正本= scripts/imagegen/rooms.py の NO_CLAUDE_DEPTS。
+    "imagegen-itsumono": "local_responder(優依のローカル生成)が所有=Claude常駐は意図して閉じた",
     # ★2026-09-12 "meeting-b"(会議室β)を削除。Chami指示 msg 1548010889389678643 で部屋ごと
     #   消えた(Discord API= 404 Unknown Channel / code 10003・当室で実測)。
     #   channels.json から消えた以上ここは引かれない= 死に重りだが、除外の理由が書けない行を

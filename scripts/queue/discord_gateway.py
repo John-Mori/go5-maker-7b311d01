@@ -642,6 +642,31 @@ def _image_depts():
     return _IMAGE_DEPTS_CACHE
 
 
+_CLAUDE_OFF_CACHE = None
+
+
+def _claude_off(dept):
+    """その部屋は Claude を閉じたか(=queueへ積まない)。正本= scripts/imagegen/rooms.py。
+
+    ★2026-09-22 Chami直令(msg 1551680397103071355)「ここでのClaudeでの配線は閉じて
+      外部から不具合時対応するようにして」。積まないのは**そこに消費者が居ないから**だ=
+      積めば deliveries=0 のまま沈み、未配送の滞留警報(INC-110)が永久に鳴る。
+    ★fail-open= 読めない時は False(=従来どおり積む)。ここで例外を出して全部門の配達を
+      止める方がよほど悪い(_image_depts と同じ理由)。
+    ★優依のローカル経路は下の fanout が受け持つ= この判定とは**別の口**で、ここを True に
+      しても絵は従来どおり出る。
+    """
+    global _CLAUDE_OFF_CACHE
+    if _CLAUDE_OFF_CACHE is None:
+        try:
+            sys.path.insert(0, os.path.join(ROOT, "scripts", "imagegen"))
+            import rooms as _rooms
+            _CLAUDE_OFF_CACHE = frozenset(getattr(_rooms, "NO_CLAUDE_DEPTS", ()))
+        except Exception:
+            _CLAUDE_OFF_CACHE = frozenset()
+    return str(dept or "") in _CLAUDE_OFF_CACHE
+
+
 def _ledger_load(path):
     try:
         return set(l.strip() for l in open(path, encoding="utf-8") if l.strip())
@@ -1036,10 +1061,18 @@ async def handle_message(m, chan_map, q, self_id=None):
                 rec["attachments_local"] = paths
         except Exception as e:
             log(f"添付退避失敗(URLのみで続行): {type(e).__name__}")
-    added = q.enqueue(json.dumps(rec, ensure_ascii=False), msg_id=rec["msg_id"], dept=rec["dept"])
-    st = q.stats()
-    log(f"受信[{rec['channel']}] msg={rec['msg_id']} {'enqueue' if added else '重複無視'} "
-        f"(ready={st['ready']} leased={st['leased']})")
+    if _claude_off(rec["dept"]):
+        # ★Claudeを閉じた部屋(2026-09-22 Chami直令)= 積まない。黙って捨てるのではなく
+        #   「積まなかった」を毎便ログに残す= 後から数えられる(silent failにしない)。
+        added = False
+        log(f"受信[{rec['channel']}] msg={rec['msg_id']} Claude閉室({rec['dept']})"
+            f"=queueへ積まない(優依のローカル生成経路はこのまま続く)")
+    else:
+        added = q.enqueue(json.dumps(rec, ensure_ascii=False), msg_id=rec["msg_id"],
+                          dept=rec["dept"])
+        st = q.stats()
+        log(f"受信[{rec['channel']}] msg={rec['msg_id']} {'enqueue' if added else '重複無視'} "
+            f"(ready={st['ready']} leased={st['leased']})")
     # ★画像生成ルーム(imagegen)= 優依を花海咲季(Claude)へ**並走**させる (中野五月 DISPATCH 2026-09-09)。
     #   上の enqueue(dept=imagegen)は花海咲季(dept_daemon)が claim する経路で**無傷**。
     #   ここは*追加*で、同じChami便を優依の生きた受付箱(discord_inbox_llm.jsonl=

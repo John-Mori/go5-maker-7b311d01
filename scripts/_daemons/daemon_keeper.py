@@ -97,7 +97,17 @@ DAEMON = os.path.join(ROOT, "scripts", "llm", "dept_daemon.py")
 #   ★DEPT_CONF・org_registry.yml・discord_channels.json と**同じ手番で**揃えた=
 #     部屋だけ在って受け手が居ない時間(INC-110の形)を作らない。
 #   ★常駐の名義はアメス。**三笘にはしない**(2026-07-22 Chami既決)。
-DEPTS = ["hq","research-room", "aegis-gl", "keiei-kikaku", "hr-room", "hr-context", "qa-reviewer", "system-engineer", "product-scout", "shorts-analyst", "copy-director", "learning-coach", "learning-coach-2", "data-org", "frontend", "ai-office", "llm-edu", "llm-qa", "platform-se", "consult-intel", "past-room", "future-room", "kaizen-analyst", "incident", "system-engineer-b", "dream-care", "health-log", "report-notify", "imagegen", "manga-shorts", "kukuru-nakama", "gunji", "soudan-room", "goods-afi", "someday-room", "web-research", "otacon-radio", "imagegen-fusoh-v0", "imagegen-fusoh-v2", "local-lab", "astro-room", "imagegen-itsumono", "hansei-ekurabe", "imagetag-talk", "fm-lab", "system-build"]
+# ★2026-09-22 imagegen-itsumono を**外した**(46→45体)。Chami直令 msg 1551680397103071355=
+#   「ここでのClaudeでの配線は閉じて外部から不具合時対応するようにして。生成の依頼の単語を
+#     貼るのを忘れてた時に無駄なトークン使わせたくないし」。合図(「生成依頼」)を付け忘れた便が
+#   雑談としてClaudeを起こす=そのたびに課金される、を止めるのが目的。
+#   ★止めたのは**Claudeの口だけ**= 優依のローカル生成(gatewayの優依並走→local_responder→
+#     local_chain.py/ComfyUI)は名簿と無関係の別経路で、従来どおり走る。
+#   ★対で触った3か所= rooms.NO_CLAUDE_DEPTS(正本)/ discord_gateway(queueへ積まない)/
+#     deadman_check.ROSTER_OTHER_OWNER(名簿に無いのが正しい部屋として登録)。
+#   ★DEPT_CONF と discord_channels.json は**残す**= 部屋も人格定義も消していない(可逆)。
+#     戻す時はこの行へ dept を足し、rooms.NO_CLAUDE_DEPTS から抜く。
+DEPTS = ["hq","research-room", "aegis-gl", "keiei-kikaku", "hr-room", "hr-context", "qa-reviewer", "system-engineer", "product-scout", "shorts-analyst", "copy-director", "learning-coach", "learning-coach-2", "data-org", "frontend", "ai-office", "llm-edu", "llm-qa", "platform-se", "consult-intel", "past-room", "future-room", "kaizen-analyst", "incident", "system-engineer-b", "dream-care", "health-log", "report-notify", "imagegen", "manga-shorts", "kukuru-nakama", "gunji", "soudan-room", "goods-afi", "someday-room", "web-research", "otacon-radio", "imagegen-fusoh-v0", "imagegen-fusoh-v2", "local-lab", "astro-room", "hansei-ekurabe", "imagetag-talk", "fm-lab", "system-build"]
 BACKOFF_START = 10
 BACKOFF_CAP = 300
 HEALTHY_SEC = 60               # これ以上生きたら健康=バックオフリセット

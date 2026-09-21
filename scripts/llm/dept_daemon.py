@@ -4590,6 +4590,11 @@ DEPT_CONF = {
     #   ★fusoh 2室と違い **LoRAの実体は置いてある**(loras\itsumono\checkpoint-e50_s600.safetensors)
     #     =「まだ置かれていない」の一文をそのまま写経しない(実情は「置き済・今すぐ描ける」)。
     # ========================================================================
+    # ★2026-09-22 この部屋の**Claude常駐は閉じた**(Chami直令 msg 1551680397103071355)。
+    #   番人の名簿(daemon_keeper.DEPTS)から外し、gatewayもqueueへ積まない=ここへ便は来ない。
+    #   定義を残してあるのは可逆にするため(部屋も人格も消していない)。戻す時は
+    #   rooms.NO_CLAUDE_DEPTS から抜いて daemon_keeper.DEPTS へ足す。
+    #   ★絵は従来どおり出る= 「生成依頼」→優依(local_responder→local_chain.py/ComfyUI)。
     "imagegen-itsumono": {
         "character": os.path.join(_CHAR, "kasumi.md"),
         "memory": os.path.join(_MEM, "imagegen-itsumono.jsonl"),
