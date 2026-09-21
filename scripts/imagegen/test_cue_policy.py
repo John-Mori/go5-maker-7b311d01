@@ -80,6 +80,44 @@ class TheExemptionKeepsItsReason(unittest.TestCase):
                                 "%s は Claude が聞いている部屋なのに合図を外している" % dept)
 
 
+class AClosedRoomIsNeverLeftSilent(unittest.TestCase):
+    """★もう一方の向きの退行= **Claudeを閉じた描画室に合図が残る**形を捕まえる。
+
+    ここまでの検査は「免除した部屋は閉室か(NO_CUE ⊆ NO_CLAUDE)」しか見ていない。
+    逆向き(NO_CLAUDE ⊆ NO_CUE)は今たまたま両者が同じ4室なので**素通りで緑**だ。
+    だが免除の名簿(NO_CUE_DEPTS)は室名の直書きで、閉室の名簿(NO_CLAUDE_DEPTS)とは別物=
+    5室目のClaudeを閉じた時に片方へ足し忘れる入口が開いている。
+
+    足し忘れると何が起きるか(2026-09-22 実測で確認した形)=
+      閉室 + 合図が要る → 合図なしの便は local_responder L1859-1865 で
+      append_line(PROCESSED) と mode=image_no_cue のログだけ残して **send を呼ばずに return**。
+      その部屋にはClaude常駐も居ない= **Chamiには何も返らない**。
+    Chamiが4室を免除した原文の理由は「そうすればエラーが積まれないから」
+    (msg 1551692713425117314 → 訂正 1551692776859631629「違う、4部屋か」)であり、
+    守るのは室名ではなく**応答者の居ない部屋を黙らせない**というこの理由の方だ。
+
+    ★赤い時に直すのは検査ではない= その部屋を NO_CUE_DEPTS へ入れるか、Claudeを戻すか。
+    """
+
+    def test_a_room_with_no_claude_does_not_still_demand_the_cue(self):
+        for dept in rooms.NO_CLAUDE_DEPTS:
+            if dept not in rooms.ROOMS:
+                continue
+            self.assertFalse(
+                rooms.cue_required(dept),
+                "%s はClaudeを閉じた部屋なのに合図を要求している="
+                "合図なしの便は捨てられ、返事をする者も居ない(沈黙する)" % dept)
+
+    def test_the_silence_is_real_not_theoretical(self):
+        """★形の一致で満足しない= 入口(order_of)まで通して「拾われない」ことを見る。
+        閉室で拾われない便は、そのまま誰の口にも乗らない。"""
+        for dept in rooms.NO_CLAUDE_DEPTS:
+            if dept not in rooms.ROOMS:
+                continue
+            taken, _ = rooms.order_of(dept, "これいらん")
+            self.assertTrue(taken, "%s: 閉室に来た一言が拾われない=沈黙する便になる" % dept)
+
+
 class ANewRoomInheritsTheRule(unittest.TestCase):
     """②ROOMS へ室を足すだけで合図が継がれる(足す手番をもう一つ作らない)。"""
 
