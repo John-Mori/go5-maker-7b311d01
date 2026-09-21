@@ -846,15 +846,20 @@ def _discipline_block():
 #     つまり保証は「記憶を信じる」ではなく「**畳まれた瞬間を検知して配り直す**」で成立させている。
 #   ★全文を必ず送る場面= 新セッションの初回 / 規律が変わった時 / 圧縮を検知した直後 /
 #     保険として DISC_FULL_EVERY 便に1回。
-#   ★**裁定カタログの見出しは毎便のまま**(改善書§3の4・第3手の但し書き)。
-#     1,268字と小さく、部門違い回送を実際に直した実績がある。ここは削らない。
+#   ★**裁定カタログの見出し**は 2026-07-29 当時は毎便のままだった(改善書§3の4・第3手の但し書き。
+#     当時1,268字)。★2026-08-24 C-060の② で**見出しも差分送付へ移した**(下の VERDICT_FULL_EVERY)。
+#     見出しが85本・3,433字まで育って毎便の固定費として無視できなくなったため。
+#     ★C-015の発注先の表(1,213字)だけは今も毎便フルのまま= 2026-07-28の誤配の実害。
 DISC_FULL_EVERY = 10
 
 
 def _discipline_parts():
     """(規律の全文ブロック, 裁定カタログの見出しブロック) に分けて返す。
 
-    ★分ける理由= 差分送付の対象は**規律だけ**で、裁定の見出しは毎便送るから(上記)。
+    ★分ける理由= 規律と裁定で**差分の判定が別**だから(規律=指紋 / 裁定=渡した番号の差分)。
+      ★2026-08-24 C-060の②以降、裁定の見出しも差分送付の対象になっている
+      (ここが返す `verdict` は**合成済みの全文**で、分けられない時のフォールバック用。
+       平時は build_envelope が verdict_parts() で取り直して見出し/表へ分ける)。
     ★分けられない時は (全部, "") へ倒す= **今までと同じ封筒**になるだけで、品質は落ちない
       (fail-open。ここで例外を出して便を落とす方がずっと悪い)。
     """
@@ -874,8 +879,9 @@ def _discipline_parts():
 def discipline_fingerprint():
     """規律の全文の指紋。読めなければ空文字(=差分送付をやめて全文へ倒す)。
 
-    ★指紋を取る対象は**規律の全文だけ**。裁定の見出しは毎便送るので指紋に入れない
+    ★指紋を取る対象は**規律の全文だけ**。裁定の見出しは入れない
       (入れると、裁定を1行足すたびに規律の全文まで再送されて封筒が太る)。
+      裁定の見出しには別の指紋がある= `verdict_fingerprint()`(2026-08-24・C-060の②)。
     """
     try:
         import dept_daemon
@@ -927,24 +933,42 @@ def verdict_plan(entry, heads, table, sid, resend):
     全文にする場面:
       ① 新セッション(sid が空)= 履歴に見出しが1文字も無い
       ② 見出しが**消えた/書き換わった**= 差分では追いつけない(取り違えるより太る方がまし)
-      ③ 圧縮の直後(resend)= 履歴が畳まれて消えている可能性
-      ④ VERDICT_FULL_EVERY 便に1回の保険
-      ⑤ この部屋にまだ渡した記録が無い(この改修より前から生きている部屋の初回)
-      ⑥ 読めない(見出しが取れない/表が取れない)= **安全側へ倒す**(fail-open)
+      ③ VERDICT_FULL_EVERY 便に1回の保険
+      ④ この部屋にまだ渡した記録が無い(この改修より前から生きている部屋の初回)
+      ⑤ 読めない(見出しが取れない/表が取れない)= **安全側へ倒す**(fail-open)
     ★増えただけなら (False, 増えた見出し) = 短い節+増えた分だけが封筒に載る。
+
+    ★★2026-09-21 床の大掃除(研究室HQ・監査 local/llm/_fable_floor_audit_result.md 案1):
+      **圧縮の直後(resend)を全文化の引き金から外した**。
+      なぜ= hq 09-14以降の109便のうち49便(45%)が圧縮直後の全文再送で、その大半は
+        「裁定は変更なし」だった。見出しの正本は 00_AI-HQ/裁定カタログ.md がディスクに在る。
+      ★**規律の全文再送は外していない**(resend はそのまま disc_full を立てる)。
+        機械要約で規律が薄まる懸念の設計理由が `_note_usage()` に書いてある。外すのは見出しだけ。
+      ★代わりに受けるもの= 圧縮直後の短い節には**裁定IDの一覧**と正本ポインタを載せる
+        (呼び元が `_verdict_short(..., ids=)` へ渡す)。「何番が在るか」は残るので、
+        裁定済みの論点を裁き直す前に正本を引ける。
+      ★戻りうる事故= 圧縮要約から見出しが落ちた状態で裁定済みの論点を裁き直す
+        (2026-07-28に §3.7 が読まれていなかった実測がある)。IDと §3.7 と正本ポインタで受け、
+        VERDICT_FULL_EVERY(10)便に1回の全文と指紋変化での全文で回復する。
+      `resend` は**引数として残す**= 呼び元の形を変えないため。ここで使わなくなっただけ。
     """
     ids = _verdict_ids(heads)
     seen = [str(x) for x in ((entry or {}).get("verdict_ids") or [])]
     added = [h for h, i in zip(heads, ids) if i not in seen]
     lost = [i for i in seen if i not in ids]
     since_full = int((entry or {}).get("verdict_since_full") or 0)
-    full = bool(not sid or not heads or not table or not seen or lost or resend
+    full = bool(not sid or not heads or not table or not seen or lost
                 or since_full >= VERDICT_FULL_EVERY)
     return full, ([] if full else added)
 
 
-def _verdict_short(fp, n, added):
-    """裁定の見出しを全文で送らない便に入れる短い節(増えた分だけは実物で載せる)。"""
+def _verdict_short(fp, n, added, ids=()):
+    """裁定の見出しを全文で送らない便に入れる短い節(増えた分だけは実物で載せる)。
+
+    ★ids(2026-09-21・案1の受け皿)= 圧縮直後の便にだけ渡す裁定番号の一覧。
+      履歴が畳まれた直後は「どの番号が在るか」すら消えているので、番号だけは実物で載せる
+      (見出し本文 約3,400字に対し、番号一覧は約600字)。平時は空= 今までと1バイトも変わらない。
+    """
     body = ("■裁定: 前便から変更なし(指紋 " + (fp or "?") + f"・計{n}本)。\n"
             "既に受け取っている裁定の見出しを引き続き守れ"
             "(正本= 00_AI-HQ/裁定カタログ.md ・詳細はそこを読め)。\n")
@@ -953,6 +977,12 @@ def _verdict_short(fp, n, added):
                 + f"・計{n}本)。**増えた分だけ**載せる(他は前便までに渡した通り)。\n"
                 + "\n".join("- " + a for a in added) + "\n"
                 "★全文の正本= 00_AI-HQ/裁定カタログ.md\n")
+    ids = [str(x) for x in (ids or ()) if str(x)]
+    if ids:
+        body += ("★圧縮の直後なので**裁定の番号だけ**並べる(見出し本文は載せない)。\n"
+                 "  " + " ".join(ids) + "\n"
+                 "★この中の論点を裁き直す前に、必ず 00_AI-HQ/裁定カタログ.md で"
+                 "該当番号の本文を読め(§3.7)。\n")
     return body + "\n"
 
 
@@ -2028,7 +2058,8 @@ def _recent_history_block(rec, dept, n=HISTORY_MAX_ITEMS):
 
 
 def build_envelope(rec, is_work=False, state="", dept="", disc_full=True, disc_fp="",
-                   verdict_full=True, verdict_fp="", verdict_added=(), conf=None):
+                   verdict_full=True, verdict_fp="", verdict_added=(), conf=None,
+                   verdict_ids=()):
     """新着1件を「原文のまま」の封筒にする(提案書§5.2)。
 
     disc_full(2026-07-29・改善書 第3手): 規律を全文入れるか(False=3行の差分)。
@@ -2075,7 +2106,8 @@ def build_envelope(rec, is_work=False, state="", dept="", disc_full=True, disc_f
     v_head, v_table, v_heads = verdict_parts()
     if v_head and v_table:
         verdict = ((v_head + "\n\n") if verdict_full
-                   else _verdict_short(verdict_fp, len(v_heads), list(verdict_added))) \
+                   else _verdict_short(verdict_fp, len(v_heads), list(verdict_added),
+                                       ids=list(verdict_ids))) \
             + v_table + "\n\n"
     disc = (disc_head if disc_full else _discipline_short(disc_fp)) + verdict
     return (
@@ -6063,15 +6095,19 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
                  f"{DISC_FULL_EVERY}便に1回の保険" if _since_full >= DISC_FULL_EVERY else "")
 
     # --- ★★裁定の見出しを全文で送るか、増えた分だけにするか(2026-08-24・C-060の②) ---
-    #   全文にする場面は規律と同じ4つ+1= ①新セッション ②見出しが**消えた/書き換わった**
-    #   ③圧縮の直後 ④VERDICT_FULL_EVERY 便に1回 ⑤この部屋にまだ渡した記録が無い(移行の初回)。
+    #   全文にする場面= ①新セッション ②見出しが**消えた/書き換わった**
+    #   ③VERDICT_FULL_EVERY 便に1回 ④この部屋にまだ渡した記録が無い(移行の初回)。
     #   **増えただけ**なら短い節+増えた分だけを載せる(=普段の1日1〜数本の追記はここへ落ちる)。
+    #   ★2026-09-21 **圧縮の直後は全文化の引き金から外した**(床の大掃除 案1・verdict_plan 参照)。
+    #     規律は今までどおり全文で配り直す。外したのは見出しだけで、代わりに番号一覧を載せる。
     _v_head, _v_table, _v_heads = verdict_parts()
     _v_ids = _verdict_ids(_v_heads)
     _v_fp = verdict_fingerprint(_v_heads)
     _v_since_full = int(entry.get("verdict_since_full") or 0)
     verdict_full, _v_added = verdict_plan(entry, _v_heads, _v_table, sid, _resend)
     # ★指紋が同じなら「増えた分」は空になる= 短い節だけが載る(平時)。
+    # ★圧縮直後で短文に落ちる便にだけ、裁定番号の一覧を載せる(見出し本文は載せない)。
+    _v_id_list = list(_v_ids) if (_resend and not verdict_full) else []
 
     # ★封筒はここで作る(交代の判定より**後**)。理由= 封筒の先頭に載せる世代番号を、
     #   交代後の新しい世代にしないと、セッションが自分の世代を間違えて答える。
@@ -6082,6 +6118,7 @@ def relay(dept, rec, conf, token, is_work=False, on_slow=None, on_main_start=Non
                            0 if pre_rotating else int(entry.get("floor_tokens") or 0)),
         dept=dept, disc_full=disc_full, disc_fp=_disc_fp,
         verdict_full=verdict_full, verdict_fp=_v_fp, verdict_added=_v_added,
+        verdict_ids=_v_id_list,
         conf=conf)                     # ★2026-09-02 #1= 声の芯の再注入に characterfile が要る
 
     def _on_soft(elapsed):
