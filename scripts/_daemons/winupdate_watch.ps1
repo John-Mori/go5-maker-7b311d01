@@ -38,7 +38,13 @@ try {
   exit 1
 }
 
-$rebootRequired = Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired'
+# Reboot-required detection: watch BOTH the Windows Update flag AND the Component Based
+# Servicing (CBS) flag. CBS\RebootPending often flips true minutes BEFORE the WU flag while
+# an update is being staged, so watching only the WU key made the alert say "reboot not yet
+# required" when a reboot was in fact already pending (observed 2026-09-21 12:09 -> 12:15).
+# PendingFileRenameOperations is deliberately NOT included: it is dominated by benign temp/
+# driver file renames (58 benign entries measured 2026-09-21) and is not a WU reboot signal.
+$rebootRequired = (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired') -or (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending')
 
 # Drop Defender signature updates: they arrive several times a day and never force a reboot.
 # Without this filter the watcher would nag Chami constantly and become noise (see the
