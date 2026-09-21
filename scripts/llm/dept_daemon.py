@@ -6480,6 +6480,34 @@ def strip_meta(dept, rec, reply):
                 reply = _b3
         except Exception:
             pass             # 切り落としで転んでも以降の剥ぎは当てる
+        # ★出力ゲートE-4(名乗り前の英語作業前置き切り・2026-09-21 イージス研究室)。
+        #   発注= 改善提案部門(トトリ) msg 1551430845766836227 / Chami msg 1551429691251101828
+        #   実物= トトリのPDCA報告便 msg 1551390481165058160 の1行目が英語の作業ノート。
+        #   ★detect_narration_leak では当たらない(3条件ANDの③=声の痕跡で必ず素通しする)。
+        #     見るのは語彙ではなく**位置**。ミラー経路(output_gates)と同じ純関数(C-064)。
+        try:
+            _b4, _h4 = _meta_strip.strip_preamble_leak(reply)
+            if _h4:
+                log(dept, f"★出力ゲートE-4(名乗り前の英語前置き): {len(_h4)}行を除去 "
+                          f"先頭={_h4[0].get('line', '')[:60]} "
+                          f"残り本文={len(str(_b4 or ''))}字 msg={str((rec or {}).get('msg_id', ''))}")
+                try:
+                    os.makedirs(os.path.dirname(META_AUDIT), exist_ok=True)
+                    with open(META_AUDIT, "a", encoding="utf-8") as f:
+                        f.write(json.dumps({
+                            "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                            "dept": dept,
+                            "event": "preamble_leak",
+                            "source": "daemon",
+                            "msg_id": str((rec or {}).get("msg_id", "")),
+                            "stripped": [h.get("line") for h in _h4],
+                            "before": str(reply or "")[:400],
+                        }, ensure_ascii=False) + "\n")
+                except Exception:
+                    pass
+                reply = _b4
+        except Exception:
+            pass             # 切り落としで転んでも以降の剥ぎは当てる
         body, hits = _meta_strip.strip_meta_tail(reply)
         if not hits:
             return reply
@@ -6800,26 +6828,50 @@ def dialect_detector(dept, personas=()):
 NARRATION_WARN = "⚠️(自動)生成不良: 名乗りも話者も無い機械ログのままの本文を検知。要確認。"
 
 
+def _leak_or_preamble(text):
+    """実況漏れ(生ログ)か、本文まるごと英語前置きか= どちらかなら情報dictを返す。
+
+    ★2つを1つの関門にまとめる理由= 出る形は違うが**手当ては同じ**(1回だけ作り直す)。
+      呼び分けを増やすと、片方だけ配線が漏れる事故が起きる(C-064=OUT口は同時に塞ぐ)。
+    ★例外は投げない(判定不能は None=素通し)。
+    """
+    try:
+        if _meta_strip is None:
+            return None
+        hit = _meta_strip.detect_narration_leak(text)
+        if hit is not None:
+            return hit
+        return getattr(_meta_strip, "detect_preamble_only", lambda _t: None)(text)
+    except Exception:
+        return None
+
+
 def narration_gate(text, regen=None, strip_marker=None):
     """実況漏れ検知→1回だけ再生成→なお漏れていたら元文に警告付与(純関数・テスト可)。
 
     引数・返り値の形は `hangul_gate` と同じ(合流点で兄弟として並べるため)。
       regen       : 無引数callable。再生成後の本文を返す(None なら再生成しない)。
       strip_marker: 再生成本文から <<WIP>> 等を落とす callable(任意)。
-    返り値: (out_text, info)  info={"hit1","regenerated","hit2","warned","machine"}
+    返り値: (out_text, info)  info={"hit1","regenerated","hit2","warned","machine","reason"}
+
+    ★2026-09-21(イージス研究室・トトリ便 msg 1551430845766836227)= 引き金を1つ足した。
+      本文が**まるごと英語の作業前置き**の形(detect_preamble_only)も同じ扱いにする。
+      実物= デブライネ 09-05 msg 1545536969449144450 / アメス 09-15 msg 1549148706014503123。
+      切る側(ゲートE-4)は「切ると沈黙になる」ので手を引く形= ここで**作り直す**のが正しい手。
 
     ★何が起きても例外を外へ出さない。転んだら元文をそのまま返す(沈黙ゼロ)。
     """
     info = {"hit1": False, "regenerated": False, "hit2": False, "warned": False,
-            "machine": []}
+            "machine": [], "reason": ""}
     try:
         base = str(text or "")
         if _meta_strip is None:
             return base, info                    # 検知器が無い=素通し(fail-open)
-        hit = _meta_strip.detect_narration_leak(base)
+        hit = _leak_or_preamble(base)
         if hit is None:
             return base, info                    # 通常経路=何もしない
         info["hit1"] = True
+        info["reason"] = str(hit.get("reason") or "")
         info["machine"] = list(hit.get("machine") or [])
         if regen is None:
             # 再生成できない経路(session_relay/失敗告知/test等)=沈黙にしない=警告付きで送る
@@ -6837,7 +6889,7 @@ def narration_gate(text, regen=None, strip_marker=None):
                     cleaned, _ = strip_marker(cleaned)
                 except Exception:
                     cleaned = str(regen_text)
-            if cleaned and _meta_strip.detect_narration_leak(cleaned) is None:
+            if cleaned and _leak_or_preamble(cleaned) is None:
                 return cleaned, info             # 再生成で声が戻った=そちらへ差し替え
             info["hit2"] = True
         # ここに来る=再生成しなかった/失敗/空/2回目も漏れ → 元文に警告付き(沈黙にしない)

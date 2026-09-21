@@ -321,6 +321,111 @@ def detect_narration_leak(text):
 
 
 # ============================================================================
+# 名乗りより前の「英語の作業前置き」の切り落とし  2026-09-21 / イージス研究室
+# ----------------------------------------------------------------------------
+# 発注= 改善提案部門(トトリ) msg 1551430845766836227 / 出所= Chami msg 1551429691251101828
+#   「最初に声がお漏らししてるの多いんよなあ」。
+# 壊れた実物(検体)= トトリのPDCA報告便 msg 1551390481165058160 の1行目:
+#   "Wiring confirmed correct (末尾ゲート→中間ゲートの順序も設計通り)。Now the room reply …"
+#   = 人格の声で書き始める前に、英語の作業ノートが1行だけ本文へ漏れている。
+#   同根の OPEN= DEF-kaizen-analyst-75514baf50 / DEF-ef1b3f4d0f / DEF-b6198e94f6 / DEF-e34d9358ab。
+#
+# ★なぜ detect_narration_leak では拾えないか(2026-09-21 実測):
+#   検体を本物の detect_narration_leak に通すと **None(素通し)**。理由は2つ:
+#     ② _MACHINE_WORDS の当たりが **空**(Wiring / Now / confirmed はどれも表に無い)
+#     ③ 声の痕跡が **6つ**当たる(私・自分・Chami・ちゃん・よ。・——)= 3条件ANDの③で必ず落ちる
+#   つまり DEF-english-dump-mixed-lang-20260906 が書いている「Let me / I'll / Now を
+#   _MACHINE_WORDS へ足す」だけでは**この形は止まらない**。前置きの後ろに正常な人格本文が
+#   続くので、本文全体を見る3条件ANDはどうやっても③で素通しする。見るべきは**位置**だ。
+#
+# ★だから検知ではなく**切る**。detect_narration_leak が検知だけなのは「剥ぐと空になる」から
+#   (本文まるごとが生ログ)。こちらは前置きの後ろに本文が残るので安全に切れる。
+#   strip_meta_tail が末尾を切るのに対して、これは**頭を切る**同じ家族。
+#
+# 判定(narrow に倒す。迷ったら切らない):
+#   名乗り `[名前]` より前(名乗りが無ければ本文の頭)の**最初の非空行**が、
+#   行頭から **英単語3語以上**で始まっているか。
+#   ★2語ではなく3語= 2語だと「Release Gate は **APPROVED(直った)**。」(ジェンティルドンナ)を
+#     誤爆した実測がある。3語にすると落ちる。
+#
+# 実測(2026-09-21・イージス研究室):
+#   送信台帳 local/llm/send_audit.jsonl 本文付き 3,136便 → **3件(0.096%)**
+#     デブライネ 09-05 "Now the remaining sections (header, 1, 3, 5, 6, 7, 8):"
+#     アメス 09-15 "body to the room:" / トトリ 09-21(検体)
+#   HQ hr/memory の人格返信 7,124便 → **33件(0.463%)**。33件を人の目で全部見て、
+#   「これは人格の台詞だ」と言える便は **1つも無い**(全部 Now the reply / Both fixes are
+#   shipped / Confirmed at line 1408 型の英語作業ノート)= 明白な誤発火 0。
+_PREAMBLE_EN_RE = re.compile(r"^[ \t　]*(?:[A-Za-z][A-Za-z'’\-]*\s+){2,}[A-Za-z][A-Za-z'’\-]*")
+
+
+def strip_preamble_leak(text):
+    """名乗りより前の英語作業前置きを落として (本文, 剥いだ行) を返す。
+
+    - 名乗り `[名前]` が**1行目に在る**なら触らない(前置きが存在しない)。
+    - 最初の非空行が英単語3語以上で始まらないなら触らない。
+    - 落とすのは「英語で始まる行(と空行)が続く間」だけ= 間に日本語が挟まれば手前で止まる。
+    - 切った結果が空/空白だけになるなら触らない(**沈黙は作らない**)。
+    - 落とす範囲にコードフェンスが在るなら触らない(貼り付けを巻き込まない)。
+    - 1件も切らなければ元の文字列をそのまま返す(前後の空白の整形すらしない)。
+    - どんな入力でも例外を投げない(fail-open= 転んだら素通し)。
+    """
+    try:
+        s = str(text or "")
+        if not s.strip():
+            return s, []
+        m = _TAG_RE.search(s)
+        head = s[:m.start()] if m else s
+        if not head.strip():
+            return s, []                          # 名乗りが頭に在る=前置き無し
+        lines = s.splitlines()                  # ★原文の全行で数える(改行コードに依らない)
+        limit = len(head.splitlines()) if m else len(lines)   # 名乗りの行=ここより先へ進まない
+        first = next((i for i in range(limit) if lines[i].strip()), None)
+        if first is None or not _PREAMBLE_EN_RE.match(lines[first]):
+            return s, []                          # 英語の前置きではない
+        # ★落とすのは「英語で始まる行(と空行)が続く間」だけ= 間に日本語が挟まったら手前で止める。
+        end = first
+        while end < limit and (not lines[end].strip() or _PREAMBLE_EN_RE.match(lines[end])):
+            end += 1
+        cut = lines[first:end]
+        if any("```" in ln for ln in cut):
+            return s, []                          # フェンスを跨いで切らない(貼り付けを守る)
+        rest = "\n".join(lines[end:])
+        if not rest.strip():
+            return s, []                          # 切ると沈黙になる=触らない
+        return rest.lstrip("\n"), [{"marker": "preamble_leak", "line": ln.strip()[:300]}
+                                   for ln in cut if ln.strip()]
+    except Exception:                            # noqa: BLE001
+        return text, []                          # 何が起きても素通し(沈黙ゼロ)
+
+
+def detect_preamble_only(text):
+    """本文が**まるごと**英語の作業前置きなら情報dictを返す(違えば None)。
+
+    ★なぜ切る関数と別に要るか(2026-09-21 実測):
+      送信台帳で当たった3便のうち**2便は本文が前置きだけ**だった。
+        デブライネ 09-05 msg 1545536969449144450 "Now the remaining sections (header, 1, …):"
+        アメス 09-15 msg 1549148706014503123 "body to the room:"
+      strip_preamble_leak は「切ると沈黙になる」ので正しく手を引く。この形で要るのは
+      切ることではなく**作り直し**= detect_narration_leak と同じ扱い(常駐の regen 経路)。
+    ★判定だけする。本文は1文字も変えない。例外は投げない(判定不能は None=素通し)。
+    """
+    try:
+        s = str(text or "")
+        if not s.strip():
+            return None
+        if _TAG_RE.search(s):                    # 名乗りが在る=人格の便
+            return None
+        lines = [ln for ln in s.splitlines() if ln.strip()]
+        if not lines or any("```" in ln for ln in lines):
+            return None
+        if not all(_PREAMBLE_EN_RE.match(ln) for ln in lines):
+            return None
+        return {"line": lines[0].strip()[:300], "reason": "preamble_only"}
+    except Exception:                            # noqa: BLE001
+        return None
+
+
+# ============================================================================
 # 孤立した末尾コードフェンス(``` だけの行)の切り落とし  2026-09-17 / プラットフォームSE
 # ----------------------------------------------------------------------------
 # 壊れた実物(検体・2026-09-16 14:23 JST / imagegen-fusoh-v0・カスミ):

@@ -433,6 +433,37 @@ def apply_gates(dept, persona, text, source="mirror", msg_id="", fix=None, ask=N
     except Exception:
         pass            # 切り落としで転んでも以降のゲートは当てる
 
+    # --- ゲートE-4(名乗り前の英語作業前置き切り)= 2026-09-21 イージス研究室 -----
+    #   発注= 改善提案部門(トトリ) msg 1551430845766836227 / 出所= Chami msg 1551429691251101828
+    #   実物= トトリのPDCA報告便 msg 1551390481165058160 の1行目が英語の作業ノート。
+    #   ★detect_narration_leak では当たらない(3条件ANDの③=声の痕跡で必ず素通しする)。
+    #     見るのは語彙ではなく**位置**= 名乗りより前に英語の作業ノートが在るか。
+    #   OUT口は常駐とミラーの2つ=同時に塞ぐ(C-064)。
+    try:
+        if _meta_strip is not None:
+            pcut, phits = _meta_strip.strip_preamble_leak(s)
+            if phits:
+                summary["preamble_leak"] = len(phits)
+                _append(META_AUDIT, [{
+                    "ts": ts, "dept": dept, "event": "preamble_leak", "source": source,
+                    "persona": str(persona or ""), "msg_id": str(msg_id or ""),
+                    "stripped": [h.get("line") for h in phits],
+                    "before": excerpt_before}])
+                s = pcut
+            else:
+                # 本文がまるごと前置き= 切ると沈黙になるので**切らない**。台帳に残すだけ
+                #   (この経路に再生成の手が無い。常駐側だけが作り直しへ格上げする)。
+                _only = _meta_strip.detect_preamble_only(s)
+                if _only:
+                    summary["preamble_only"] = 1
+                    _append(META_AUDIT, [{
+                        "ts": ts, "dept": dept, "event": "preamble_only", "source": source,
+                        "persona": str(persona or ""), "msg_id": str(msg_id or ""),
+                        "line": _only.get("line") or "",
+                        "warned": False, "before": excerpt_before}])
+    except Exception:
+        pass            # 切り落としで転んでも以降のゲートは当てる
+
     # --- 実況漏れ(名乗りも声も無い生ログ)= **警告のみ** ------------------
     # ★2026-09-01 イージス研究室。常駐(経路①)と**同じ検知器**(meta_strip.detect_narration_leak)。
     # ★ここでは突き返さない= この経路に**再生成の手が無い**(セッションは既に喋り終えている)。
