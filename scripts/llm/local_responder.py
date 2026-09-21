@@ -798,6 +798,99 @@ def send_as(channel, text, persona, suffix=""):
     return r.returncode == 0
 
 
+# ------------------------------------------------------------------ 閉室の不具合の行き先
+TROUBLE_DISPATCH = os.path.join(ROOT, "scripts", "llm", "dispatch.py")
+TROUBLE_BODY_DIR = os.path.join(LOCAL, "_work")
+TROUBLE_STATE = os.path.join(LOCAL, "llm", "image_trouble_notified.json")
+TROUBLE_COOLDOWN = 1800        # 同じ部屋の同じ型は30分に1本(連投で相手の部屋を埋めない)
+TROUBLE_SENDER = "優依"        # 出すのは橋渡し役の本人(部屋で喋る名義は trouble_persona 側)
+
+
+def _trouble_recent(key, cooldown):
+    """この(部屋,型)を直近 cooldown 秒に出したか。出していなければ印を置いて False を返す。"""
+    now = time.time()
+    try:
+        with open(TROUBLE_STATE, encoding="utf-8") as f:
+            state = json.load(f)
+    except Exception:
+        state = {}
+    last = state.get(key) or 0
+    if now - last < cooldown:
+        return True
+    state[key] = now
+    try:
+        os.makedirs(os.path.dirname(TROUBLE_STATE), exist_ok=True)
+        with open(TROUBLE_STATE, "w", encoding="utf-8") as f:
+            json.dump(state, f, ensure_ascii=False)
+    except Exception:
+        pass                    # 印が置けなくても通知は止めない(fail-open)
+    return False
+
+
+def notify_trouble_dept(dept, kind, why, content="", cooldown=TROUBLE_COOLDOWN, dry_run=False):
+    """閉じた描画室で絵が出なかったことを、**直せる部門**へ1本出す。
+
+    返り= "sent"(今出した) / "recent"(直近に同型を出したので見送った=**届いてはいる**) /
+          ""(受け先が無い・送信に失敗した=**誰にも届いていない**)。
+    ★呼び側はこの3つを区別しろ= "recent" を「届いていない」と扱うと、壊れている間じゅう
+      別経路(Claude)へ雪崩れる。"" の時だけ元の受け皿へ落とす。
+
+    ★2026-09-22 Chami直令 msg 1551691197020508272=
+      「その時はローカル研究室に対応させて。ローカル内のことだから。」
+      (直前= 閉室した4室は不具合が起きても中に応答者が居ない、と答えた流れ)
+    ★受け先は **rooms.trouble_dept() が正本**= ここに部門名を書かない。
+      Claudeが聞いている部屋なら None が返る= 何もしない(従来の経路に任せる)。
+    ★連投しない= 同じ部屋の同じ型は cooldown 秒に1本。壊れている間じゅう鳴らすと読まれなくなる。
+    ★送るのは dispatch.py の1本だけ(--also-post は付けない)。--work を付けるのは
+      **相手に手番が有る実依頼**だから(C-023)= 受けた側が直して返す。
+    """
+    if image_rooms is None:
+        return ""
+    to = image_rooms.trouble_dept(dept)
+    if not to:
+        return ""
+    if _trouble_recent("%s|%s" % (dept, kind), cooldown):
+        print(f"  不具合の回送は見送り(直近に同型を出した) {dept} {kind}")
+        return "recent"
+    label = str(((image_rooms.ROOMS.get(dept) or {}).get("label") or dept))
+    room = image_rooms.channel_name(dept) or dept
+    body = "\n".join([
+        "優依のローカル生成が失敗した。Claudeを閉じた部屋なので、そちらで見てほしい。",
+        "",
+        "  部屋: %s(%s / dept=%s)" % (room, label, dept),
+        "  型: %s" % kind,
+        "  理由: %s" % ((why or "").strip() or "(local_chain からの説明なし)"),
+        "  注文の頭: %s" % (content or "").strip()[:120],
+        "  時刻: %s" % time.strftime("%Y-%m-%d %H:%M:%S"),
+        "",
+        "この回送は Chami直令 msg 1551691197020508272「その時はローカル研究室に対応させて。",
+        "ローカル内のことだから。」による。部屋には既に事情を1本出してある(名義は rooms.py の",
+        "trouble_persona)。同じ部屋の同じ型は30分に1本しか出さない= 直った確認はそちらで取って。",
+    ])
+    path = os.path.join(TROUBLE_BODY_DIR, "image_trouble_%s_%s.txt" % (dept, kind))
+    try:
+        os.makedirs(TROUBLE_BODY_DIR, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(body)
+        cmd = [sys.executable, TROUBLE_DISPATCH, "--dept", to, "--from-dept", dept,
+               "--from", TROUBLE_SENDER, "--audience", "ai", "--direct",
+               "--work", "画像生成の失敗(%s)を見てほしい: %s" % (kind, room),
+               "--body-file", path]
+        if dry_run:
+            cmd.append("--dry-run")
+        r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=120)
+        if r.returncode != 0:
+            tail = (r.stderr or r.stdout or "").strip().splitlines()
+            print(f"  ★不具合の回送に失敗 rc={r.returncode}: {tail[-1] if tail else '(出力なし)'}")
+            return ""
+        print(f"  不具合を{to}へ回送 [{room}] {kind}")
+        return "sent"
+    except Exception as e:
+        print(f"  ★不具合の回送で例外: {type(e).__name__}: {e}")
+        return ""
+
+
 def image_spec_attachments(rec, limit=8000):
     """この便に付いている**テキスト添付**(.txt/.md)の中身を返す。無ければ空文字。
 
@@ -826,11 +919,18 @@ def image_spec_attachments(rec, limit=8000):
     return "\n\n".join(out)[:limit]
 
 
-def handle_image_request(rec, raw_line, content, channel, dept=None):
+def handle_image_request(rec, raw_line, content, channel, dept=None, cue=None):
     """優依が絵を描く。研究室HQのローカル経路(local_chain.py=Gemmaタグ→ComfyUI)で生成し、
     画像生成ルームへ届ける。外部AI(Claude/ChatGPT/Gemini)を通さない。
     ★ローカルが失敗した時だけ Claude へ回す(Chami「うまくいくまではCodexとClaudeで支援」の実装)。
-    返り値は常に True(=画像便として処理済み。成功でも失敗のClaude回送でも、黙って落とさない)。"""
+    返り値は常に True(=画像便として処理済み。成功でも失敗のClaude回送でも、黙って落とさない)。
+
+    cue= この便を通した時の合図ゲートの判定(True=合図が要る部屋で合図があった / False=
+         ゲートが掛かっていなかった / None=呼び側が判定を持たない旧経路)。★2026-09-22 追加。
+         理由= ここへ届く content は**合図を剥がした後**の本文なので、ログだけ見ても
+         「合図があったのか、ゲートが外れていたのか」を後から区別できなかった
+         (2026-09-22 05:06:18 の実害を、ログから名指しできなかった)。判定そのものは
+         rooms.order_of が持ったまま=ここは**記録だけ**する。見る側= cue_gate_watch.py。"""
     # ★貼り先と名義を dept から引く(表示名の直書きをやめた。上の長いコメントを読め)。
     #   dept が無い旧経路(優依の自室から「絵を描いて」)は、従来どおり画像生成ルームへ届ける=
     #   ただし**名前は台帳から引く**ので、今度こそ届く。
@@ -879,7 +979,7 @@ def handle_image_request(rec, raw_line, content, channel, dept=None):
                           "気に入らなければ言い方を変えてもう一度頼んで。")
         log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "answered", "channel": channel,
              "q": content[:200], "a": "[画像生成/local_chain] " + out[:200], "sent": True,
-             "growth": True, "image": True})
+             "growth": True, "image": True, "dept": dept, "cue": cue})
         print(f"  画像生成→貼付 [{channel}] {content[:30]!r}")
     elif rc == 3 and image_rooms is not None:
         # ★LoRAの実体が置き場に無い(Chami指示「トラブル時アメス」→ 2026-09-17 C-082でLoRA3室はカスミ)。
@@ -891,10 +991,14 @@ def handle_image_request(rec, raw_line, content, channel, dept=None):
                 why = ln[len("LORA_MISSING"):].strip()
         who, body = image_rooms.trouble_message(dept, "lora_missing", why)
         send_as(channel, body, who, image_rooms.TROUBLE_SUFFIX)
+        # ★閉じた部屋なら、部屋へ言うだけでは誰も直しに来ない=直せる部門へも1本出す
+        #   (2026-09-22 Chami直令 msg 1551691197020508272)。行き先は rooms.trouble_dept()。
+        relayed = notify_trouble_dept(dept, "lora_missing", why, content)
         # PROCESSED への記録は上で済んでいる(ここで二度書かない)
         log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "lora_missing", "channel": channel,
              "dept": dept, "q": content[:200], "image": True, "err": why[:300],
-             "trouble_persona": who})
+             "trouble_persona": who, "relayed_to": image_rooms.trouble_dept(dept),
+             "relayed": relayed})
         print(f"  画像生成不可(LoRA未設置) [{channel}] {why[:80]!r}")
     elif rc == 5 and image_rooms is not None:
         # ★2026-09-16 イージス研究室: タグ変換段(gemma)の時間切れ(DISPATCH-aegis-gl-1789567116980)。
@@ -906,20 +1010,37 @@ def handle_image_request(rec, raw_line, content, channel, dept=None):
                 why = ln[len("TAG_TIMEOUT"):].strip()
         who, body = image_rooms.trouble_message(dept, "tag_timeout", why)
         send_as(channel, body, who, image_rooms.TROUBLE_SUFFIX)
+        relayed = notify_trouble_dept(dept, "tag_timeout", (why or err or out), content)
         log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "tag_timeout", "channel": channel,
              "dept": dept, "q": content[:200], "image": True,
              "reason": "local_chain_rc5", "err": (why or err or out)[:300],
-             "trouble_persona": who})
+             "trouble_persona": who, "relayed_to": image_rooms.trouble_dept(dept),
+             "relayed": relayed})
         print(f"  タグ変換timeout [{channel}] {why[:80]!r}")
     else:
         # ローカルが通らなかった=Chamiの言う「うまくいくまでのClaude支援」に回す。黙って消さない。
-        append_line(FOR_CLAUDE, raw_line)
-        send(channel, "ごめん、ローカルの絵の経路が今うまく動かなかったから、Claude側に引き取ってもらうね"
-                      "(私のPCだけで描けるようになるまでのつなぎだよ)。")
+        # ★★2026-09-22 Chami直令 msg 1551691197020508272=「その時はローカル研究室に対応させて。
+        #   ローカル内のことだから。」= **Claudeを閉じた部屋の失敗はClaudeへ回さない**。
+        #   閉室の目的(msg 1551680397103071355)は「その部屋のことでClaudeを起こして課金しない」で、
+        #   失敗のたび main箱へ積めば裏口から同じ課金が戻る。直せる手元(ローカル研究室)へ直接出す。
+        #   ★受け先の正本は rooms.trouble_dept()= ここに部門名を書かない。開いている部屋の便は
+        #     今までどおり main箱へ積む(1文字も変えていない)。
+        relayed = notify_trouble_dept(dept, "local_chain_rc%s" % rc, (err or out), content)
+        if relayed:
+            to = image_rooms.trouble_dept(dept) if image_rooms else ""
+            send(channel, "ごめん、ローカルの絵の経路が今うまく動かなかったから、"
+                          "ローカル研究室に見てもらうね(この部屋のことは向こうで直せるよ)。")
+        else:
+            # 回送先が無い(開いている部屋)/ 回送に失敗した= 便を落とさないために従来の受け皿へ。
+            append_line(FOR_CLAUDE, raw_line)
+            to = ""
+            send(channel, "ごめん、ローカルの絵の経路が今うまく動かなかったから、Claude側に引き取ってもらうね"
+                          "(私のPCだけで描けるようになるまでのつなぎだよ)。")
         log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "escalated", "channel": channel,
-             "q": content[:200], "growth": True, "image": True, "reason": f"local_chain_rc{rc}",
-             "err": (err or out)[:300]})
-        print(f"  画像生成失敗→Claude [{channel}] rc={rc} {(err or out)[:80]!r}")
+             "dept": dept, "q": content[:200], "growth": True, "image": True,
+             "reason": f"local_chain_rc{rc}", "err": (err or out)[:300],
+             "relayed_to": to, "relayed": relayed})
+        print(f"  画像生成失敗→{to or 'Claude'} [{channel}] rc={rc} {(err or out)[:80]!r}")
     return True
 
 
@@ -1711,6 +1832,19 @@ def handle(rec, raw_line, growth=None):
     #   旧= この部屋のChami便は**全部**注文として handle_image_request へ直行していた。
     #       実害= 雑談「これデーモン?デーモンの返信いらんよ」を優依が絵にしようとした。
     #   新= fusohの2室だけ「合図のある便」に限って拾う(正本= rooms.CUE_REQUIRED_DEPTS)。
+    #   ★★この「2室だけ」は**もう古い**(2026-09-22・Chami直令 msg 1551685142806925366
+    #     「生成依頼 って冒頭につけないと画像生成されないようにして」)。合図が要るのは
+    #     **ROOMSに載っている描画室すべて**= 素の imagegen 室も対象に入った。
+    #     C-035「名指ししていない既存室は1文字も変えない」の除外線は、imagegen室については
+    #     この直令で消えている(消えたのはこの1本だけ=規律の本体は広がっていない)。
+    #     実害= 05:06:18、素の imagegen 室でChamiのこの指示文そのものが絵になった。
+    #   ★★★同じ日の 05:37→05:49 に**もう一度動いた**。Chami直令 msg 1551692713425117314
+    #     「この3部屋は生成依頼って書かなくても生成するようにしてよ、そうすればエラーが
+    #      積まれないから」→ 直後の msg 1551692776859631629「違う、４部屋か」で itsumono も。
+    #     結果= Claude常駐を閉じた4室(rooms.NO_CUE_DEPTS = NO_CLAUDE_DEPTS)は**合図なしで全便を
+    #     注文として拾う**= 実在の描画室で合図が要る部屋は今ゼロだ。
+    #     ★この段落を鵜呑みにするな= 要否の正本は `rooms.cue_required(dept)` ただ1つで、
+    #       ここは写しにすぎない(1日で3回動いた=写しは必ず遅れる)。判定は下の order_of が持つ。
     #   ★2026-09-16 03:0x Chami直で合図を**「生成依頼」で始まる時だけ**の1本に絞った
     #     (msg 1549476416641572937 / 1549477000807194637「1。でも印はいらんかな」)。
     #     `!描`系の印も wants_image の曖昧マッチも、この2室では効かない= rooms.order_of が決める。
@@ -1738,7 +1872,10 @@ def handle(rec, raw_line, growth=None):
                  "channel": channel, "dept": _idept, "q": content[:200], "image": True,
                  "sent": True})
             return
-        handle_image_request(rec, raw_line, _prompt, channel, _idept)
+        # ★cue= この便にゲートが掛かっていたか(True=合図が要る部屋で合図が有った)。
+        #   剥がす前の本文はここにしか無いので、記録はここで決める(下流は受け取るだけ)。
+        _cue = bool(image_rooms is not None and image_rooms.cue_required(_idept))
+        handle_image_request(rec, raw_line, _prompt, channel, _idept, cue=_cue)
         return
     # ★旧V0シャドー配線(改善設計書_ローカルLLM画像認識強化_2026-07-17 §3・T-2)の跡地。
     #   旧= 画像添付は**問答無用で司令塔(Claude)へ回し**、ローカルVLMの下読み(vision_draft)を
