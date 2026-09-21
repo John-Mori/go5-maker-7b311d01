@@ -421,6 +421,24 @@ def build_work_post(sender, work, body):
     return build_work_header(sender, work) + "\n\n" + front_digest(body)
 
 
+_CLAUDE_OFF_CACHE = None
+
+
+def claude_off(dept):
+    """その部門の部屋は Claude を起こさないか。判定の正本は scripts/imagegen/rooms.py の
+    NO_CLAUDE_DEPTS(2026-09-22・Chami直令 msg1551680397103071355)。
+    fail-open= 読めなければ「閉じていない」と答える(従来どおり裏へ投函する)。"""
+    global _CLAUDE_OFF_CACHE
+    if _CLAUDE_OFF_CACHE is None:
+        try:
+            sys.path.insert(0, os.path.join(ROOT, "scripts", "imagegen"))
+            import rooms as _rooms
+            _CLAUDE_OFF_CACHE = frozenset(getattr(_rooms, "NO_CLAUDE_DEPTS", ()))
+        except Exception:
+            _CLAUDE_OFF_CACHE = frozenset()
+    return str(dept or "") in _CLAUDE_OFF_CACHE
+
+
 def is_work_request(work):
     """--work が実質的な値を持つ=実依頼=表に出す、か。空/空白は False(=裏のまま)。"""
     return bool((work or "").strip())
@@ -691,6 +709,20 @@ def dispatch(dept, sender, body, also_post=False, dry_run=False, work="", audien
         if not aud["audience"]:
             print(AUDIENCE_WARN)
         return True, synthetic
+
+    # ★閉室(Claudeを起こさない部屋)への便は**queueへ積まず、表へ出す**
+    #   (2026-09-22 イージス研究室・Chami直令 msg1551680397103071355)。
+    #   理由は2つ。①その部屋には便を引き取る常駐が居ない= 裏へ置くと status=pending /
+    #   deliveries=0 のまま残り、absence_watchdog.check_orphan_pending が「消費者不在」で
+    #   鳴き続ける(INC-110で踏んだ穴と同じ形)。②その部屋を読むのは人と外部の手だけだから、
+    #   裏に完本があっても**誰も読まない**= 表へ出すのが届けたことになる。
+    #   ★gateway 側(受信→queue)と対。片方だけでは閉室に便が溜まる。
+    if claude_off(dept):
+        _pid = post_work_to_channel(dept, sender.split("(")[0],
+                                    build_work_post(sender, work, body) if is_work else body)
+        print(f"  [{dept}] Claude閉室= キューへは積まない(読む常駐が居ない)。"
+              f"表へ投稿した{'(msg=' + _pid + ')' if _pid else '=★投稿に失敗'} (ch={ch})")
+        return True, (_pid or synthetic)
 
     # ★実依頼=先に相手部門チャンネルへ表投稿し、実IDを得る(best-effort・失敗しても続行)。
     #   これを enqueue の前に置く理由= 便の msg_id にその実IDを載せ、デーモンの既読/着手印を

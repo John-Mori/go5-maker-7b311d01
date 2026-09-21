@@ -30,6 +30,7 @@ DEPT = "imagegen-itsumono"
 KEEPER = os.path.join(ROOT, "scripts", "_daemons", "daemon_keeper.py")
 DEADMAN = os.path.join(ROOT, "scripts", "_daemons", "deadman_check.py")
 GATEWAY = os.path.join(ROOT, "scripts", "queue", "discord_gateway.py")
+DISPATCH = os.path.join(ROOT, "scripts", "llm", "dispatch.py")
 
 
 def _keeper_depts():
@@ -64,6 +65,13 @@ class ClaudeClosed(unittest.TestCase):
             src = f.read()
         self.assertIn("def _claude_off(", src)
         self.assertIn("if _claude_off(rec[\"dept\"]):", src)
+
+    def test_dispatch_does_not_enqueue_to_closed_room(self):
+        """他部門から閉室へ出した便が queue へ溜まらないか(受信側と対の口)。"""
+        with open(DISPATCH, "r", encoding="utf-8") as f:
+            src = f.read()
+        self.assertIn("def claude_off(", src)
+        self.assertIn("if claude_off(dept):", src)
 
     def test_deadman_does_not_cry_wolf(self):
         sys.path.insert(0, os.path.join(ROOT, "scripts", "_daemons"))
