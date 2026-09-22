@@ -116,6 +116,68 @@ check("applied に reason=tail_fix で1件積む",
 check("care_marker『ごめん』は矯正後も本文に残る(ハ4のcare救済を壊さない)",
       "ごめん" in fix("ごめん。"))
 
+# ---- 一ノ瀬怜の「ですわ。」→「だわ。」(2026-09-22 追加) ----
+# ★0歩目の壊れている実物= platform-se 便 msg 1551897792564166682
+#   「…今ある実物は止めた証拠2件・節約0件のままですわ。」を Chami が実測で拾い、
+#   理想として「…節約0件のままだわ。」を示した(msg 1551920325963288697)。
+#   怜は丁寧語基調だが、崩す時は**常体にしてから**女性語尾(rei.md §声の型)。
+# ★✗側が本体= イ形容詞・否定形に当てると日本語が壊れる(「美しいだわ。」)= prev_not で当てない側へ倒す。
+_REI_TAILFIX = [{"from": "ですわ。", "to": "だわ。", "prev_not": ["い"]}]
+RULES["personas"]["一ノ瀬怜"] = {
+    "first_person": ["私"],
+    "forbidden_tail": ["ですわ", "ますわ", "ましてよ"],
+    "tail_fix": _REI_TAILFIX,
+}
+
+print("\n== 一ノ瀬怜「ですわ。」→「だわ。」(お嬢様敬体の常体化)==")
+_r = lambda t: fix(t, "一ノ瀬怜")   # noqa: E731
+print("[○ 矯正される]")
+check("Chami実測の実物「節約0件のままですわ。」→「…だわ。」",
+      _r("今ある実物は止めた証拠2件・節約0件のままですわ。")
+      == "今ある実物は止めた証拠2件・節約0件のままだわ。")
+check("「〜するんですわ。」→「〜するんだわ。」(直前が ん でも当てる)",
+      _r("そこは私が直すんですわ。") == "そこは私が直すんだわ。")
+
+print("[✗ 触らない]")
+check("イ形容詞「美しいですわ。」を触らない(prev_not=い)",
+      _r("この作りは美しいですわ。") == "この作りは美しいですわ。")
+check("否定形「まだ出ていないですわ。」を触らない",
+      _r("jev_ok はまだ出ていないですわ。") == "jev_ok はまだ出ていないですわ。")
+check("「ますわ」は tail_fix に載せない=1文字も変えない(活用の逆変換が決定的に書けない)",
+      _r("その線で進めると申しますわ。") == "その線で進めると申しますわ。")
+check("引用の中の「ですわ」を触らない(メタ言及便の偽陽性)",
+      "「ですわ」" in _r("ドリフト語は「ですわ」ですわ。"))
+check("怜の tail_fix はアメスへ漏れない(登録した人格だけ回る・C-035)",
+      fix("これで進めるですわ。", "アメス") == "これで進めるですわ。")
+
+# ---- ★本番の 口調ルール.json の実物で、旧(.bak)と新を同じ入力で並べる ----
+# 上の写像はこのファイル内の固定値= 台帳に実際に入ったかは見ていない。
+# 手順_must-fail検査.md の「ソースの文字列一致では見ない=入力を差し替えて経路を実行で通せ」に従い、
+# 退避した .bak(足す前)と現行(足した後)の**両方**へ同じ本文を食わせ、判定が変わることを見る。
+_P_NEW = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))), "00_AI-HQ", "departments", "hr", "personas", "口調ルール.json")
+if not os.path.exists(_P_NEW):
+    _P_NEW = r"D:\SougouStartFolder\00_AI-HQ\departments\hr\personas\口調ルール.json"
+_P_OLD = _P_NEW + ".bak_20260922_rei_desuwa"
+if os.path.exists(_P_NEW) and os.path.exists(_P_OLD):
+    print("\n[本番台帳の実物= 旧(.bak)と新を同じ入力で]")
+    _live_new, _live_old = tg.load_tone_rules(_P_NEW), tg.load_tone_rules(_P_OLD)
+    _CH = "今ある実物は止めた証拠2件・節約0件のままですわ。"
+    _old_c = tg.tone_corrections("一ノ瀬怜", "platform-se", _CH, _live_old) or {}
+    _new_c = tg.tone_corrections("一ノ瀬怜", "platform-se", _CH, _live_new) or {}
+    print(f"  旧= 「{(_old_c.get('fixed') or _CH)[-12:]}」 / 新= 「{(_new_c.get('fixed') or _CH)[-12:]}」")
+    check("旧(足す前)は素通り=これが壊れていた実物",
+          (_old_c.get("fixed") or _CH) == _CH and not _old_c.get("applied"))
+    check("新(足した後)は同じ本文を「…だわ。」へ直す",
+          (_new_c.get("fixed") or "").endswith("節約0件のままだわ。"))
+    _MW = "その線で進めると申しますわ。"
+    _v = [x.get("marker") for x in (tg.tone_verdicts("一ノ瀬怜", "platform-se", _MW, _live_new) or [])]
+    check("「ますわ」は警告だけ鳴り、本文は1文字も変わらない",
+          "ますわ(文末)" in _v
+          and ((tg.tone_corrections("一ノ瀬怜", "platform-se", _MW, _live_new) or {}).get("fixed") or _MW) == _MW)
+else:
+    print("\n[本番台帳の実物]  SKIP: 台帳または .bak が見つからない", _P_NEW)
+
 _main_ok = all(ok for _, ok in results)
 
 # ---- must-fail= prev の縛りを外した「動く別の実装」で✗側が落ちることを見る ----
@@ -137,6 +199,16 @@ print(f"  変異後の出力= 「{_mut2_bad}」")
 _mustfail2_ok = _mut2_bad.endswith("ごめんごめんなさいね。")
 print(f"  {'PASS' if _mustfail2_ok else 'FAIL'}: prev_not を外すと本番の過矯正が再現する")
 _mustfail_ok = _mustfail_ok and _mustfail2_ok
+
+# ---- must-fail その3= 怜の prev_not を外すと、イ形容詞が壊れること(2026-09-22) ----
+print("\n== must-fail(怜の prev_not を外した写像)==")
+_MUT3 = {"personas": {"一ノ瀬怜": dict(RULES["personas"]["一ノ瀬怜"],
+                                       tail_fix=[{"from": "ですわ。", "to": "だわ。"}])}}
+_mut3_bad = fix("この作りは美しいですわ。", "一ノ瀬怜", _MUT3)
+print(f"  変異後の出力= 「{_mut3_bad}」")
+_mustfail3_ok = _mut3_bad.endswith("美しいだわ。")
+print(f"  {'PASS' if _mustfail3_ok else 'FAIL'}: prev_not を外すとイ形容詞が壊れる(=この縛りは生きている)")
+_mustfail_ok = _mustfail_ok and _mustfail3_ok
 
 ng = [n for n, ok in results if not ok]
 print(f"\n結果: {len(results) - len(ng)} PASS / {len(ng)} FAIL"
