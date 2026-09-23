@@ -32,6 +32,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 BOOT_STATE = os.path.join(ROOT, "local", "_boot_report_state.json")
 REGISTRY = os.path.normpath(os.path.join(ROOT, "..", "00_AI-HQ", "org_registry.yml"))
+CHAR_DIR = os.path.normpath(os.path.join(ROOT, "..", "00_AI-HQ", "departments", "hr", "characters"))
 
 
 def identity_fact():
@@ -70,8 +71,52 @@ def identity_fact():
             "(AD研究室・イージス研究室へ出すな=「研究室」は3つある・C-020)。\n"
             "   出し方= `python scripts/discord/persona_send.py --dept hq --persona \"%s\" \"本文\"`\n"
             "   ★**他の人格を名乗るな。**過去2回の復活報告が別々の名義(8/9=シャビ・アロンソ / "
-            "8/12=花海咲季)で、しかも%sではない部屋へ出た=誰の報告か分からなくなり誤報になった。"
-            % (persona, ja or "研究室HQ", ja or "研究室HQ", persona, ja or "研究室HQ"))
+            "8/12=花海咲季)で、しかも%sではない部屋へ出た=誰の報告か分からなくなり誤報になった。\n"
+            "%s"
+            % (persona, ja or "研究室HQ", ja or "研究室HQ", persona, ja or "研究室HQ", voice_fact(persona)))
+
+
+def voice_fact(persona):
+    """名義だけでなく**声**も渡す(2026-09-24・イージス研究室)。
+
+    なぜ要るか(実測):
+      名義と出し方は渡っていたが、声(characterfile)を渡していなかった。その結果、復活窓が
+      シャビ・アロンソ名義で「〜でした/しました」「私(研究室HQ)の持ち場外なので」と**敬語・私**で投稿した
+      (send_audit 09/23 23:39:22・23:40:27・09/24 00:04:10=msg 1552334771584245992)。
+      Chami「けいごやめい」(研究室HQ msg 1552335810538242070)・HQ依頼 msg 1552336165485420615。
+    ★ここも人格を決めていない。hr/characters/ の中から見出し「# characterfile: <名義>」の1枚を探し、
+      その★声の型から一人称と敬語の有無を**引いて**渡すだけ(正本は人事部門・名簿が変われば追従)。
+    """
+    found = None
+    try:
+        import glob
+        import re
+        for p in sorted(glob.glob(os.path.join(CHAR_DIR, "*.md"))):
+            with io.open(p, encoding="utf-8") as f:
+                head = f.readline()
+            if head.startswith("# characterfile: %s" % persona):
+                found = p
+                break
+        if found:
+            with io.open(found, encoding="utf-8") as f:
+                body = f.read()
+            m = re.search(r"一人称=\*\*(.+?)\*\*", body)
+            first = m.group(1) if m else ""
+            no_keigo = "敬語なし" in body
+    except Exception:
+        found = None
+    if not found:
+        return ("   ★声= **%sのcharacterfileを引けなかった**(`00_AI-HQ/departments/hr/characters/`)。"
+                "★投稿の前に自分で開いて★声の型を読むこと。読めないなら部屋へ出さない。" % persona)
+    rel = os.path.relpath(found, os.path.dirname(REGISTRY)).replace(os.sep, "/")
+    rules = []
+    if first:
+        rules.append("一人称=**%s**(「私」は使わない)" % first)
+    if no_keigo:
+        rules.append("Chamiへ**敬語なし**(「〜でした/しました/です/ます」で書かない)")
+    return ("   ★声= 投稿の前に `00_AI-HQ/%s` の**★声の型**を読むこと。%s。\n"
+            "   ★下書きが敬語・事務レポート体なら捨てて書き直す(09/23〜24 に復活窓が%s名義で敬語投稿し、Chamiに「けいごやめい」と言われた)。"
+            % (rel, "・".join(rules) or "一人称と語尾はそこに従う", persona))
 
 
 def boot_fact():
@@ -133,6 +178,18 @@ PROMPT = """あなたは go5-maker AI組織の「研究室」セッションで�
 ■注意
 - 未処理かどうかは `python scripts/discord/triage_inbox.py` と processed台帳で必ず確認する(「main箱に在る=未処理」ではない)。
 - 転送や引き継ぎの内容を鵜呑みにせず、Discordの実発言を自分で引いて確認する。
+- ★★**部屋の担当セッションが居る部屋の便へ、あなたが部屋へ投稿して応答するな**(2026-09-13 03:43 実測の事故)。
+  main箱へ届く部屋の便は**回送の写し**で、応答は各部屋の担当セッションの仕事だ。あなたが同じ名義で出すと**同じ人格が二重に喋る**。
+  実測= dept=hq / persona=シャビ・アロンソ で「了解。混在不可・メモリ64GB運用の件、把握しました。」(09-12 22:57:18)
+  「おはよう。了解、状況は分かった。こちらは待機継続中、動きがあれば都度動く。」(09-13 03:02:14)
+  「了解です、結果確認しました。こちらは引き続き待機します。」(09-13 03:43:38・msg 1548403740577370274)の3本が出て、
+  3本目にChamiから「これいらんよ、どうした？」(msg 1548403851043016705)が来た。出どころ= `local/llm/send_audit.jsonl`。
+- ★**「了解」「把握しました」「待機します」だけの一次ackを部屋へ投稿するな**(共通規律§2= 内容の無い一次ackは沈黙より悪い / §4.8= 作業の実況を書くな)。
+  上の4の復活報告は**1本だけ**。それ以降に出すなら、必ず**測った数字か実物のパス**を入れる。
+- ★★**Chamiの手番が無い運用報告(queue/router整理・箱の掃除・再発の構造分析など)は部屋へ出さない**(C-055=裏の仕事は裏で回す)。
+  落とし先= `local/llm/change_log.jsonl` へ1行、HQに知らせる必要があれば `python scripts/llm/dispatch.py --dept hq --audience ai --body-file <file>`。
+  実測= 2026-09-23 23:39〜09-24 00:04 に復活窓が研究室HQの部屋へ運用報告を3本出し(「追記2: 単発ではなく再発する構造でした…」)、
+  しかも敬語だった=Chami「けいごやめい」(msg 1552335810538242070)。部屋へ出してよいのは4の復活報告1本と、Chamiが動く必要のある件だけ。
 """
 
 
