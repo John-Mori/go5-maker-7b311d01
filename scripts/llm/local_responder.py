@@ -1025,6 +1025,14 @@ def handle_image_request(rec, raw_line, content, channel, dept=None, cue=None):
              "trouble_persona": who, "relayed_to": image_rooms.trouble_dept(dept),
              "relayed": relayed})
         print(f"  タグ変換timeout [{channel}] {why[:80]!r}")
+    elif rc == 6:
+        # ★2026-09-23 イージス研究室: 【ポジティブ】【ネガティブ】で切った結果、描く中身が空だった
+        #   (DISPATCH-aegis-gl-1790166561731)。空のpromptは描かずに聞き返す= 壊れではないので回送しない。
+        send(channel, "描いてほしいもの(【ポジティブ】の中身)が空だったから、まだ描いてないよ。"
+                      "描く中身を書いて、もう一度頼んでね。")
+        log({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "mode": "empty_positive", "channel": channel,
+             "dept": dept, "q": content[:200], "image": True, "cue": cue})
+        print(f"  画像生成せず(ポジ空) [{channel}] {content[:30]!r}")
     else:
         # ローカルが通らなかった=Chamiの言う「うまくいくまでのClaude支援」に回す。黙って消さない。
         # ★★2026-09-22 Chami直令 msg 1551691197020508272=「その時はローカル研究室に対応させて。

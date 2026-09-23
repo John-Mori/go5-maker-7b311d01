@@ -90,6 +90,38 @@ SYSTEM = (
     "末尾に品質タグ(masterpiece, best quality, highres)を必ず含める。"
 )
 
+# ★2026-09-23 イージス研究室(P4= 除外→negative)。発注= 研究室HQ DISPATCH-aegis-gl-1790166561731 /
+#   Chami原文 msg 1552295146882736229「【ポジティブ】【ネガティブ】で分けれたらいいな」。
+#   ネガ側は SYSTEM を流用しない= SYSTEM は品質タグを必ず足すので、ネガへ masterpiece 等が入ると逆に効く。
+NEG_SYSTEM = (
+    "あなたは日本語で書かれた『絵に描いてほしくないもの』を、SDXL(Illustrious系・Danbooru語彙前提)の"
+    "ネガティブプロンプト用の英語タグへ変換する係です。\n"
+    "出力はカンマ区切りの英語タグ列だけ。説明・前置き・引用符・見出しは書かない。\n"
+    "書かれたものだけをタグにする。品質タグ(masterpiece 等)や、書かれていない要素は足さない。"
+)
+
+_MARK_RE = re.compile(r"【(ポジティブ|ネガティブ)】")
+
+
+def split_pos_neg(text):
+    """本文を【ポジティブ】【ネガティブ】で切り分ける。返り値= (ポジ本文, ネガ本文 or None)。
+
+    ★マーカーが1つも無い時は (text, None)= 旧経路と1バイトも変えない(仕様A)。
+    ★マーカーより前の地の文はポジへ入れる(仕様C)。同じマーカーが複数あれば順に繋ぐ。
+    ★中身が空のマーカーは無かったものとして扱う= ネガが空なら None を返す(仕様3)。
+    """
+    text = str(text or "")
+    parts = _MARK_RE.split(text)
+    if len(parts) == 1:
+        return text, None
+    pos = [parts[0].strip()]
+    neg = []
+    for kind, body in zip(parts[1::2], parts[2::2]):
+        (pos if kind == "ポジティブ" else neg).append(body.strip())
+    pos_s = "\n".join(p for p in pos if p)
+    neg_s = "\n".join(n for n in neg if n)
+    return pos_s, (neg_s or None)
+
 
 def _post(url, payload, timeout=None):
     """LM Studioへ1発投げる。★時間切れは TagTimeout に化かして上へ返す。
@@ -202,7 +234,7 @@ def salvage_tags(reasoning):
     return ""
 
 
-def to_tags(text, max_tokens=4000):
+def to_tags(text, max_tokens=4000, system=None):
     """日本語 → 英語タグ列。★max_tokensを削るな(罠1)。
 
     ★2026-09-16 ここで実際に絵が出なくなった(imagegen-fusoh-v0・reason=local_chain_rc1)。
@@ -225,7 +257,7 @@ def to_tags(text, max_tokens=4000):
         try:
             d = _post(LMS_API, {
                 "model": CHAT_MODEL, "temperature": 0.4, "max_tokens": budget,
-                "messages": [{"role": "system", "content": SYSTEM},
+                "messages": [{"role": "system", "content": system or SYSTEM},
                              {"role": "user", "content": text}],
             })
         except TagTimeout as e:
@@ -301,6 +333,12 @@ def main():
         else:
             rest.append(a); i += 1
     text = " ".join(rest)
+    # ★2026-09-23 【ポジティブ】【ネガティブ】の切り分け(上の split_pos_neg)。マーカー無しは旧と同じ。
+    pos_text, neg_text = split_pos_neg(text)
+    if not pos_text.strip():
+        # ★空のpromptを ComfyUI へ投げない(HTTP 400 の件と同じ穴)= rc=6 で親に聞き返させる
+        print("EMPTY_POSITIVE 描く中身(ポジティブ)が空だった")
+        sys.exit(6)
 
     # ★2026-09-14 研究室HQ: --dept を足した(Chami直令 msg 1548842898773123105)。
     #   部屋ごとにLoRAが違うので、**どのLoRAで描くかは部屋(dept)から引く**。正本= rooms.py。
@@ -329,7 +367,8 @@ def main():
 
     t0 = time.time()
     try:
-        tags = to_tags(text)
+        tags = to_tags(pos_text)
+        neg_tags = to_tags(neg_text, system=NEG_SYSTEM) if neg_text else ""
     except TagTimeout as e:
         # ★ここで黙って落ちない= 親(local_responder)は rc だけを見る。rc=5 を
         #   「タグ変換の時間切れ」専用にして、部屋に読める文面を出させる(rc=3 の LORA_MISSING と同じ型)。
@@ -347,8 +386,18 @@ def main():
         cmd += ["--lora", lora, "--lora-strength", str(lora_strength)]
     if out:
         cmd += ["--out", out]
+    caption = text
+    if neg_tags:
+        # ★既定ネガは落とさない= NEG_DEFAULT の後ろへ足す(置き換えると品質用の除外が消える)。
+        #   値の正本は generate.py の1か所(ここへ写さない)。
+        sys.path.insert(0, _HERE)
+        from generate import NEG_DEFAULT            # noqa: E402
+        cmd += ["--neg", NEG_DEFAULT + ", " + neg_tags]
+        print("ネガ指定: %s → %s" % (neg_text, neg_tags))
+        # ★効いたかをChamiが目で見られるよう、投稿に使ったネガ(指定分)を1行載せる
+        caption = pos_text + "\n(描かないもの: %s → %s)" % (neg_text.replace("\n", " "), neg_tags)
     if channel and persona:
-        cmd += ["--discord", channel, "--persona", persona, "--caption", text]
+        cmd += ["--discord", channel, "--persona", persona, "--caption", caption]
         # ★2026-09-16 イージス研究室: タグ変換段の秒数を渡す(Chami原文=「かかった時間も
         #   教えてもらえるようにして」)。描画段は generate.py が自分で測る=
         #   投稿本文には「所要 N秒(タグ変換 A秒 / 描画 B秒)」が載る。
