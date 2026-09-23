@@ -4639,6 +4639,7 @@ DEPT_CONF = {
     #     ここは**掴んで・見て・上げる**までを持つ。作業判定が付いた便は回送される。
     #   ★forward_all= Chamiがこの部屋に書いた便だけ main箱にも残す。GLが仮で専任セッションが
     #     無い今、掴み手が居ないまま沈黙するのを防ぐ安全網(A1= 無警報滞留0)。可逆。
+    #     ★2026-09-23 外した(下の conf の注記)。部屋の対話セッションが答えているので写しは余剰。
     "local-lab": {
         "character": os.path.join(_CHAR, "kasumi.md"),
         "memory": os.path.join(_MEM, "local-lab.jsonl"),
@@ -4653,7 +4654,11 @@ DEPT_CONF = {
         ],
         "port": 18839,          # 18838(imagegen-fusoh-v2)まで使用済=2026-09-16 実測
         "session_relay": True,
-        "forward_all": True,
+        # ★2026-09-23 forward_all を**外した**(研究室HQ msg 1552312288147411036 /
+        #   Chami承認 msg 1552311797330219049「OK」)。部屋が返した後もChamiの全便がHQへ
+        #   写され、直近7日で44便・HQ側は手番ゼロの写しだった。
+        #   外しても沈黙しない= 範囲外の申告(<<WORK>>=is_work)は forward_after_reply が
+        #   forward_all より先に通すので、上申は従来どおりHQへ届く。
         "boot_note": (
             "■この部屋の性格(必ず守る)\n"
             "- ここは **ローカル研究室**= カテゴリ「ローカルLLM部門」の**司令塔**だ"

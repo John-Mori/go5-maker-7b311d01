@@ -92,7 +92,10 @@ relay = sorted(k for k, v in D.DEPT_CONF.items() if v.get("forward_all"))
 #               head_of('local-lab')=None(自身が4室の部門長)なので、回送先は main箱。
 #               = **Chamiがこの部屋に書いた便だけ**HQの箱にも残す、が付けた理由。
 #               ★GLが本決まりになって専任セッションが立ったら、この行ごと見直す。
-eq(relay, ["hq", "local-lab", "research-room"],
+#     ★2026-09-23 local-lab を**外した**(研究室HQ msg 1552312288147411036 / Chami承認
+#               msg 1552311797330219049)。部屋の対話セッションが答えた後も全便がHQへ写され、
+#               直近7日で44便がHQ側の手番ゼロだった。上申(<<WORK>>)は forward_all と無関係に上がる。
+eq(relay, ["hq", "research-room"],
    "★forward_allはmain箱を読む対話セッションが居る部屋のみ(組織層の部門には付けない)")
 # ★talk は 2026-08-18 まで literal 一致の期待値だった(下の履歴コメントはその時代のもの=消さない)。
 #   いまは下の WORK_ROOMS / UNDECLARED_TALK による判定に置き換わっている。参考値として残す。
@@ -204,7 +207,8 @@ UNDECLARED_TALK = sorted([  # C= 権限も宣言も無い部屋。**増やすな
     #   Aへ足すのとは向きが逆だ。ただし C は事故の形(aegis-gl 8/5)でもあるので、
     #   「誰が受け取るのか」を実測してから置く= 2室とも消費者が居ることを確かめた。
     "local-lab",         # GLが「仮」(Chami原文「仮で一旦カスミを配置」)=配線の実作業は持たせない。
-                         #   上の relay に居るので Chami便は main箱にも残る。
+                         #   ★2026-09-23 relay から外した=Chami便の写しはHQへ行かない。
+                         #   上申は <<WORK>> 申告で従来どおり上がる。
     "otacon-radio",      # コンテキスト整理の会話部屋(2026-09-05 commit dd2d63b・Chami直接指示)。
                          #   ★実測= dept_daemon_otacon-radio.log に「回送=」26行。全て
                          #   「部門長が引けずmain箱へ」= head_of('otacon-radio') が None。

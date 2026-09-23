@@ -53,8 +53,10 @@ CASES = [
     ("work_scope と conversation_only を同居させる",
      'D.DEPT_CONF["qa-reviewer"]["conversation_only"] = True',
      "work_scopeと conversation_only の同居は learning-coach のみ"),
-    ("local-lab から forward_all を剥がす(登録した理由が消えた形)",
-     'D.DEPT_CONF["local-lab"].pop("forward_all", None)',
+    # ★2026-09-23 local-lab の forward_all は外した(研究室HQ msg 1552312288147411036)。
+    #   変異の向きを逆にする= 付け直したら赤くなる(44便/7日の写しが戻る形)。
+    ("local-lab に forward_all を付け直す(HQへの全便写しが戻る形)",
+     'D.DEPT_CONF["local-lab"]["forward_all"] = True',
      "★forward_allはmain箱を読む対話セッションが居る部屋のみ"),
 ]
 
