@@ -45,9 +45,6 @@ except Exception as _e:                                 # noqa: BLE001
     def _msg_text_obj(m):
         return str(getattr(m, "content", None) or "")
 GW_PULSE = os.path.join(LOCAL, "queue", "_gateway_pulse.txt")
-GATEWAY_RETRY_MIN_SEC = 2
-GATEWAY_RETRY_MAX_SEC = 60
-GATEWAY_STABLE_RUN_SEC = 60
 
 
 def _touch_pulse():
@@ -1067,12 +1064,10 @@ async def handle_message(m, chan_map, q, self_id=None):
     if _claude_off(rec["dept"]):
         # ★Claudeを閉じた部屋(2026-09-22 Chami直令)= 積まない。黙って捨てるのではなく
         #   「積まなかった」を毎便ログに残す= 後から数えられる(silent failにしない)。
-        delivery_open = False
         added = False
         log(f"受信[{rec['channel']}] msg={rec['msg_id']} Claude閉室({rec['dept']})"
             f"=queueへ積まない(優依のローカル生成経路はこのまま続く)")
     else:
-        delivery_open = True
         added = q.enqueue(json.dumps(rec, ensure_ascii=False), msg_id=rec["msg_id"],
                           dept=rec["dept"])
         st = q.stats()
@@ -1108,14 +1103,9 @@ async def handle_message(m, chan_map, q, self_id=None):
         #   「Claude側の既読とかは要らんからさ」)。要るのは中身が便として認識される配線で、
         #   ボスの投稿へ印を足すことではない。押さなかったと分かる形でだけ残す。
         log(f"Codex便=送信印は押さない msg={rec['msg_id']} dept={rec['dept']}")
-    elif ACTIVE_JOBS and delivery_open and _dept_allowed(rec["dept"]):
+    elif ACTIVE_JOBS and added and _dept_allowed(rec["dept"]):
         # A2: 送信印 (3段印の1段目=「届いた」の即可視化・裁定2026-07-18で移植)。
         # 並走中は鳩と二重押しになるが、同一Bot同一絵文字はDiscord側で1個に収束=無害。
-        # ★2026-09-24: `added` を条件にしない。同じDiscord便をCodex専用gatewayが先に
-        #   enqueueすると、主gateway側は重複(False)になり、Claudeの送信印だけ消えていた。
-        #   queueの重複排除は処理件数の契約、reactionは受領表示の契約で別物。同一Botの
-        #   同一reactionはDiscord側で1個に収束するため、再接続リプレイでも表示は増えない。
-        #   delivery_open は残すので、Claude閉室へ嘘の送信印を付けることもない。
         try:
             # ★受け手がCodexなら Codex印(uptsukiyomi)。札は enqueue に使った rec["dept"]
             #   そのもの= 拾う側(codex_responder)と同じ1枚を見る(上 sent_mark_for 参照)。
@@ -1306,56 +1296,15 @@ def run_gateway():
         await handle_message(m, chan_map, q, self_id=getattr(client.user, "id", None))
 
     try:
-        try:
-            client.run(token, log_handler=None)
-        except discord.errors.PrivilegedIntentsRequired:
-            log("ABORT: MESSAGE CONTENT INTENT が未設定です。Developer Portalで有効化が必要 "
-                "(Bot設定→Privileged Gateway Intents→MESSAGE CONTENT INTENT=ON)。")
-            return 2
-        except discord.errors.LoginFailure:
-            log("ABORT: Botトークンが無効です (local/discord_bot_token.txt を確認)。")
-            return 3
-        return 0
-    finally:
-        # client.run() が戻った後に同一プロセスで張り直すため、旧接続のDB handleを残さない。
-        try:
-            q.close()
-        except Exception as e:                              # noqa: BLE001
-            log(f"gateway終了時のqueue close失敗(再接続は継続): {type(e).__name__}")
-
-
-def serve_gateway_forever(run_once=None, sleep_fn=None, monotonic_fn=None):
-    """受信ループが戻ってもプロセスを終わらせず、上限付きbackoffで張り直す。
-
-    discord.py 自身も WebSocket を再接続するが、client.run() が例外終了または正常帰還した
-    場合は従来プロセスごと終わり、10分周期の外部supervisorまで受信口が空いた。
-    認証/Intent不備(2/3)だけは設定を直すべき恒久エラーなので再試行しない。
-
-    引数注入はDiscordへ繋がず故障経路を実行する回帰試験用。常駐では既定値だけを使う。
-    """
-    run_once = run_gateway if run_once is None else run_once
-    sleep_fn = time.sleep if sleep_fn is None else sleep_fn
-    monotonic_fn = time.monotonic if monotonic_fn is None else monotonic_fn
-    delay = GATEWAY_RETRY_MIN_SEC
-    while True:
-        started = monotonic_fn()
-        try:
-            rc = run_once()
-        except KeyboardInterrupt:
-            log("gateway停止指示を受けた。再接続せず終了する。")
-            return 130
-        except Exception as e:                              # noqa: BLE001
-            rc = 1
-            log(f"gateway受信ループが例外終了: {type(e).__name__}: {e}")
-        runtime = max(0.0, monotonic_fn() - started)
-        if rc in (2, 3):
-            return rc
-        log(f"gateway受信ループが終了(rc={rc})。{delay}秒後に同一プロセスで再接続する。")
-        sleep_fn(delay)
-        if runtime >= GATEWAY_STABLE_RUN_SEC:
-            delay = GATEWAY_RETRY_MIN_SEC
-        else:
-            delay = min(GATEWAY_RETRY_MAX_SEC, delay * 2)
+        client.run(token, log_handler=None)
+    except discord.errors.PrivilegedIntentsRequired:
+        log("ABORT: MESSAGE CONTENT INTENT が未設定です。Developer Portalで有効化が必要 "
+            "(Bot設定→Privileged Gateway Intents→MESSAGE CONTENT INTENT=ON)。")
+        return 2
+    except discord.errors.LoginFailure:
+        log("ABORT: Botトークンが無効です (local/discord_bot_token.txt を確認)。")
+        return 3
+    return 0
 
 
 def main():
@@ -1364,7 +1313,7 @@ def main():
     if not claim_singleton():
         return 0                        # 既に稼働中=正常終了(superviseが再起動を繰り返さない)
     try:
-        return serve_gateway_forever()
+        return run_gateway()
     finally:
         release_singleton()
 

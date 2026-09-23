@@ -24,7 +24,6 @@
   python scripts/queue/test_gateway_sendmark.py --mutate main    # 人間便の印を殺す→赤になるはず
   python scripts/queue/test_gateway_sendmark.py --mutate mirror  # ミラー便の印を殺す
   python scripts/queue/test_gateway_sendmark.py --mutate failopen  # 握り潰しを外す
-  python scripts/queue/test_gateway_sendmark.py --mutate dupe      # 重複時の印を殺す
   python scripts/queue/test_gateway_sendmark.py --mutate sendmsid  # Claude印のID照合を殺す
   python scripts/queue/test_gateway_sendmark.py --mutate sendmsanchor  # ID直撃を殺す
 終了コード: 0=全PASS / 1=FAILあり / 2=変異が当たらなかった(試験自体が無効)
@@ -72,10 +71,7 @@ MUTATIONS = {
     "failopen": ('            except Exception as e:\n'
                  '                log(f"送信印失敗(配達は継続): {type(e).__name__}")',
                  '            except Exception:\n'
-                  '                raise  # MUTANT'),
-    # Codex専用gatewayが先にenqueueした時の送信印を再び殺す(2026-09-24の実事故)。
-    "dupe": ('    elif ACTIVE_JOBS and delivery_open and _dept_allowed(rec["dept"]):',
-             '    elif ACTIVE_JOBS and added and _dept_allowed(rec["dept"]):  # MUTANT'),
+                 '                raise  # MUTANT'),
     # Codexの撃ち分けを殺す (2026-09-07 追加。再発時にここが赤くなる)
     # ★2026-09-16 引数が1つ増えた(content)ので狙いを「dept を渡す所」だけへ縮めた=
     #   以後も引数が増減して当たらなくなることがない。
@@ -219,17 +215,12 @@ def get_on_message(mod):
     """
     import discord
     real_run = discord.Client.run
-    real_close = mod.LeaseQueue.close
     holder = []
     discord.Client.run = lambda self, *a, **k: holder.append(self)
-    # 本番はclient.run帰還時にDBを閉じる。試験は帰還後に捕まえたhandlerを実行するためだけ
-    # handleを残す(外へ出る手の差し替えで、受信分岐そのものは本物のまま)。
-    mod.LeaseQueue.close = lambda self: None
     try:
         rc = mod.run_gateway()
     finally:
         discord.Client.run = real_run
-        mod.LeaseQueue.close = real_close
     if rc or not holder:
         print("run_gateway が接続前に落ちた (rc=%s)。試験が無効。" % rc)
         sys.exit(2)
@@ -361,15 +352,6 @@ def main(argv):
         check("6 Claude印(sendms)は押されていない", sendms not in m8.pushed)
         check("6 便は dept=codex で queue に入っている", queued_dept(loc, "8") == "codex",
               "-> %r" % (queued_dept(loc, "8"),))
-
-        # ★2026-09-24 実事故: Codex専用gatewayが同じmsg_idを先に入れると主gatewayの
-        # enqueueはFalse(重複)になる。処理は1件に収束させたまま、受領表示は必ず押す。
-        m8_dupe = FakeMsg(8, "@ボス これ見てくれ", chami, ch, gc)
-        asyncio.run(on_message(m8_dupe))
-        check("6 重複enqueueでも Send_MS_Boss を押す",
-              m8_dupe.pushed[:1] == [boss_ms], "-> %r" % (m8_dupe.pushed,))
-        check("6 重複enqueueでもqueue行は1件に収束",
-              queued(loc).count("8") == 1, "-> %r" % (queued(loc),))
 
         # 召喚されていない普通の便は今までどおり sendms (撃ち分けが逆流していないこと)
         m9 = FakeMsg(9, "ボスの話をしただけの便", chami, ch, gc)
