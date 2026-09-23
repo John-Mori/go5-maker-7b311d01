@@ -1105,7 +1105,7 @@ _SELF_TAIL_RE = re.compile(r"^(?:だ|です|である|でございます|だぜ|
 _SELF_NAME_MAX_LINES = 3        # 頭の何行まで名乗りを探すか(本文中の言及を拾わない線)
 
 
-def self_named_speaker(text, roster):
+def self_named_speaker(text, roster, aliases=None):
     """本文が**頭で自分から名乗っている**部屋の人格名を返す。決められなければ None。
 
     なぜ要るか(実物 2026-09-19 manga-shorts msg 1550851084782800968 /
@@ -1124,6 +1124,11 @@ def self_named_speaker(text, roster):
     None を返す条件(=決めない):
       - 頭 _SELF_NAME_MAX_LINES 行に名乗りが無い / 2人ぶん以上見つかる(決められない)
       - 引用・コード・パスの中にしか無い(_mask_protected で潰してから探す)
+    aliases: {愛称: 正式名} (任意・2026-09-23)。
+      実物= copy-director msg 1551994215381078138。本文は「三笘だ。」と名乗っていたのに
+      正式名「三笘薫」でしか照合しなかったため取りこぼし、既定の早坂芽衣名義で出た
+      (Chami「表示芽衣だけど、三笘さんですか?」)。愛称でも名乗りなら正式名で返す。
+      ★正式名が roster に在る愛称だけ使う(名簿の外へは出さない)。英字の愛称は使わない。
     """
     try:
         if not roster:
@@ -1132,8 +1137,13 @@ def self_named_speaker(text, roster):
         head = "\n".join(lines[:_SELF_NAME_MAX_LINES + 2])
         s = _mask_protected(head)
         found = set()
-        for name in roster:
-            nm = str(name or "")
+        cands = [(str(n or ""), str(n or "")) for n in roster]
+        for al, formal in dict(aliases or {}).items():
+            al = str(al or "")
+            if (formal in roster and len(al) >= 2
+                    and not re.fullmatch(r"[\x00-\x7f]+", al)):
+                cands.append((al, formal))
+        for nm, formal in cands:
             if not nm:
                 continue
             i = 0
@@ -1143,7 +1153,7 @@ def self_named_speaker(text, roster):
                     break
                 if (_SELF_LEAD_RE.search(s[:i])
                         and _SELF_TAIL_RE.match(s[i + len(nm):])):
-                    found.add(nm)
+                    found.add(formal)
                     break
                 i += len(nm)
         if len(found) == 1:

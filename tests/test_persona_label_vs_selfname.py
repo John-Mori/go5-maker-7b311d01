@@ -107,10 +107,27 @@ for _name, _t, _exp in (
     check("⑩%s" % _name, tg.self_named_speaker(_t, ROSTER) == _exp)
 
 
+# --- 2b) 愛称の名乗り(2026-09-23 実物= copy-director msg 1551994215381078138) ----------
+_CD = ["早坂芽衣", "三笘薫"]
+_AL = {"mei": "早坂芽衣", "芽衣": "早坂芽衣", "早坂": "早坂芽衣",
+       "三笘": "三笘薫", "みとま": "三笘薫", "ミトマ": "三笘薫", "mitoma": "三笘薫"}
+_real = "完成まで通した。Chamiへ1本で返す。\n\n---\n\n三笘だ。パタちドパ、**.ymmp焼き切った**。"
+check("⑩b 実物: 愛称「三笘だ」から正式名の三笘薫を引ける",
+      tg.self_named_speaker(_real, _CD, _AL) == "三笘薫")
+check("⑩c 愛称を渡さなければ従来どおり(後方互換)",
+      tg.self_named_speaker(_real, _CD) is None)
+check("⑩d 正式名での名乗りは愛称と二重に数えない",
+      tg.self_named_speaker("三笘薫だ。了解した。", _CD, _AL) == "三笘薫")
+check("⑩e 名簿の外の正式名を指す愛称は使わない",
+      tg.self_named_speaker("ククールだ。", _CD, {"ククール": "ククール"}) is None)
+check("⑩f 愛称の言及だけ(名乗りでない)は拾わない",
+      tg.self_named_speaker("三笘の案を見た。悪くない。", _CD, _AL) is None)
+
+
 # --- 3) 配線= dept_daemon の送信前ループが F-2 を実際に呼んでいる --------------------
 _src = open(os.path.join(PJ, "scripts", "llm", "dept_daemon.py"), encoding="utf-8").read()
 check("⑪ゲートF-2が送信前ループに配線されている(呼び出しが消えたらここが赤くなる)",
-      "audit_self_named(self.dept, _speaker, _part, _roster, rec)" in _src)
+      "audit_self_named(self.dept, _speaker, _part, _roster, rec," in _src)
 check("⑫F-2は口調ゲートC/Dより手前に在る(名義を直してから口調を見る)",
       _src.index("audit_self_named(self.dept") < _src.index("audit_naming(self.dept, _speaker, _part, rec)"))
 check("⑬機械名義の便は対象外(機械の告知を人格名義へ動かさない)",

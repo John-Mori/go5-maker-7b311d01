@@ -5977,7 +5977,7 @@ def audit_speaker(dept, persona, text, roster, rec=None):
         return None              # fail-open= 転んだら従来どおり
 
 
-def audit_self_named(dept, persona, text, roster, rec=None):
+def audit_self_named(dept, persona, text, roster, rec=None, aliases=None):
     """出力ゲートF-2= **タグが無い便**の名義を、本文の名乗りから直す(2026-09-20)。
 
     ★ゲートF(audit_speaker)は `[名前]` で名乗った便だけが対象= **タグが無い便は素通り**
@@ -5998,7 +5998,7 @@ def audit_self_named(dept, persona, text, roster, rec=None):
     try:
         if _tone_gate is None or not roster:
             return None
-        who = _tone_gate.self_named_speaker(text, roster)
+        who = _tone_gate.self_named_speaker(text, roster, aliases)   # aliases= 2026-09-23 「三笘だ」の取りこぼし
         if not who or (persona and _tone_gate._norm(who) == _tone_gate._norm(persona)):
             return None
         log(dept, f"★出力ゲートF-2(名乗りとタグの欠落): タグが無く既定の{persona}で出ようとしたが、"
@@ -11055,6 +11055,10 @@ class Daemon:
             #     ★割らない・前置きも落とさない= 単独部屋の挙動はタグ1行以外1ミリも変えない。
             _roster = [str(p.get("persona") or "")
                        for p in (self.conf.get("personas") or ()) if p.get("persona")]
+            # ★愛称→正式名(ゲートF-2が「三笘だ」等の愛称の名乗りも拾うため・2026-09-23)
+            _alias_map = {str(a): str(p.get("persona"))
+                          for p in (self.conf.get("personas") or ()) if p.get("persona")
+                          for a in (p.get("aliases") or ())}
             # ★resolve は1本だけ組んで上流(分割/剥がし)と下流(出力ゲートE)で**同じ物**を使う
             #   = 名義の判定を2箇所に持たない(ORG-11)。
             self._liveblog_notice = False   # ★便ごとに必ず初期化(前の便の判定を持ち越さない)
@@ -11133,7 +11137,8 @@ class Daemon:
                 #   ★機械名義の便(_speaker=MACHINE_PERSONA)は対象外= 機械の告知を
                 #     人格名義へ動かさない(2026-07-28 Chami指摘「精霊には喋らさないで」)。
                 elif not self.machine_named():
-                    _self_who = audit_self_named(self.dept, _speaker, _part, _roster, rec)
+                    _self_who = audit_self_named(self.dept, _speaker, _part, _roster, rec,
+                                                 aliases=_alias_map)
                     if _self_who:
                         _who = _self_who
                         _speaker = _self_who
