@@ -2381,7 +2381,7 @@ DEPT_CONF = {
         #   「品質を落とした節約」になり規約違反(Chami「品質を落とさないことが最重要」2026-07-21)。
         #   ★引き継ぎの生成(_write_handoff)と交代後の自己確認も**同じモデル**で走る
         #     (安いモデルで引き継ぎを書くと、1週間の連鎖の**最弱点がそこになる**)。
-        "relay_model": "claude-opus-5",  # 2026-08-04 Chami「研究室は特にopus5に上げといて」(msg 1534105086224105532)。研究室HQのrelay=この司令塔セッションをOpus5へ。旧"opus"(=pinで4-8)から明示のopus5へ
+        "relay_model": "claude-opus-5-5",  # 2026-08-04 Chami「研究室は特にopus5に上げといて」(msg 1534105086224105532)。研究室HQのrelay=この司令塔セッションをOpus5へ。旧"opus"(=pinで4-8)から明示のopus5へ。★2026-09-23 Chami直令(msg 1552038514223353877)「標準でOpus5ですることは全てOpus5.5で行うように」= claude-opus-5 → claude-opus-5-5
         "boot_note": (
             "■この部屋の性格(必ず守る)\n"
             "- **ここは研究室HQ=全プロジェクト横断の司令塔**だ。主はシャビ・アロンソ(GL・敬語なし)。\n"
@@ -3380,8 +3380,8 @@ DEPT_CONF = {
         #     ただし**効き目は7日で1本**= 「入れた」を「効いた」と読むな。
         #   ★値5から上げるな= `_coalesce_hold` は毎便この秒数だけ黙って待つ。狙いは after_run 側。
         "coalesce_sec": 5,
-        "work_model": "claude-opus-5",    # 2026-08-04 Chami「研究室は特にopus5に上げといて」(msg 1534105086224105532)。旧"opus"(=2026-07-31 Chami直命令・pinで4-8)から明示opus5へ
-        "relay_model": "claude-opus-5",   # 2026-08-04 同号令。イージス研究室のGL relayセッション(旧: 未指定=RELAY_MODEL既定。★2026-07-29以降その既定はopus・pinで4-8。「sonnet既定」と書いていたのは誤り・2026-08-18訂正)をopus5へ引き上げ
+        "work_model": "claude-opus-5-5",    # 2026-08-04 Chami「研究室は特にopus5に上げといて」(msg 1534105086224105532)。旧"opus"(=2026-07-31 Chami直命令・pinで4-8)から明示opus5へ。★2026-09-23 Chami直令(msg 1552038514223353877)で claude-opus-5 → claude-opus-5-5
+        "relay_model": "claude-opus-5-5",   # 2026-08-04 同号令。イージス研究室のGL relayセッション(旧: 未指定=RELAY_MODEL既定。★2026-07-29以降その既定はopus・pinで4-8。「sonnet既定」と書いていたのは誤り・2026-08-18訂正)をopus5へ引き上げ。★2026-09-23 Chami直令で claude-opus-5 → claude-opus-5-5
         "session_relay": True,   # 会話便だけを部屋の永続セッションへ(DEPT_CONF冒頭の説明参照)
         "personas": [
             {"persona": "ケヴィン・デブライネ",
@@ -3628,7 +3628,7 @@ DEPT_CONF = {
         #   →「違う。改修α、βの部屋をそのまんま」)が、前便のackの3〜11秒前に着いて**全部別便**になった。
         #   ★値5から上げるな= `_coalesce_hold` は毎便この秒数だけ黙って待つ。狙いは after_run 側。
         "coalesce_sec": 5,
-        "relay_model": "claude-opus-5",  # 2026-08-04 Chami「研究室は特にopus5に上げといて」(msg 1534105086224105532)。AD研究室のGL relayセッション(旧: 未指定=RELAY_MODEL既定。★2026-07-29以降その既定はopus・pinで4-8。「sonnet既定」と書いていたのは誤り・2026-08-18訂正)をopus5へ
+        "relay_model": "claude-opus-5-5",  # 2026-08-04 Chami「研究室は特にopus5に上げといて」(msg 1534105086224105532)。AD研究室のGL relayセッション(旧: 未指定=RELAY_MODEL既定。★2026-07-29以降その既定はopus・pinで4-8。「sonnet既定」と書いていたのは誤り・2026-08-18訂正)をopus5へ。★2026-09-23 Chami直令(msg 1552038514223353877)で claude-opus-5 → claude-opus-5-5
         "forward_all": True,   # 総括本部なので全便を研究室(Vol.9セッション)へ回す=hqと同じ理由
         # ★2026-07-26 relay化(最後の1部屋)。Chami「**デーモンが処理するのはもうやめたい。
         #   こういう放置が治らないから**」「止めて良いよ、そっちも最も改善して欲しい」。
@@ -5258,7 +5258,8 @@ def work_relay_model(rec, dept, is_work):
 #   ★判定は増やさない= 述語はここ1本のまま(ORG-11)。返り値に理由を足しただけで、
 #     `work_relay_model` は今までどおりモデル名だけを返す(既存の呼び口と検査は不変)。
 _WORK_RELAY_REASONS = ("ok", "not_work", "not_listed", "chami", "marker", "error",
-                       "too_short", "no_history")
+                       "too_short", "no_history",
+                       "jev_ok", "jev_unsafe", "jev_low_confidence", "jev_error")
 
 
 # ★★2026-08-25 イージス研究室(発注= 研究室HQ `DISPATCH-aegis-gl-1787585184396` の「モデル切替の
@@ -5404,13 +5405,100 @@ def _switch_pays_off(dept, author):
         return (False, "no_history")             # 判定不能=下げない(品質側へ倒す)
 
 
+# ★2026-09-22 platform-se(Jev確信度合流・狭い版パイロット・発注= カスミ
+#   DISPATCH-platform-se-1789740520050→アロンソ研究室HQ裁定 DISPATCH-platform-se-1790060897044)。
+#   history_scan_v2パイロット(同じ2026-09-18の発注だが窓バグ修正=別件)とは**名称も対象も別**。
+#   こちらは内容の確信度信号をwork_relay_decideへ追加で合流させる方の元案。
+#   ★対象は `jev_confidence_depts`(_model_override.json)に列挙された部屋だけ=1部屋パイロット。
+#     列挙されない部屋はこの関数を呼ばれない=挙動0変化(ORG-11と同じ形)。
+#   ★state(本文)を外部API(TypeSafe)へ送るのは、既にkw_work=True(作業便)と判定済みの母集団だけ。
+#     会話便(is_work=False)には触らない・他部屋のホットパスに新しいスキャンを足さない。
+#   ★choice/criteriaの中身(何を安全とみなすか)の設計は中野五月(llm-edu)の持ち場として引き継ぎ済み。
+#     ここに置く既定の2択(safe/unsafe)は配線を通すための暫定値= 差し替えは
+#     _JEV_DOWNGRADE_QUESTION を書き換えるだけでよい形にしてある。
+_JEV_DOWNGRADE_QUESTION = {
+    "downgrade_safety": {
+        "type": "choice",
+        "instructions": "この作業依頼は、安価なモデルに任せても品質が保てる定型的な内容か",
+        "criteria": {
+            "safe": "定型的・機械的で、安価なモデルでも品質が保てる作業依頼",
+            "unsafe": "複雑・重要・文脈依存で、安価なモデルでは品質が落ちる恐れがある作業依頼",
+        },
+    },
+}
+_JEV_MIN_CONFIDENCE = 0.7                            # ★フォールバック既定。★本番の閾値はここに
+#   焼かず、_model_override.json の `jev_min_confidence` から都度読む(下の _jev_min_confidence)。
+#   30件の当て比べ(2026-09-22・アロンソ研究室HQ)で境目は0.6付近と出たが、①標本が少ない
+#   (100件規模で引き直す前提)②当て比べは work/talk 分類の確信度で、こちらの問い(downgrade
+#   の安全性)とは軸が別。だから定数へ焼かず外から動かせる形にした(デブライネ指摘・イージス研究室)。
+
+
+def _jev_min_confidence():
+    """本番の確信度しきい値。_model_override.json の `jev_min_confidence` を読み、
+    未設定・範囲外(0〜1の外)・壊れた値なら _JEV_MIN_CONFIDENCE(0.7)へ倒す(fail-safe)。
+    """
+    try:
+        doc = _model_override_doc() or {}
+        v = doc.get("jev_min_confidence")
+        if v is None:
+            return _JEV_MIN_CONFIDENCE
+        f = float(v)
+        return f if 0.0 <= f <= 1.0 else _JEV_MIN_CONFIDENCE
+    except Exception:                                # noqa: BLE001
+        return _JEV_MIN_CONFIDENCE
+
+
+def _jev_confidence_depts():
+    try:
+        doc = _model_override_doc() or {}
+        v = doc.get("jev_confidence_depts") or []
+        return set(str(x) for x in v) if isinstance(v, list) else set()
+    except Exception:                                # noqa: BLE001
+        return set()
+
+
+def _jev_downgrade_ok(dept, rec):
+    """Jev(TypeSafe)へ「この作業便は安価なモデルへ回して安全か」を1回だけ尋ねる。
+
+    戻り= (True, "jev_ok") / (False, "jev_unsafe") / (False, "jev_low_confidence")
+          / (False, "jev_error")。
+    ★呼ぶのは `jev_confidence_depts` に列挙された部屋だけ(このパイロットの対象外は呼ばれない)。
+    ★キー未設置・timeout・非200・空応答・低確信は**全部 jev_error/jev_low_confidence へ倒し、
+      下げない**(fail-open=迷ったらOpus・§1)。例外はここで止めて呼び側へ漏らさない。
+    """
+    try:
+        sys.path.insert(0, os.path.join(LOCAL, "jev"))
+        import jev_client                            # noqa: E402
+    except Exception:
+        return (False, "jev_error")
+    try:
+        content = str((rec or {}).get("content") or "").strip()[:4000]
+        if not content:
+            return (False, "jev_error")
+        answers = jev_client.ask(content, _JEV_DOWNGRADE_QUESTION)
+        if not answers:
+            return (False, "jev_error")
+        a = answers.get("downgrade_safety") or {}
+        choice = str(a.get("choice") or "")
+        conf = float(a.get("confidence") or 0)
+        if choice != "safe":
+            return (False, "jev_unsafe")
+        if conf < _jev_min_confidence():
+            return (False, "jev_low_confidence")
+        return (True, "jev_ok")
+    except Exception:                                # noqa: BLE001
+        return (False, "jev_error")
+
+
 def work_relay_decide(rec, dept, is_work):
     """②の判定を (モデル名 or None, 理由1語) で返す。**この関数が述語の正本**。
 
     理由の語= "ok"(落とす) / "not_work"(作業便でない) / "not_listed"(②の名簿に無い部屋)
               / "chami"(Chami本人の便) / "marker"(🔥・炎上・インシデント) / "error"(判定不能)
-              / ★"too_short"・"no_history"(2026-08-25 追加= 切替の固定費の元が取れない便)。
-    ★"ok" 以外は全部 None= 落とさない(迷ったら高い方で回す・§1の優先順)。
+              / ★"too_short"・"no_history"(2026-08-25 追加= 切替の固定費の元が取れない便)
+              / ★"jev_ok"・"jev_unsafe"・"jev_low_confidence"・"jev_error"
+                (2026-09-22 追加= Jev確信度合流・狭い版パイロット。列挙された部屋だけ)。
+    ★"ok"/"jev_ok" 以外は全部 None= 落とさない(迷ったら高い方で回す・§1の優先順)。
     ★理由を**記録するのは呼び口の仕事**(この関数は書かない=純粋なまま検査できる)。
     """
     try:
@@ -5430,6 +5518,11 @@ def work_relay_decide(rec, dept, is_work):
         ok, why = _switch_pays_off(dept, (rec or {}).get("author"))
         if not ok:
             return (None, why)
+        if str(dept or "") in _jev_confidence_depts():
+            jok, jwhy = _jev_downgrade_ok(dept, rec)
+            if not jok:
+                return (None, jwhy)
+            return (m, jwhy)
         return (m, "ok")
     except Exception:
         return (None, "error")                       # 判定不能=落とさない(Opusのまま)
@@ -6511,6 +6604,37 @@ def strip_meta(dept, rec, reply):
                 except Exception:
                     pass
                 reply = _b4
+        except Exception:
+            pass             # 切り落としで転んでも以降の剥ぎは当てる
+        # ★出力ゲートE-5(自己申告メモの丸ごと抑止・2026-09-23 プラットフォームSE / DEF-platform-se-8f7599cc3c)。
+        #   実物= send_audit msg 1551880577232277526「(これは作業メモで、部屋への投稿ではありません…)」。
+        #   本文自身が「投稿ではない」と宣言していたら**本文まるごと**空にする(前置きの実況段落ごと)。
+        #   ★空になったらすぐ下の「生成失敗」が拾う= 部屋へ出さず、便も閉じず、作り直しへ回る。
+        #   ★引用(「」『』の中)・``` の中は対象外= この事故を部屋で論じる便は素通し(検査で固定)。
+        try:
+            _b5, _h5 = _meta_strip.strip_selfdeclared_memo(reply)
+            if _h5:
+                log(dept, f"★出力ゲートE-5(自己申告メモ): 本文まるごと抑止 "
+                          f"マーカー={_h5[0].get('marker')} 該当={_h5[0].get('line', '')[:60]} "
+                          f"msg={str((rec or {}).get('msg_id', ''))}"
+                          + "  ※本文が空になった=この便は投稿ではないと本人が宣言している")
+                try:
+                    os.makedirs(os.path.dirname(META_AUDIT), exist_ok=True)
+                    with open(META_AUDIT, "a", encoding="utf-8") as f:
+                        f.write(json.dumps({
+                            "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                            "dept": dept,
+                            "event": "selfdeclared_memo",
+                            "source": "daemon",
+                            "msg_id": str((rec or {}).get("msg_id", "")),
+                            "markers": [h.get("marker") for h in _h5],
+                            "stripped": [h.get("line") for h in _h5],
+                            "emptied": True,
+                            "before": str(reply or "")[:400],
+                        }, ensure_ascii=False) + "\n")
+                except Exception:
+                    pass
+                reply = _b5
         except Exception:
             pass             # 切り落としで転んでも以降の剥ぎは当てる
         body, hits = _meta_strip.strip_meta_tail(reply)

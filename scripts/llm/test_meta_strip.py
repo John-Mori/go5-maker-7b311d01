@@ -94,6 +94,7 @@ def main():
 
     _narration_tests()
     _orphan_fence_tests()
+    _memo_tests()
 
     print("\n%d PASS / %d FAIL" % (_PASS, _FAIL))
     return 1 if _FAIL else 0
@@ -281,6 +282,99 @@ def _orphan_fence_tests():
            alt_strip_no_balance_check(ORPHAN)[0] == ORPHAN_BODY)
     _check("[must-fail] 均衡ガードを外すと正しいコードブロックの閉じ ``` まで剥ぐ=このガードが効いている",
            alt_strip_no_balance_check(balanced)[0] != balanced)
+
+
+# ============================================================================
+# 自己申告メモの丸ごと抑止(2026-09-23・プラットフォームSE / DEF-platform-se-8f7599cc3c)
+# ----------------------------------------------------------------------------
+# 陽性の入力は**実物のコピー**= local/llm/send_audit.jsonl msg 1551880577232277526
+#   (漏れた作業メモそのもの。作業実況2段落 + 末尾に自己申告の丸括弧行)。
+# 陰性の実物= 直後の謝罪便 msg 1551884541915037698(「作業メモ」を「」で括って論じている)。
+#   → 恒久対策がこの謝罪便を巻き込んで消したら、事故を論じる便が消える=それこそ事故。固定する。
+# ============================================================================
+
+MEMO_SPEC = ("閾値外出しの載せ替え確認と台帳記帳を背景タスク b9g7f95rs に任せ、完了通知を待ちます。"
+             "Jev合流の配線自体は現行常駐(pid 19172・328433fc52e7)で既に稼働中で、外出し分は"
+             "既定値0.7が同一のため反映待ちでも挙動は変わりません。完了を確認してから、"
+             "研究室HQへの1行を含む返信を1本だけ出します。\n\n"
+             "*(これは作業メモで、部屋への投稿ではありません。載せ替え＋記帳の確認後に "
+             "`[一ノ瀬怜]` の返信を送ります。)*")
+
+MEMO_APOLOGY = ("あなたの指摘のとおりです。あの「作業メモ」、部屋へそのまま出ていました。"
+                "投稿にならない前提で書いた私のミスです。私が打つ文字は全部この部屋へ届く——"
+                "そう扱いますわ。以後、内輪メモを返信本文に混ぜません。出すのは実のある1本だけにします。")
+
+
+def _memo_tests():
+    # --- 陽性: 実物の作業メモは本文まるごと抑止される ---------------------
+    body, hits = meta_strip.strip_selfdeclared_memo(MEMO_SPEC)
+    _check("実物の自己申告メモは丸ごと抑止(空を返す)", body == "" and len(hits) == 1)
+    _check("抑止の理由が記録に残る",
+           bool(hits) and hits[0]["marker"] in ("memo_not_post", "not_a_room_post"))
+
+    # --- 陰性: 剥いではいけないもの(誤爆=事故を論じる便が消える) ---------
+    _check("謝罪便(「作業メモ」を引用して論じている)は1文字も変えない",
+           meta_strip.strip_selfdeclared_memo(MEMO_APOLOGY) == (MEMO_APOLOGY, []))
+
+    quoted = ('デブライネ、漏れた原文=「これは作業メモで、部屋への投稿ではありません」。'
+              'この形を機構で止める。')
+    _check("引用符「」の中の宣言は抑止しない",
+           meta_strip.strip_selfdeclared_memo(quoted) == (quoted, []))
+
+    bq = "報告です。\n> これは作業メモで、部屋への投稿ではありません"
+    _check("引用ブロック(>)の中の宣言は抑止しない",
+           meta_strip.strip_selfdeclared_memo(bq) == (bq, []))
+
+    fenced = "貼ります。\n```\nこれは作業メモで、部屋への投稿ではありません\n```"
+    _check("コードブロックの中の宣言は抑止しない",
+           meta_strip.strip_selfdeclared_memo(fenced) == (fenced, []))
+
+    normal = "怜、②受け取った。実物を見て測った。1本だけ返すわ。"
+    _check("宣言が無ければ1文字も変えない",
+           meta_strip.strip_selfdeclared_memo(normal) == (normal, []))
+
+    mixne = "以後、内輪メモを返信本文に混ぜません。出すのは1本だけにします。"
+    _check("『メモを混ぜません』は投稿否定ではない=素通し",
+           meta_strip.strip_selfdeclared_memo(mixne) == (mixne, []))
+
+    # --- fail-open: どんな入力でも例外を投げない --------------------------
+    ok = True
+    for bad in (None, 123, {"a": 1}, [], "", "   \n  "):
+        try:
+            meta_strip.strip_selfdeclared_memo(bad)
+        except Exception:                                  # noqa: BLE001
+            ok = False
+    _check("壊れた入力でも例外を投げない", ok)
+
+    # --- 本物の合流点(dept_daemon.strip_meta)を**実行で**通す(C-053) ----
+    #   外向きの手(投稿)は差し替えず、実際の剥ぎ経路そのものへ検体を流す。
+    import dept_daemon as dd                               # noqa: E402
+    rec = {"msg_id": "TEST-memo"}
+    _check("常駐の合流点strip_metaに通すと検体は空になる(=生成失敗で送られない)",
+           dd.strip_meta("platform-se", rec, MEMO_SPEC) == "")
+    _check("常駐の合流点strip_metaに通すと謝罪便は残る(=素通し)",
+           dd.strip_meta("platform-se", rec, MEMO_APOLOGY) == MEMO_APOLOGY)
+
+    # --- must-fail(C-053): **動く別実装**を当てて、壊れる側を1つ固定する ---
+    #   別実装= 引用ガードを標準の _QUOTE_OPEN(丸括弧 (（ を**含む**)で行う版。
+    #   検体はメモを丸括弧で囲っている= 丸括弧を引用扱いにすると**検体を取り逃がす**。
+    #   これで「引用ガードから丸括弧を外した判断」が効いていることを1つ固定する。
+    def alt_with_standard_quote_guard(text):
+        s = str(text or "")
+        for ln in s.splitlines():
+            b = ln.lstrip(meta_strip._DECOR)
+            if b.lstrip().startswith(">"):
+                continue
+            for name, rx in meta_strip._MEMO_NOTPOST:
+                m = rx.search(b)
+                if m and not any(q in b[:m.start()] for q in meta_strip._QUOTE_OPEN):
+                    return "", [{"marker": name}]
+        return s, []
+
+    _check("[must-fail] 標準の引用ガード(丸括弧込み)だと検体を取り逃がす=丸括弧を外した判断が効いている",
+           alt_with_standard_quote_guard(MEMO_SPEC) == (MEMO_SPEC, []))
+    _check("[must-fail] 本実装は同じ検体を抑止できる(=正しい実装である)",
+           meta_strip.strip_selfdeclared_memo(MEMO_SPEC)[0] == "")
 
 
 if __name__ == "__main__":

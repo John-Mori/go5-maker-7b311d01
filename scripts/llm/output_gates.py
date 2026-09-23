@@ -222,6 +222,24 @@ def apply_naming_gate_only(dept, persona, text, source="dispatch", msg_id="",
                     "cut": False, "before": s[:200]}])
     except Exception:
         pass            # 記録で転んでも便は止めない(fail-open)
+    # ★2026-09-23(プラットフォームSE)自己申告メモ(DEF-platform-se-8f7599cc3c)も投函経路で**見る**。
+    #   常駐(経路①)とミラー(経路②)は空にして止めるが、投函経路のこの関数は呼称ゲートCだけでE系は
+    #   切らない設計(便は書式が情報)。ここでは**記録だけ**残し、投函便でこの形が出るかを実測する。
+    #   event=selfdeclared_memo_warn / source=dispatch が実物で出たら、その実物を見て切りへ上げる。
+    try:
+        if _meta_strip is not None and hasattr(_meta_strip, "strip_selfdeclared_memo"):
+            _mcut, _mh = _meta_strip.strip_selfdeclared_memo(s)
+            if _mh:
+                summary["selfdeclared_memo_warn"] = len(_mh)
+                _append(META_AUDIT, [{
+                    "ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "dept": dept,
+                    "event": "selfdeclared_memo_warn", "source": source,
+                    "persona": str(persona or ""), "msg_id": str(msg_id or ""),
+                    "markers": [h.get("marker") for h in _mh],
+                    "line": _mh[0].get("line") or "",
+                    "cut": False, "before": s[:200]}])
+    except Exception:
+        pass            # 記録で転んでも便は止めない(fail-open)
     try:
         rules = _rules("naming")
         if _naming_gate is None or not rules:
@@ -463,6 +481,27 @@ def apply_gates(dept, persona, text, source="mirror", msg_id="", fix=None, ask=N
                         "warned": False, "before": excerpt_before}])
     except Exception:
         pass            # 切り落としで転んでも以降のゲートは当てる
+
+    # --- ゲートE-5(自己申告メモの丸ごと抑止)= 2026-09-23 プラットフォームSE ---
+    #   炎上 DEF-platform-se-8f7599cc3c / C-038。常駐(経路①)と**同じ純関数**(C-064)。
+    #   実物= send_audit msg 1551880577232277526「(これは作業メモで、部屋への投稿ではありません…)」。
+    #   本文自身が「投稿ではない」と宣言していたら本文まるごと空にして送らない(便は書式が情報だが、
+    #   これは書式ではなく**本人が投稿ではないと言っている**ので、envelope_echo と同じく空を返す)。
+    try:
+        if _meta_strip is not None:
+            mcut, mhits = _meta_strip.strip_selfdeclared_memo(s)
+            if mhits:
+                summary["selfdeclared_memo"] = len(mhits)
+                summary["meta_emptied"] = True
+                _append(META_AUDIT, [{
+                    "ts": ts, "dept": dept, "event": "selfdeclared_memo", "source": source,
+                    "persona": str(persona or ""), "msg_id": str(msg_id or ""),
+                    "markers": [h.get("marker") for h in mhits],
+                    "stripped": [h.get("line") for h in mhits],
+                    "emptied": True, "before": excerpt_before}])
+                return "", summary
+    except Exception:
+        pass            # 抑止で転んでも以降のゲートは当てる
 
     # --- 実況漏れ(名乗りも声も無い生ログ)= **警告のみ** ------------------
     # ★2026-09-01 イージス研究室。常駐(経路①)と**同じ検知器**(meta_strip.detect_narration_leak)。
