@@ -5462,6 +5462,35 @@ def _jev_confidence_depts():
         return set()
 
 
+JEV_DECISIONS = os.path.join(LOCAL, "jev", "decisions.jsonl")
+
+
+def _jev_log_decision(dept, msg_id, choice, conf, min_conf, reason, content):
+    """Jevの判定を1件 local/jev/decisions.jsonl へ追記する(発注= 研究室HQ 1552312311186853922)。
+
+    ★なぜ要るか= work_audit には "jev_unsafe" の1語しか残らず、「正しく止めた」のか
+      「質問文が厳しすぎて常に unsafe」なのかを後から仕分けできない。判定の中身(choice/
+      confidence/その時のしきい値)を1行ずつ残して、2日分たまったらHQが仕分ける。
+    ★判定結果と所要時間に影響させない= 失敗は握りつぶす(fail-open・§1)。外部へは送らない(ローカル追記だけ)。
+    ★jev_error便(キー無し・空応答・例外)も reason=jev_error で残す。choice/confidence は null でよい。
+    """
+    try:
+        os.makedirs(os.path.dirname(JEV_DECISIONS), exist_ok=True)
+        with open(JEV_DECISIONS, "a", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),   # ローカル時刻=JST(このPC)
+                "dept": str(dept or ""),
+                "msg_id": str(msg_id or ""),
+                "choice": choice,                            # "safe"/"unsafe"/…、未取得は None
+                "confidence": conf,                          # 0〜1、未取得は None
+                "min_conf": min_conf,                        # その時のしきい値、未到達は None
+                "reason": str(reason or ""),                 # 返り値の語
+                "head": str(content or "")[:80],             # 本文先頭80字
+            }, ensure_ascii=False) + "\n")
+    except Exception:                                # noqa: BLE001
+        pass                                         # 監査の失敗で判定を巻き添えにしない
+
+
 def _jev_downgrade_ok(dept, rec):
     """Jev(TypeSafe)へ「この作業便は安価なモデルへ回して安全か」を1回だけ尋ねる。
 
@@ -5470,28 +5499,41 @@ def _jev_downgrade_ok(dept, rec):
     ★呼ぶのは `jev_confidence_depts` に列挙された部屋だけ(このパイロットの対象外は呼ばれない)。
     ★キー未設置・timeout・非200・空応答・低確信は**全部 jev_error/jev_low_confidence へ倒し、
       下げない**(fail-open=迷ったらOpus・§1)。例外はここで止めて呼び側へ漏らさない。
+    ★どの分岐でも decisions.jsonl へ1行残す(発注= 研究室HQ 1552312311186853922・§4.55の仕分け材料)。
     """
+    msg_id = str((rec or {}).get("msg_id") or "")
+    content = str((rec or {}).get("content") or "").strip()
+    choice = None
+    conf = None
+    min_conf = None
     try:
         sys.path.insert(0, os.path.join(LOCAL, "jev"))
         import jev_client                            # noqa: E402
     except Exception:
+        _jev_log_decision(dept, msg_id, choice, conf, min_conf, "jev_error", content)
         return (False, "jev_error")
     try:
-        content = str((rec or {}).get("content") or "").strip()[:4000]
         if not content:
+            _jev_log_decision(dept, msg_id, choice, conf, min_conf, "jev_error", content)
             return (False, "jev_error")
-        answers = jev_client.ask(content, _JEV_DOWNGRADE_QUESTION)
+        answers = jev_client.ask(content[:4000], _JEV_DOWNGRADE_QUESTION)
         if not answers:
+            _jev_log_decision(dept, msg_id, choice, conf, min_conf, "jev_error", content)
             return (False, "jev_error")
         a = answers.get("downgrade_safety") or {}
         choice = str(a.get("choice") or "")
         conf = float(a.get("confidence") or 0)
+        min_conf = _jev_min_confidence()
         if choice != "safe":
+            _jev_log_decision(dept, msg_id, choice, conf, min_conf, "jev_unsafe", content)
             return (False, "jev_unsafe")
-        if conf < _jev_min_confidence():
+        if conf < min_conf:
+            _jev_log_decision(dept, msg_id, choice, conf, min_conf, "jev_low_confidence", content)
             return (False, "jev_low_confidence")
+        _jev_log_decision(dept, msg_id, choice, conf, min_conf, "jev_ok", content)
         return (True, "jev_ok")
     except Exception:                                # noqa: BLE001
+        _jev_log_decision(dept, msg_id, choice, conf, min_conf, "jev_error", content)
         return (False, "jev_error")
 
 
