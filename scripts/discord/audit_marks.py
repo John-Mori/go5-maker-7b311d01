@@ -90,7 +90,33 @@ def _build_marks():
     return out
 
 
+def _build_mark_ids():
+    """印の**絵文字ID**を畳む(名前ではなくIDで数える正本)。
+    ★2026-09-24(プラットフォームSE): サーバー側で 送信=sendms→Send_MS /
+      既読=kidoku→Kidoku_Claude / 着手=chakusyu→Chakusyu_Claude に**改称**され、
+      名前照合(MARKS)だけの marks_on() が全便を「生存印なし」と誤報した(実測 goods-afi 他
+      全11部門61便が0)。押す側 react.py は EMOJI_ID の**ID固定**で撃つので印は実在していた=
+      読む側もIDで照合すればよい(名前は改称で腐る・IDは不変=ORG-11の続き・C-064)。
+    react.py の EMOJI_ID(Claude常用)+ CODEX_OVERRIDE / CODEX_RETIRED(@ボス便)のidを畳む。
+    押す側にIDが増減したら読む側も自動追随する(表を2か所に持たない)。"""
+    out = {}
+    for label in ("送信", "既読", "着手", "即答"):
+        ids = set()
+        eid = _react.EMOJI_ID.get(label)
+        if eid:
+            ids.add(str(eid))
+        ov = _react.CODEX_OVERRIDE.get(label)
+        if ov and ov[1]:
+            ids.add(str(ov[1]))
+        for _name, _id in (getattr(_react, "CODEX_RETIRED", {}).get(label) or []):
+            if _id:
+                ids.add(str(_id))
+        out[label] = frozenset(ids)
+    return out
+
+
 MARKS = _build_marks()
+MARK_IDS = _build_mark_ids()
 CHAMI_ID_FILE = os.path.join(LOCAL, "chami_discord_id.txt")
 
 
@@ -146,12 +172,14 @@ def is_chami(m, cid_self):
 
 
 def marks_on(m):
-    """そのメッセージに付いている印の集合。名前でもUnicodeでも拾う。"""
+    """そのメッセージに付いている印の集合。**IDが第一**(改称に強い)・名前/Unicodeも拾う。"""
     got = set()
     for r in (m.get("reactions") or []):
-        name = str(((r.get("emoji") or {}).get("name")) or "")
-        for label, aliases in MARKS.items():
-            if name in aliases:
+        emo = r.get("emoji") or {}
+        name = str(emo.get("name") or "")
+        eid = str(emo.get("id") or "")
+        for label in MARKS:
+            if (eid and eid in MARK_IDS.get(label, ())) or name in MARKS[label]:
                 got.add(label)
     return got
 
