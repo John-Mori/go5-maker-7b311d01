@@ -22,6 +22,8 @@ CHECKPOINTS_PATH = os.environ.get(
     r"E:\5chShortMovie\リサーチ\自社48h\own_48h.jsonl",
 )
 CHECKPOINT_HOURS = (1, 2, 3, 6, 12, 24, 48, 72)
+# 記録係(log_own_48h)が2分おき・±3分運用になった時刻。これより前の遅れは旧運用(10分おき)の記録。
+STRICT_SINCE_JST = "2026-09-27T09:00"
 JST = dt.timezone(dt.timedelta(hours=9))
 
 
@@ -92,6 +94,9 @@ def _checkpoint_map(rows: Iterable[dict[str, Any]]) -> dict[str, dict[int, dict[
         delayed = bool(row.get("delayed"))
         if drift_min is not None and abs(drift_min) > 3:
             delayed = True
+        cause = row.get("delay_cause")
+        if delayed and not cause and str(row.get("fetched_jst") or "") < STRICT_SINCE_JST:
+            cause = "9/27 9:00より前は10分おき取得だったため(今は2分おき・±3分運用)"
         value = {
             "checkpoint_h": hour,
             "views": _to_int(row.get("views")),
@@ -99,6 +104,7 @@ def _checkpoint_map(rows: Iterable[dict[str, Any]]) -> dict[str, dict[int, dict[
             "age_h": age_h,
             "drift_min": drift_min,
             "delayed": delayed,
+            "delay_cause": cause if delayed else None,
             "fetched_jst": row.get("fetched_jst"),
         }
         current = merged.setdefault(video_id, {}).get(hour)

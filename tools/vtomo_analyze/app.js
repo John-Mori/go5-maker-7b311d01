@@ -62,6 +62,9 @@
 
   function ownCard(video) {
     const points = (data.checkpoint_hours || []).map((hour, index) => checkpointCell((video.checkpoints || [])[index], hour)).join("");
+    // ±3分を外した区切りは、記録係が残した原因を下に出す(同じ原因はまとめる)。
+    const causes = [...new Set((video.checkpoints || []).filter((point) => point && point.delayed && point.delay_cause).map((point) => point.delay_cause))];
+    const note = causes.length ? `<p class="cp-note">±3分超の理由: ${causes.map(esc).join(" / ")}</p>` : "";
     return `<article class="video-card">
       ${thumbnail(video)}
       <div class="video-body">
@@ -70,6 +73,7 @@
         <div class="badge-row"><span class="badge">再生 ${number(video.views)}</span><span class="badge">高評価 ${number(video.likes)}</span></div>
       </div>
       <div class="checkpoints" aria-label="投稿後の再生数">${points}</div>
+      ${note}
     </article>`;
   }
 
