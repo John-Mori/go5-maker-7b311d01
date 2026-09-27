@@ -226,6 +226,7 @@ h2 { margin: 0; font-size: 1rem; }
 .select-wrap { display: grid; gap: 5px; color: var(--muted); font-size: .7rem; font-weight: 700; }
 .select-wrap select {
   width: 100%;
+  max-width: 320px;
   min-width: 0;
   padding: 10px 34px 10px 10px;
   border: 1px solid var(--line-strong);
@@ -279,7 +280,8 @@ h2 { margin: 0; font-size: 1rem; }
 .empty-state code { color: var(--accent); }
 
 @media (min-width: 680px) {
-  .toolbar { grid-template-columns: minmax(280px, 1fr) auto; align-items: end; }
+  .toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 12px 16px; }
+  .select-wrap { width: 320px; }
   .video-card { grid-template-columns: 190px minmax(0, 1fr); }
   .checkpoints { grid-column: 2; grid-template-columns: repeat(8, minmax(0, 1fr)); }
 }
