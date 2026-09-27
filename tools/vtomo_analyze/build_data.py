@@ -220,6 +220,16 @@ def build() -> tuple[dict[str, Any], str]:
         handle.write("window.VTOMO_DATA = ")
         json.dump(payload, handle, ensure_ascii=False, separators=(",", ":"))
         handle.write(";\n")
+    # 自社分だけの小さい版。公開ページが数分おきに読み直し、再生数・高評価を差し替える。
+    live_path = os.path.join(out_dir, "own_live.json")
+    with open(live_path, "w", encoding="utf-8") as handle:
+        json.dump(
+            {"schema": "vtomo_own_live_v1", "generated_at_jst": payload["generated_at_jst"], "own": own},
+            handle,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        handle.write("\n")
     return payload, data_path
 
 

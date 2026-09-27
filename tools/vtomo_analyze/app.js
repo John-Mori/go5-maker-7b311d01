@@ -175,4 +175,25 @@
   bind();
   selectTab(location.hash === "#subs" ? "subs" : "own");
   window.__VTOMO_STATE__ = { counts: data.counts, sources: data.sources };
+
+  // 自社分は own_live.json を1分おきに読み直す(file:// では読めないので data.js のまま)。
+  async function refreshOwnLive() {
+    if (location.protocol === "file:") return;
+    try {
+      const response = await fetch(`data/own_live.json?t=${Date.now()}`, { cache: "no-store" });
+      if (!response.ok) return;
+      const live = await response.json();
+      if (!live || !live.own || String(live.generated_at_jst || "") <= String(data.generated_at_jst || "")) return;
+      data.own = live.own;
+      data.generated_at_jst = live.generated_at_jst;
+      $("#updatedAt").textContent = `更新 ${dateJst(live.generated_at_jst)} JST`;
+      renderOwn();
+      window.__VTOMO_STATE__.live = live.generated_at_jst;
+    } catch (error) {
+      // 読み直しに失敗しても表示中のデータを残す。
+    }
+  }
+  refreshOwnLive();
+  setInterval(() => { if (!document.hidden) refreshOwnLive(); }, 60_000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshOwnLive(); });
 }());
