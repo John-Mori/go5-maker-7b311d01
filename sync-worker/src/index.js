@@ -17,6 +17,8 @@
  *   POST /api/persona/enqueue   → body {persona, key, sourceKey, edit}。完成画像と元画像を結ぶ「申告」を
  *                                  R2 persona/queue.jsonl へ**追記だけ**する。{ ok, line }
  *   GET  /api/persona/edit/:key → 登録後の再編集用に、元画像keyと正方形切り抜き情報を返す。
+ *   POST /api/persona/delete    → body {persona, key}。差分削除の申告を同じ queue.jsonl へ
+ *                                  {op:"delete"} 行として追記する。台帳から外すのはPC側ポーラー。{ ok, line }
  *   GET  /api/teian/latest       → 提案候補の当日JSONを配信（トークン必須）。R2 teian/latest.json。
  *   GET  /api/teian/:date        → 指定日(YYYY-MM-DD)の提案候補JSON。R2 teian/<date>.json。未配信は {empty:true}。
  *                                  ※書き込みは wrangler r2 object put（PC側=scripts/teian/publish_candidates.py）。
@@ -77,6 +79,12 @@ export default {
     if (path === "/api/persona/enqueue" && request.method === "POST") {
       if (!authOk(request, env)) return json({ ok: false, error: "bad_token" }, 403, cors);
       return personaEnqueue(request, env, cors);
+    }
+
+    // 人格ハブ アイコン削除の申告（POST /api/persona/delete）
+    if (path === "/api/persona/delete" && request.method === "POST") {
+      if (!authOk(request, env)) return json({ ok: false, error: "bad_token" }, 403, cors);
+      return personaDelete(request, env, cors);
     }
 
     // 登録後の再編集。完成画像keyから元画像と編集レシピを引く(トークン必須)。
@@ -271,11 +279,38 @@ async function personaEnqueue(request, env, cors) {
   });
   // 同じ (persona,key) が既に申告済みなら足さない(冪等)。ページの二度押しで行が増えない。
   const dup = '"persona":' + JSON.stringify(persona) + ',"key":"' + key + '"';
-  if (prev.indexOf(dup) >= 0) return json({ ok: true, deduped: true, line: prev.split("\n").filter(Boolean).length }, 200, cors);
+  // ただし最後の申告が削除なら、上げ直しとして足す(削除→再登録を黙って捨てない)。
+  if (prev.lastIndexOf(dup) > prev.lastIndexOf(deleteMarker(persona, key))) return json({ ok: true, deduped: true, line: prev.split("\n").filter(Boolean).length }, 200, cors);
   const rec = JSON.stringify(editRec);
   const next = prev + (prev.endsWith("\n") || prev === "" ? "" : "\n") + rec + "\n";
   // ★read-modify-write= 同時申告が重なると片方が消えうる。手作業でアイコンを足す用途では
   //   同時実行が起きない前提。起きたらページ側が再申告すれば冪等に戻る(消えた行は残らない)。
+  await env.SYNC_IMAGES.put(PQ_KEY, next, { httpMetadata: { contentType: "application/x-ndjson", cacheControl: "no-store" } });
+  return json({ ok: true, line: next.split("\n").filter(Boolean).length }, 200, cors);
+}
+
+// 削除の申告(Chami要望 2026-09-27)。追記だけの型は同じ=R2の画像実体も edit メタも消さない
+//   (台帳から外すだけ。誤削除は同じ画像の上げ直しで戻せる)。
+//   行はキーの並びを {op,key,persona} にして、追加行の重複判定(dup)と取り違えないようにする。
+function deleteMarker(persona, key) {
+  return '"op":"delete","key":"' + key + '","persona":' + JSON.stringify(persona);
+}
+async function personaDelete(request, env, cors) {
+  if (!env.SYNC_IMAGES) return json({ ok: false, error: "r2_unset" }, 500, cors);
+  const body = parseJson(await request.text());
+  const persona = safeName(body && body.persona);
+  const key = String((body && body.key) || "");
+  if (!persona || !validKey(key)) return json({ ok: false, error: "bad_body" }, 400, cors);
+  const cur = await env.SYNC_IMAGES.get(PQ_KEY);
+  const prev = cur ? await cur.text() : "";
+  if (prev.length > PQ_MAX) return json({ ok: false, error: "queue_full" }, 507, cors);
+  const dup = '"persona":' + JSON.stringify(persona) + ',"key":"' + key + '"';
+  // 最後の申告が既に削除なら足さない(二度押しで行が増えない)。
+  if (prev.lastIndexOf(deleteMarker(persona, key)) > prev.lastIndexOf(dup)) {
+    return json({ ok: true, deduped: true, line: prev.split("\n").filter(Boolean).length }, 200, cors);
+  }
+  const rec = JSON.stringify({ op: "delete", key, persona, at: new Date().toISOString() });
+  const next = prev + (prev.endsWith("\n") || prev === "" ? "" : "\n") + rec + "\n";
   await env.SYNC_IMAGES.put(PQ_KEY, next, { httpMetadata: { contentType: "application/x-ndjson", cacheControl: "no-store" } });
   return json({ ok: true, line: next.split("\n").filter(Boolean).length }, 200, cors);
 }

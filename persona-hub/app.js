@@ -58,8 +58,42 @@
 
   // 折り畳みの開閉状態(この端末だけ・見た目の好み)。既定=全開。閉じたsectionのタイトルだけ覚える。
   var COLLAPSE_KEY = "persona_hub_collapsed_v1";
+  // キャラ一覧(左/上の名前リスト)を畳んだか(この端末だけ)。Chami要望 2026-09-27 ④。
+  var LIST_HIDDEN_KEY = "persona_hub_list_hidden_v1";
+  // 削除した差分(この端末で即時に消す)。台帳から外れて data.js へ着地したら自然に不要になる。
+  var DELETED_KEY = "persona_hub_deleted_avatars_v1";
 
-  var state = { personas: {}, names: [], filtered: [], selected: null, pending: [] };
+  // 部屋スラッグ→日本語名(正本= org_registry.yml の display_ja。ハブに出る部屋だけ写した)。Chami要望 2026-09-27 ⑤。
+  var ROOM_JA = {
+    "aegis-gl": "イージス研究室",
+    "consult-intel": "コンサル情報",
+    "copy-director": "タイトル文部門",
+    "data-org": "データ整理部門",
+    "frontend": "フロントエンド部門",
+    "hr-context": "人事部門(コンテキスト)",
+    "hr-room": "人事部門",
+    "incident-recovery": "事故対応部門",
+    "kaizen-analyst": "改善提案部門",
+    "keiei-kikaku": "経営企画部門",
+    "learning-coach": "学習の部屋",
+    "llm-edu": "ローカルLLM教育部門",
+    "platform-se": "プラットフォームSE",
+    "product-scout": "商品候補選定部門",
+    "qa-reviewer": "品質管理部門",
+    "report-notify": "報告通知部門",
+    "shorts-analyst": "分析部門",
+    "system-engineer": "5chシステム改修部門α"
+  };
+  function roomJa(slug) {
+    var s = String(slug || "").trim();
+    var head = s.split("(")[0].trim();
+    return ROOM_JA[head] || s;
+  }
+  function deptJa(dept) {
+    return String(dept).split("/").map(function (s) { return roomJa(s); }).filter(Boolean).join(" / ");
+  }
+
+  var state = { personas: {}, names: [], filtered: [], selected: null, pending: [], deleted: [] };
   var els = {};
 
   document.addEventListener("DOMContentLoaded", init);
@@ -105,6 +139,32 @@
     state.pending = kept;
     savePending();
   }
+  function loadDeleted() {
+    try {
+      var v = JSON.parse(localStorage.getItem(DELETED_KEY) || "[]");
+      return Array.isArray(v) ? v : [];
+    } catch (e) { return []; }
+  }
+  function saveDeleted() {
+    try { localStorage.setItem(DELETED_KEY, JSON.stringify(state.deleted || [])); } catch (e) {}
+  }
+  // 削除済みの差分を表示から外す。data.js 側にもう無い記録は役目を終えたので捨てる。
+  function applyDeletedAvatars() {
+    var kept = [];
+    (state.deleted || []).forEach(function (rec) {
+      var e = state.personas[rec.persona];
+      if (!e || !e.アイコン) return;
+      var urls = normalizeUrls(e.アイコン.url);
+      var i = urls.indexOf(rec.url);
+      if (i < 0) return;
+      urls.splice(i, 1);
+      e.アイコン.url = urls;
+      e.アイコン.枚数 = urls.length;
+      kept.push(rec);
+    });
+    state.deleted = kept;
+    saveDeleted();
+  }
   function init() {
     els.list = document.getElementById("personaList");
     els.detail = document.getElementById("detailPane");
@@ -112,6 +172,7 @@
     els.error = document.getElementById("errorBanner");
     els.footer = document.getElementById("hubFooter");
     els.roster = document.getElementById("roomRoster");
+    wireListToggle();
 
     // 公開ページ(GitHub Pages)では data.js が window.PERSONA_HUB_DATA を焼き込んでいる。
     // local/ はgitignore配下でPagesに配信されないため、まず埋め込みを使い、無い時だけ
@@ -134,6 +195,8 @@
     state.meta = (json && json._meta) || {};
     state.pending = loadPending();
     mergePendingAvatars();
+    state.deleted = loadDeleted();
+    applyDeletedAvatars();
     state.names = Object.keys(state.personas).sort(function (a, b) { return a.localeCompare(b, "ja"); });
     state.filtered = state.names.slice();
     renderList();
@@ -152,16 +215,38 @@
   }
 
   // ── 一覧 ──
+  function isListHidden() {
+    try { return localStorage.getItem(LIST_HIDDEN_KEY) === "1"; } catch (e) { return false; }
+  }
+  function applyListHidden() {
+    var hidden = isListHidden();
+    var pane = els.list.parentNode;
+    if (pane && pane.classList) pane.classList.toggle("is-list-hidden", hidden);
+    els.count.setAttribute("aria-expanded", hidden ? "false" : "true");
+    els.count.innerHTML =
+      '<span class="persona-count-arrow">' + (hidden ? "▸" : "▾") + "</span>" +
+      '<span>キャラ一覧 ' + state.filtered.length + " / " + state.names.length + " 件</span>" +
+      '<span class="persona-count-hint">' + (hidden
+        ? "表示する" + (state.selected ? "(選択中: " + esc(state.selected) + ")" : "")
+        : "隠す") + "</span>";
+  }
+  function wireListToggle() {
+    els.count.addEventListener("click", function () {
+      try { localStorage.setItem(LIST_HIDDEN_KEY, isListHidden() ? "0" : "1"); } catch (e) {}
+      applyListHidden();
+    });
+  }
+
   function renderList() {
-    els.count.textContent = state.filtered.length + " / " + state.names.length + " 件";
+    applyListHidden();
     if (!state.filtered.length) {
       els.list.innerHTML = '<li class="persona-empty">該当するキャラクターがいません</li>';
       return;
     }
     els.list.innerHTML = state.filtered.map(function (name) {
       var e = state.personas[name] || {};
-      var dept = e.所属部門 || "所属部門: 未設定";
-      var iconCount = (e.アイコン && e.アイコン.枚数) || 0;
+      var dept = e.所属部門 ? deptJa(e.所属部門) : "所属部門: 未設定";
+      var iconCount = normalizeUrls(e.アイコン && e.アイコン.url).length;
       var hasTone = !!e.口調;
       var toWhom = ((e.呼称 || {}).この人をどう呼ぶか || {}).自分を対象にした個別ルール || [];
       var fromWhom = (e.呼称 || {}).この人が誰をどう呼ぶか || [];
@@ -223,7 +308,7 @@
       }).join("");
       return '<div class="room-card">' +
           '<div class="room-card-head">' +
-            '<span class="room-name">' + esc(rn) + "</span>" +
+            '<span class="room-name">' + esc(roomJa(rn)) + "</span>" +
             '<span class="room-count">' + members.length + "人</span>" +
           "</div>" +
           '<div class="room-members">' + chips + "</div>" +
@@ -248,7 +333,7 @@
     if (!e) { els.detail.innerHTML = '<div class="detail-empty">データがありません。</div>'; return; }
     var html = "";
     html += '<div class="detail-head"><h2>' + esc(name) + "</h2>" +
-      '<div class="detail-dept">' + esc(e.所属部門 || "所属部門: 未設定") + "</div></div>";
+      '<div class="detail-dept">' + esc(e.所属部門 ? deptJa(e.所属部門) : "所属部門: 未設定") + "</div></div>";
     html += renderAvatarSection(e.アイコン, name);
     html += renderToneSection(e.口調);
     html += renderNamingToSection((e.呼称 || {}).この人をどう呼ぶか);
@@ -431,7 +516,10 @@
         '</div>' +
         '<span class="av-label">#' + (i + 1) + ' <span class="av-id">' + esc(shortId(u)) + "</span></span>" +
         (pending ? '<span class="av-pending-tag">即時表示・台帳反映待ち</span>' : '') +
-        '<button class="av-btn av-edit" type="button" data-act="edit" data-key="' + esc(key) + '" data-url="' + esc(u) + '">再編集</button>' +
+        '<div class="av-cell-btns">' +
+          '<button class="av-btn av-edit" type="button" data-act="edit" data-key="' + esc(key) + '" data-url="' + esc(u) + '">再編集</button>' +
+          '<button class="av-btn av-del" type="button" data-act="delete" data-num="' + (i + 1) + '" data-url="' + esc(u) + '">削除</button>' +
+        "</div>" +
       "</div>";
     });
     var body = cells.length ? cells.join("") : '<div class="section-empty">画像なし</div>';
@@ -463,6 +551,8 @@
           var fu = sec.querySelector(".av-file-up"); if (fu) fu.click();
         } else if (act === "edit") {
           editRegisteredAvatar(name, btn.getAttribute("data-key"), btn.getAttribute("data-url"));
+        } else if (act === "delete") {
+          deleteAvatar(name, btn.getAttribute("data-url"), btn.getAttribute("data-num"));
         }
       });
     });
@@ -471,7 +561,8 @@
   }
 
   // ── 範囲トリミング(画像を編集)。追加/直接アップロードの前に、適用する矩形をChamiが厳密に選ぶ。
-  //   スクショ準拠: 三分割グリッド+四隅ハンドルの切り抜き枠、左右回転(90度)、リセット、キャンセル/適用。
+  //   スクショ準拠: 三分割グリッド+四隅ハンドルの切り抜き枠、拡大スライダー+＋/−、キャンセル/適用。
+  //   回転/リセット/1px微調整ボタンは撤去(Chami 2026-09-27「使わない」)。保存済みの rot は再編集で引き継ぐ。
   //   done(null)=キャンセル、done({dataUrl,file,blob})=適用。正本には触れない(結果を既存の追加/送信経路へ渡すだけ)。
   var OUT_SIZE = 512; // Discordへ渡す正方形の実体。表示時はDiscord側で丸くマスクされる。
   function openCropper(file, done, initialEdit) {
@@ -623,12 +714,11 @@
               '<span class="cropper-h cropper-h-se" data-h="se"></span>' +
             '</div>' +
           '</div>' +
-          '<div class="cropper-zoom-row"><label>拡大</label><input class="cropper-zoom" type="range" min="100" max="600" step="1" value="100"><span class="cropper-crop-info"></span></div>' +
-          '<div class="cropper-nudge" aria-label="位置を微調整">' +
-            '<span>1px微調整</span><button type="button" data-nudge="up">↑</button>' +
-            '<button type="button" data-nudge="left">←</button><button type="button" data-nudge="down">↓</button>' +
-            '<button type="button" data-nudge="right">→</button>' +
-          '</div>' +
+          '<div class="cropper-zoom-row"><label>拡大</label>' +
+            '<button type="button" class="cropper-zbtn" data-zoom="-1" aria-label="縮小">−</button>' +
+            '<input class="cropper-zoom" type="range" min="100" max="600" step="1" value="100">' +
+            '<button type="button" class="cropper-zbtn" data-zoom="1" aria-label="拡大">＋</button>' +
+            '<span class="cropper-crop-info"></span></div>' +
           '<div class="discord-preview-wrap">' +
             '<div class="cropper-square-preview"><span>保存画像(正方形)</span><canvas width="128" height="128"></canvas></div>' +
             '<div class="discord-message-preview"><canvas width="80" height="80"></canvas>' +
@@ -637,9 +727,6 @@
           '</div>' +
           '<div class="cropper-bar">' +
             '<button class="cropper-btn cropper-cancel" data-c="cancel">キャンセル</button>' +
-            '<button class="cropper-btn cropper-icon" data-c="rleft" title="左に回転" aria-label="左に回転">⟲</button>' +
-            '<button class="cropper-btn cropper-icon" data-c="reset" title="リセット" aria-label="リセット">⭯</button>' +
-            '<button class="cropper-btn cropper-icon" data-c="rright" title="右に回転" aria-label="右に回転">⟳</button>' +
             '<button class="cropper-btn cropper-apply" data-c="apply">適用</button>' +
           '</div>' +
         '</div>';
@@ -664,27 +751,23 @@
         var c = b.getAttribute("data-c");
         if (c === "cancel") { window.removeEventListener("resize", rerender); cleanup(); done && done(null); }
         else if (c === "apply") { window.removeEventListener("resize", rerender); apply(); }
-        else if (c === "reset") { rot = 0; buildBase(); crop = null; rerender(); }
-        else if (c === "rleft") { rot = (rot + 270) % 360; buildBase(); crop = null; rerender(); }
-        else if (c === "rright") { rot = (rot + 90) % 360; buildBase(); crop = null; rerender(); }
       });
 
-      zoomCtl.addEventListener("input", function () {
+      // 拡大率(100〜600%)を中心固定で変える。スライダーと ＋/− の共通口。
+      function setZoom(pct) {
+        pct = Math.max(100, Math.min(600, pct));
         var centerX = crop.x + crop.size / 2, centerY = crop.y + crop.size / 2;
-        crop.size = Math.min(base.width, base.height) / (Number(zoomCtl.value) / 100);
+        crop.size = Math.min(base.width, base.height) / (pct / 100);
         crop.x = centerX - crop.size / 2; crop.y = centerY - crop.size / 2;
         clampCrop(); drawFrame();
-      });
+      }
+      zoomCtl.addEventListener("input", function () { setZoom(Number(zoomCtl.value)); });
+      // ＋/− は1押しで10%= 目に見えて動く幅(旧1px微調整は表示上1px未満で効いて見えなかった)。
       overlay.addEventListener("click", function (e) {
-        var b = e.target.closest ? e.target.closest("[data-nudge]") : null;
+        var b = e.target.closest ? e.target.closest("[data-zoom]") : null;
         if (!b) return;
-        var step = Math.max(1, Math.round(crop.size / OUT_SIZE));
-        var d = b.getAttribute("data-nudge");
-        if (d === "up") crop.y -= step;
-        else if (d === "down") crop.y += step;
-        else if (d === "left") crop.x -= step;
-        else if (d === "right") crop.x += step;
-        clampCrop(); drawFrame();
+        var cur = Math.min(base.width, base.height) / crop.size * 100;
+        setZoom(Math.round(cur) + 10 * Number(b.getAttribute("data-zoom")));
       });
 
       wireFrame();
@@ -846,6 +929,9 @@
     state.pending = (state.pending || []).filter(function (p) { return !(p.persona === name && p.key === key); });
     state.pending.push({ persona: name, key: key, url: url, sourceKey: sourceKey, sourceCt: sourceCt, edit: edit, at: new Date().toISOString() });
     savePending();
+    // 一度消した画像を上げ直した時は、削除記録を外して再び出す。
+    state.deleted = (state.deleted || []).filter(function (d) { return !(d.persona === name && d.url === url); });
+    saveDeleted();
     var e = state.personas[name];
     if (e) {
       var icon = e.アイコン || (e.アイコン = {});
@@ -856,6 +942,36 @@
     renderList();
     renderDetail(name);
     return url;
+  }
+
+  // 差分の削除(Chami要望 2026-09-27 ③)。Workerへ削除申告を積み、PC側の取り込み常駐が台帳から外す。
+  //   画面からは申告が通った時点で消す(この端末の DELETED_KEY)。申告が通らなければ消さない=見かけだけ消えたことにしない。
+  function deleteAvatar(name, url, num) {
+    var key = imageKey(url);
+    if (!key) { setUploadMsg("この画像は削除の対象外だ(go5-syncの画像ではない)。", true); return; }
+    if (!window.confirm(name + " の #" + num + "(…" + key.slice(-6) + ")を削除する?")) return;
+    var token = getSyncToken();
+    if (!token) { if (!setSyncToken()) { setUploadMsg("トークン未設定=中止した。", true); return; } token = getSyncToken(); }
+    setUploadMsg("削除を申告中…", false);
+    fetch(SYNC_BASE + "/api/persona/delete", {
+      method: "POST",
+      headers: { "X-Sync-Token": token, "Content-Type": "application/json" },
+      body: JSON.stringify({ persona: name, key: key })
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) {
+        if (!r.ok || !j.ok) throw new Error("削除申告失敗 HTTP " + r.status + (j && j.error ? " " + j.error : ""));
+        state.pending = (state.pending || []).filter(function (p) { return !(p.persona === name && p.url === url); });
+        savePending();
+        state.deleted = (state.deleted || []).filter(function (d) { return !(d.persona === name && d.url === url); });
+        state.deleted.push({ persona: name, url: url, at: new Date().toISOString() });
+        applyDeletedAvatars();
+        renderList();
+        renderDetail(name);
+        setUploadMsg("削除した(台帳からの除去は常駐処理後)。id …" + key.slice(-6), false);
+      });
+    }).catch(function (err) {
+      setUploadMsg("失敗: " + String((err && err.message) || err) + "(トークン誤り/通信不可の可能性)。消していない。", true);
+    });
   }
 
   function uploadAvatar(name, result) {

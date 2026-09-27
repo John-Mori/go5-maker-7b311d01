@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260918-avatar2">
+<link rel="stylesheet" href="style.css?v=20260927-hubfix">
 </head>
 <body>
 <header class="hub-header">
@@ -20,7 +20,7 @@
 
 <main class="hub-main">
   <aside class="hub-list-pane">
-    <div id="personaCount" class="persona-count"></div>
+    <button id="personaCount" class="persona-count" type="button" aria-controls="personaList" aria-expanded="true"></button>
     <ul id="personaList" class="persona-list"><li class="persona-empty">読み込み中...</li></ul>
   </aside>
   <section id="detailPane" class="detail-pane">
@@ -34,6 +34,6 @@
 
 <script src="../core/util.js?v=20260908"></script>
 <script src="data.js?v=20260918-avatar2"></script>
-<script src="app.js?v=20260918-avatar2"></script>
+<script src="app.js?v=20260927-hubfix"></script>
 </body>
 </html>
