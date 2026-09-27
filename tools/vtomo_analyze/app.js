@@ -162,6 +162,43 @@
     });
   }
 
+  // 動画用タグの文字列をタップでコピー(clipboard APIが使えない file:// 等は選択+execCommandで代替)。
+  function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(text);
+    return new Promise((resolve, reject) => {
+      const area = document.createElement("textarea");
+      area.value = text;
+      area.setAttribute("readonly", "");
+      area.style.position = "fixed";
+      area.style.opacity = "0";
+      document.body.appendChild(area);
+      area.select();
+      area.setSelectionRange(0, text.length);
+      const ok = document.execCommand("copy");
+      area.remove();
+      ok ? resolve() : reject(new Error("copy failed"));
+    });
+  }
+
+  const tagCopy = $("#tagCopy");
+  if (tagCopy) {
+    let timer = 0;
+    tagCopy.addEventListener("click", () => {
+      copyText(tagCopy.dataset.copy).then(() => {
+        tagCopy.classList.add("copied");
+        $("#tagCopyState").textContent = "コピー済";
+      }, () => {
+        $("#tagCopyState").textContent = "失敗";
+      }).finally(() => {
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          tagCopy.classList.remove("copied");
+          $("#tagCopyState").textContent = "コピー";
+        }, 1600);
+      });
+    });
+  }
+
   if (!data) {
     $("#emptyState").hidden = false;
     $$(".panel").forEach((panel) => { panel.hidden = true; });

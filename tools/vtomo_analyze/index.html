@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://i.ytimg.com https://*.ytimg.com; connect-src 'self'; base-uri 'none'; form-action 'none'">
   <title>ぶいとも分析</title>
-  <link rel="stylesheet" href="style.css?v=20260927-narrowsel">
+  <link rel="stylesheet" href="style.css?v=20260927-tagcopy">
 </head>
 <body>
   <header class="app-header">
@@ -28,7 +28,10 @@
       <div class="section-head">
         <div>
           <p class="section-kicker">Vともっと推し活ちゃんねる</p>
-          <h2>投稿と初動の伸び</h2>
+          <div class="title-row">
+            <h2>投稿と初動の伸び</h2>
+            <button class="tag-copy" id="tagCopy" type="button" data-copy="#shorts #ホロライブ #ホロライブ切り抜き" aria-label="動画用タグをコピー"><span class="tag-text"><span>#shorts</span> <span>#ホロライブ</span> <span>#ホロライブ切り抜き</span></span><span class="tag-state" id="tagCopyState">コピー</span></button>
+          </div>
         </div>
         <span class="count" id="ownListCount">0本</span>
       </div>
@@ -65,6 +68,6 @@
   </main>
 
   <script src="data/data.js"></script>
-  <script src="app.js?v=20260927-live"></script>
+  <script src="app.js?v=20260927-tagcopy"></script>
 </body>
 </html>

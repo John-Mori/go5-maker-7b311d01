@@ -138,6 +138,28 @@ h2 { margin: 0; font-size: 1rem; }
 }
 
 .section-head.compact { margin-top: 18px; }
+.title-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+
+.tag-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 6px 6px 6px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--ink);
+  cursor: pointer;
+  font-size: .74rem;
+  font-weight: 700;
+  text-align: left;
+}
+.section-head > div { min-width: 0; }
+.tag-text { min-width: 0; line-height: 1.5; }
+.tag-text > span { white-space: nowrap; }
+.tag-state { flex: 0 0 auto; padding: 3px 7px; border-radius: 6px; background: var(--ink); color: #fff; font-size: .66rem; font-weight: 800; }
+.tag-copy.copied .tag-state { background: var(--good); }
 .count { color: var(--muted); font-size: .75rem; }
 .video-list { display: flex; flex-direction: column; gap: 10px; }
 
