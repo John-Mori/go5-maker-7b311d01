@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://i.ytimg.com https://*.ytimg.com; connect-src 'self'; base-uri 'none'; form-action 'none'">
+  <title>ぶいとも分析</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="header-row">
+      <div>
+        <p class="eyebrow">VTOMO ANALYZE</p>
+        <h1>ぶいとも分析</h1>
+      </div>
+      <span class="updated" id="updatedAt">更新 --</span>
+    </div>
+    <div class="tabs" role="tablist" aria-label="分析対象">
+      <button class="tab" id="tab-own" role="tab" aria-controls="panel-own" aria-selected="true" data-tab="own">自社投稿履歴</button>
+      <button class="tab" id="tab-subs" role="tab" aria-controls="panel-subs" aria-selected="false" data-tab="subs">登録チャンネル</button>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="panel active" id="panel-own" role="tabpanel" aria-labelledby="tab-own">
+      <div class="summary" id="ownSummary"></div>
+      <div class="section-head">
+        <div>
+          <p class="section-kicker">Vともっと推し活ちゃんねる</p>
+          <h2>投稿と初動の伸び</h2>
+        </div>
+        <span class="count" id="ownListCount">0本</span>
+      </div>
+      <div class="video-list" id="ownList"></div>
+    </section>
+
+    <section class="panel" id="panel-subs" role="tabpanel" aria-labelledby="tab-subs" hidden>
+      <div class="summary" id="subsSummary"></div>
+      <div class="toolbar" aria-label="登録チャンネルの絞り込みと並べ替え">
+        <label class="select-wrap">
+          <span>チャンネル</span>
+          <select id="channelFilter"></select>
+        </label>
+        <div class="sorts" aria-label="並べ替え">
+          <button class="sort-button active" type="button" data-sort="new" aria-pressed="true">新しい順</button>
+          <button class="sort-button" type="button" data-sort="views" aria-pressed="false">再生数順</button>
+        </div>
+      </div>
+      <div class="section-head compact">
+        <div>
+          <p class="section-kicker" id="subsAccount">@yoizakura_t</p>
+          <h2>取得済み動画</h2>
+        </div>
+        <span class="count" id="subsListCount">0本</span>
+      </div>
+      <div class="video-list" id="subsList"></div>
+      <nav class="pager" id="subsPager" aria-label="動画一覧のページ送り"></nav>
+    </section>
+
+    <div class="empty-state" id="emptyState" hidden>
+      <b>表示データがない。</b>
+      <span><code>update_and_open.bat</code> を実行して更新する。</span>
+    </div>
+  </main>
+
+  <script src="data/data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

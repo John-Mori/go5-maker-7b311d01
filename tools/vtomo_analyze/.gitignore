@@ -1,0 +1,11 @@
+# ローカル専用の生成データ・検証画像・認証情報を追跡しない。
+data/
+_verify/
+__pycache__/
+tests/__pycache__/
+*.pyc
+*.bak_*
+*token*
+*secret*
+oauth_*.json
+client_*.json
