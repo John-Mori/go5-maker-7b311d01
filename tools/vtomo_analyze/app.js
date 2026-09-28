@@ -52,9 +52,12 @@
     const drift = Number(point.drift_min || 0);
     const driftLabel = point.delayed ? `${drift >= 0 ? "+" : ""}${drift.toFixed(1)}分` : "±3分内";
     const ageLabel = point.age_h === null || point.age_h === undefined ? "実測 --" : `実測 ${Number(point.age_h).toFixed(2)}h`;
-    return `<div class="checkpoint${point.delayed ? " delayed" : ""}" title="実測 ${esc(point.age_h)}h">
+    // ±3分を外した値はその区切りの値ではない(Chami 9/27「条件無視しちゃいかん」)。数字は出さず「範囲外」にする。
+    const main = point.delayed ? "範囲外" : number(point.views);
+    const title = point.delayed ? `${hour}hの値ではない(${driftLabel}で取得・${number(point.views)}回)` : `実測 ${point.age_h}h`;
+    return `<div class="checkpoint${point.delayed ? " delayed" : ""}" title="${esc(title)}">
       <span class="checkpoint-hour">${hour}h</span>
-      <strong class="checkpoint-views">${number(point.views)}</strong>
+      <strong class="checkpoint-views">${esc(main)}</strong>
       <span class="checkpoint-age">${esc(ageLabel)}</span>
       <span class="checkpoint-delay">${esc(driftLabel)}</span>
     </div>`;

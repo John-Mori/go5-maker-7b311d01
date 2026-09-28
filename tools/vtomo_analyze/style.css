@@ -233,6 +233,7 @@ h2 { margin: 0; font-size: 1rem; }
 .checkpoint-views { display: block; overflow: hidden; margin-top: 2px; font-size: .76rem; font-weight: 900; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 .checkpoint-age, .checkpoint-delay { display: block; margin-top: 1px; color: var(--faint); font-size: .54rem; font-variant-numeric: tabular-nums; }
 .checkpoint.delayed { border-color: #e8d9bf; background: #fbf6ec; }
+.checkpoint.delayed .checkpoint-views { color: var(--warn); font-size: .68rem; }
 .checkpoint.delayed .checkpoint-delay { color: var(--warn); }
 .checkpoint.missing .checkpoint-views { color: #b9bdc3; }
 .cp-note { grid-column: 1 / -1; margin: 0; color: var(--warn); font-size: .66rem; line-height: 1.5; }
