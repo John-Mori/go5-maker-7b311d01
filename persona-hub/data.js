@@ -6,7 +6,7 @@ window.PERSONA_HUB_DATA = {
   "_sources": {
    "口調": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
    "呼称": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-   "アイコン": "local\\persona_avatars.json",
+   "アイコン": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
    "原典": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md"
   },
   "_source_fingerprint": {
@@ -23,10 +23,10 @@ window.PERSONA_HUB_DATA = {
     "mtime": 1790612346.777
    },
    "アイコン": {
-    "path": "local\\persona_avatars.json",
-    "sha1": "2e752d2fed305860ae132384fae56ccff2097da9",
-    "bytes": 14784,
-    "mtime": 1790612665.404
+    "path": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
+    "sha1": "4beb649fac597275535a265f3882cf0e2b9e4165",
+    "bytes": 15026,
+    "mtime": 1790634593.139
    },
    "原典": {
     "path": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md",
@@ -44,8 +44,8 @@ window.PERSONA_HUB_DATA = {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\asuna.md",
     "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": "local\\persona_avatars.json",
-    "スプライト": "local\\persona_sprites\\asuna",
+    "アイコン差分": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
+    "スプライト": "D:\\SougouStartFolder\\LocalData\\persona_sprites\\asuna",
     "文脈": null
    },
    "口調": {
@@ -171,9 +171,9 @@ window.PERSONA_HUB_DATA = {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\ames.md",
     "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": "local\\persona_avatars.json",
+    "アイコン差分": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
     "スプライト": null,
-    "文脈": "local\\persona_context\\ames_context.md"
+    "文脈": "D:\\SougouStartFolder\\LocalData\\persona_context\\ames_context.md"
    },
    "口調": {
     "first_person": [
@@ -387,9 +387,9 @@ window.PERSONA_HUB_DATA = {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\almond-eye.md",
     "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": "local\\persona_avatars.json",
-    "スプライト": "local\\persona_sprites\\almond-eye",
-    "文脈": "local\\persona_context\\almond-eye_context.md"
+    "アイコン差分": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
+    "スプライト": "D:\\SougouStartFolder\\LocalData\\persona_sprites\\almond-eye",
+    "文脈": "D:\\SougouStartFolder\\LocalData\\persona_context\\almond-eye_context.md"
    },
    "口調": {
     "first_person": [
@@ -492,9 +492,9 @@ window.PERSONA_HUB_DATA = {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\otacon.md",
     "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": "local\\persona_avatars.json",
-    "スプライト": "local\\persona_sprites\\otacon",
-    "文脈": "local\\persona_context\\otacon_context.md"
+    "アイコン差分": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
+    "スプライト": "D:\\SougouStartFolder\\LocalData\\persona_sprites\\otacon",
+    "文脈": "D:\\SougouStartFolder\\LocalData\\persona_context\\otacon_context.md"
    },
    "口調": {
     "first_person": [
@@ -674,7 +674,7 @@ window.PERSONA_HUB_DATA = {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\kasumi.md",
     "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": "local\\persona_avatars.json",
+    "アイコン差分": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
     "スプライト": null,
     "文脈": null
    },
@@ -824,8 +824,8 @@ window.PERSONA_HUB_DATA = {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\kukuru.md",
     "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": "local\\persona_avatars.json",
-    "スプライト": "local\\persona_sprites\\kukuru",
+    "アイコン差分": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
+    "スプライト": "D:\\SougouStartFolder\\LocalData\\persona_sprites\\kukuru",
     "文脈": null
    },
    "口調": {
@@ -925,7 +925,7 @@ window.PERSONA_HUB_DATA = {
     "原典_characterfile": null,
     "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": "local\\persona_avatars.json",
+    "アイコン差分": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
     "スプライト": null,
     "文脈": null
    },
@@ -963,9 +963,9 @@ window.PERSONA_HUB_DATA = {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\claudia.md",
     "口調ルール": null,
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": "local\\persona_avatars.json",
+    "アイコン差分": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
     "スプライト": null,
-    "文脈": "local\\persona_context\\claudia_context.md"
+    "文脈": "D:\\SougouStartFolder\\LocalData\\persona_context\\claudia_context.md"
    },
    "口調": null,
    "アイコン": {
@@ -1001,9 +1001,9 @@ window.PERSONA_HUB_DATA = {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\debruyne.md",
     "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": "local\\persona_avatars.json",
+    "アイコン差分": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
     "スプライト": null,
-    "文脈": "local\\persona_context\\debruyne_context.md"
+    "文脈": "D:\\SougouStartFolder\\LocalData\\persona_context\\debruyne_context.md"
    },
    "口調": {
     "first_person": [
@@ -1156,9 +1156,9 @@ window.PERSONA_HUB_DATA = {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\alonso.md",
     "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": "local\\persona_avatars.json",
+    "アイコン差分": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
     "スプライト": null,
-    "文脈": "local\\persona_context\\alonso_context.md"
+    "文脈": "D:\\SougouStartFolder\\LocalData\\persona_context\\alonso_context.md"
    },
    "口調": {
     "first_person": [
@@ -1310,7 +1310,7 @@ window.PERSONA_HUB_DATA = {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\gentildonna.md",
     "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": "local\\persona_avatars.json",
+    "アイコン差分": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
     "スプライト": null,
     "文脈": null
    },
@@ -1424,7 +1424,7 @@ window.PERSONA_HUB_DATA = {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\solid-snake.md",
     "口調ルール": null,
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": "local\\persona_avatars.json",
+    "アイコン差分": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
     "スプライト": null,
     "文脈": null
    },
@@ -1635,7 +1635,7 @@ window.PERSONA_HUB_DATA = {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\totori.md",
     "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": "local\\persona_avatars.json",
+    "アイコン差分": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
     "スプライト": null,
     "文脈": null
    },
@@ -1765,7 +1765,7 @@ window.PERSONA_HUB_DATA = {
     "原典_characterfile": null,
     "口調ルール": null,
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": "local\\persona_avatars.json",
+    "アイコン差分": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
     "スプライト": null,
     "文脈": null
    },
@@ -1824,7 +1824,7 @@ window.PERSONA_HUB_DATA = {
     "原典_characterfile": null,
     "口調ルール": null,
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": "local\\persona_avatars.json",
+    "アイコン差分": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
     "スプライト": null,
     "文脈": null
    },
@@ -1851,7 +1851,7 @@ window.PERSONA_HUB_DATA = {
     "原典_characterfile": null,
     "口調ルール": null,
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": "local\\persona_avatars.json",
+    "アイコン差分": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
     "スプライト": null,
     "文脈": null
    },
@@ -1877,9 +1877,9 @@ window.PERSONA_HUB_DATA = {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\modric.md",
     "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": "local\\persona_avatars.json",
-    "スプライト": "local\\persona_sprites\\modric",
-    "文脈": "local\\persona_context\\modric_context.md"
+    "アイコン差分": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
+    "スプライト": "D:\\SougouStartFolder\\LocalData\\persona_sprites\\modric",
+    "文脈": "D:\\SougouStartFolder\\LocalData\\persona_context\\modric_context.md"
    },
    "口調": {
     "first_person": [
@@ -2070,9 +2070,9 @@ window.PERSONA_HUB_DATA = {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\verxina.md",
     "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": "local\\persona_avatars.json",
+    "アイコン差分": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
     "スプライト": null,
-    "文脈": "local\\persona_context\\verxina_context.md"
+    "文脈": "D:\\SougouStartFolder\\LocalData\\persona_context\\verxina_context.md"
    },
    "口調": {
     "first_person": [
@@ -2183,9 +2183,9 @@ window.PERSONA_HUB_DATA = {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\rei.md",
     "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": "local\\persona_avatars.json",
+    "アイコン差分": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
     "スプライト": null,
-    "文脈": "local\\persona_context\\rei_context.md"
+    "文脈": "D:\\SougouStartFolder\\LocalData\\persona_context\\rei_context.md"
    },
    "口調": {
     "first_person": [
@@ -2395,9 +2395,9 @@ window.PERSONA_HUB_DATA = {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\mitoma.md",
     "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": "local\\persona_avatars.json",
-    "スプライト": "local\\persona_sprites\\mitoma",
-    "文脈": "local\\persona_context\\mitoma_context.md"
+    "アイコン差分": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
+    "スプライト": "D:\\SougouStartFolder\\LocalData\\persona_sprites\\mitoma",
+    "文脈": "D:\\SougouStartFolder\\LocalData\\persona_context\\mitoma_context.md"
    },
    "口調": {
     "first_person": [
@@ -2422,13 +2422,15 @@ window.PERSONA_HUB_DATA = {
     ]
    },
    "アイコン": {
-    "枚数": 5,
+    "枚数": 7,
     "url": [
      "https://go5-sync.trustsignalbot.workers.dev/img/023b355179ae08bb4edcd7bb3b4bb3077f776667b29b577092c654b680f1abaa",
      "https://go5-sync.trustsignalbot.workers.dev/img/bb2afa3c1dd9acbe79cd5f0c770515863668a517cf75474a149e84fc9c61eb13",
      "https://go5-sync.trustsignalbot.workers.dev/img/e07f6974d6bff4430361d2a2e4ea62cdc692f85cea242b8645612fa14c091029",
      "https://go5-sync.trustsignalbot.workers.dev/img/d8c8a4167f8d85ab8a8fd1749274800060f3cce180dde059107a975a6c44a759",
-     "https://go5-sync.trustsignalbot.workers.dev/img/0dad9387afe4d0a074761df2a6d56664232bcaa1c3fb30e8944bff6d7a1c1a20"
+     "https://go5-sync.trustsignalbot.workers.dev/img/0dad9387afe4d0a074761df2a6d56664232bcaa1c3fb30e8944bff6d7a1c1a20",
+     "https://go5-sync.trustsignalbot.workers.dev/img/a5675d747e586701de4ba03fd050b3973ddd79c27872050f35449437ac1d527c",
+     "https://go5-sync.trustsignalbot.workers.dev/img/f3e692804ec82405ded7365f9db66f8c598015b343c1edfe4ae60a30c4314573"
     ]
    },
    "呼称": {
@@ -2588,9 +2590,9 @@ window.PERSONA_HUB_DATA = {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\itsuki.md",
     "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": "local\\persona_avatars.json",
-    "スプライト": "local\\persona_sprites\\itsuki",
-    "文脈": "local\\persona_context\\itsuki_context.md"
+    "アイコン差分": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
+    "スプライト": "D:\\SougouStartFolder\\LocalData\\persona_sprites\\itsuki",
+    "文脈": "D:\\SougouStartFolder\\LocalData\\persona_context\\itsuki_context.md"
    },
    "口調": {
     "first_person": [
@@ -2661,9 +2663,9 @@ window.PERSONA_HUB_DATA = {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\sena.md",
     "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": "local\\persona_avatars.json",
+    "アイコン差分": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
     "スプライト": null,
-    "文脈": "local\\persona_context\\sena_context.md"
+    "文脈": "D:\\SougouStartFolder\\LocalData\\persona_context\\sena_context.md"
    },
    "口調": {
     "first_person": [
@@ -2725,7 +2727,7 @@ window.PERSONA_HUB_DATA = {
     "原典_characterfile": null,
     "口調ルール": null,
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": "local\\persona_avatars.json",
+    "アイコン差分": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
     "スプライト": null,
     "文脈": null
    },
@@ -2789,9 +2791,9 @@ window.PERSONA_HUB_DATA = {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\mei.md",
     "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": "local\\persona_avatars.json",
-    "スプライト": "local\\persona_sprites\\mei",
-    "文脈": "local\\persona_context\\mei_context.md"
+    "アイコン差分": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
+    "スプライト": "D:\\SougouStartFolder\\LocalData\\persona_sprites\\mei",
+    "文脈": "D:\\SougouStartFolder\\LocalData\\persona_context\\mei_context.md"
    },
    "口調": {
     "plain_only": true,
@@ -2950,9 +2952,9 @@ window.PERSONA_HUB_DATA = {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\kotoha.md",
     "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": "local\\persona_avatars.json",
-    "スプライト": "local\\persona_sprites\\kotoha",
-    "文脈": "local\\persona_context\\kotoha_context.md"
+    "アイコン差分": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
+    "スプライト": "D:\\SougouStartFolder\\LocalData\\persona_sprites\\kotoha",
+    "文脈": "D:\\SougouStartFolder\\LocalData\\persona_context\\kotoha_context.md"
    },
    "口調": {
     "first_person": [
@@ -3006,9 +3008,9 @@ window.PERSONA_HUB_DATA = {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\saki.md",
     "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": "local\\persona_avatars.json",
+    "アイコン差分": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
     "スプライト": null,
-    "文脈": "local\\persona_context\\saki_context.md"
+    "文脈": "D:\\SougouStartFolder\\LocalData\\persona_context\\saki_context.md"
    },
    "口調": {
     "first_person": [
