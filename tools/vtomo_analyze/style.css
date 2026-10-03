@@ -75,6 +75,22 @@ h2 { margin: 0; font-size: 1rem; }
   background: var(--card);
 }
 
+.header-tools { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.refresh-button {
+  width: auto;
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  border: 1px solid var(--ink);
+  border-radius: 999px;
+  background: var(--ink);
+  color: #fff;
+  cursor: pointer;
+  font-size: .7rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.refresh-button:disabled { opacity: .55; cursor: default; }
+
 .tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 12px; }
 
 .tab {

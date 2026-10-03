@@ -218,21 +218,36 @@
   window.__VTOMO_STATE__ = { counts: data.counts, sources: data.sources };
 
   // 自社分は own_live.json を1分おきに読み直す(file:// では読めないので data.js のまま)。
+  // 戻り値: "new"=新しいデータを載せた / "same"=表示中が最新 / "fail"=読めなかった
   async function refreshOwnLive() {
-    if (location.protocol === "file:") return;
+    if (location.protocol === "file:") return "fail";
     try {
       const response = await fetch(`data/own_live.json?t=${Date.now()}`, { cache: "no-store" });
-      if (!response.ok) return;
+      if (!response.ok) return "fail";
       const live = await response.json();
-      if (!live || !live.own || String(live.generated_at_jst || "") <= String(data.generated_at_jst || "")) return;
+      if (!live || !live.own || String(live.generated_at_jst || "") <= String(data.generated_at_jst || "")) return "same";
       data.own = live.own;
       data.generated_at_jst = live.generated_at_jst;
       $("#updatedAt").textContent = `更新 ${dateJst(live.generated_at_jst)} JST`;
       renderOwn();
       window.__VTOMO_STATE__.live = live.generated_at_jst;
+      return "new";
     } catch (error) {
       // 読み直しに失敗しても表示中のデータを残す。
+      return "fail";
     }
+  }
+  // 「最新情報を取得」= PCが5分おきに取り直した最新分を、待たずにその場で読み直す。
+  const refreshButton = $("#refreshLive");
+  if (refreshButton) {
+    const label = refreshButton.textContent;
+    refreshButton.addEventListener("click", async () => {
+      refreshButton.disabled = true;
+      refreshButton.textContent = "取得中…";
+      const result = await refreshOwnLive();
+      refreshButton.textContent = result === "new" ? "取得しました" : result === "same" ? "最新です" : "取得できませんでした";
+      window.setTimeout(() => { refreshButton.textContent = label; refreshButton.disabled = false; }, 1600);
+    });
   }
   refreshOwnLive();
   setInterval(() => { if (!document.hidden) refreshOwnLive(); }, 60_000);
