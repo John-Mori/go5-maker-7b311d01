@@ -18,9 +18,9 @@ window.PERSONA_HUB_DATA = {
    },
    "呼称": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "sha1": "f3f3b7db514b0be12ff69045dd2ca442fa65231e",
-    "bytes": 106025,
-    "mtime": 1791052776.774
+    "sha1": "7cadabfabb98de3e3acc4f4824d64bdd3a1df03d",
+    "bytes": 106077,
+    "mtime": 1791059526.934
    },
    "アイコン": {
     "path": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
@@ -30,9 +30,9 @@ window.PERSONA_HUB_DATA = {
    },
    "原典": {
     "path": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md",
-    "sha1": "02f03bbf6c8f26f1ff2347b8d11bee46542685e6",
-    "bytes": 7992,
-    "mtime": 1791058714.202
+    "sha1": "6214f24aafa3d974760aced1225625524a1a72e2",
+    "bytes": 8000,
+    "mtime": 1791059526.941
    }
   },
   "_count": 29
@@ -1175,7 +1175,7 @@ window.PERSONA_HUB_DATA = {
     ]
    }
   },
-  "サレン(プリコネ)": {
+  "サレン": {
    "所属部門": "未配置(Chami判断待ち)",
    "設定所在": {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\saren.md",
@@ -1198,7 +1198,7 @@ window.PERSONA_HUB_DATA = {
        "ちゃみ",
        "あんた"
       ],
-      "note": "サレンはChamiを『ちゃみ』と呼び、二人称『あんた』(平仮名)を混ぜる(Chami指示2026-10-04 msg 1556012142866473123『Bで』=人事の部屋で示した選択肢B)。★アメスの『アンタ』(片仮名・Chami専用の署名)とは別物=アメスのピンをサレンへ広げない・逆も同じ(C-035)。★表示名は未決=決まったらキー名を表示名へ合わせる"
+      "note": "サレンはChamiを『ちゃみ』と呼び、二人称『あんた』(平仮名)を混ぜる(Chami指示2026-10-04 msg 1556012142866473123『Bで』=人事の部屋で示した選択肢B)。★アメスの『アンタ』(片仮名・Chami専用の署名)とは別物=アメスのピンをサレンへ広げない・逆も同じ(C-035)。★表示名は「サレン」で確定(Chami 2026-10-04 msg 1556040992405323776「サレン(プリコネ)の(プリコネ)を消して」)"
      },
      "自分を対象にした個別ルール": []
     },
@@ -2754,7 +2754,7 @@ window.PERSONA_HUB_DATA = {
    }
   },
   "優依": {
-   "所属部門": "llm-edu(ローカルLLMの応答人格)",
+   "所属部門": "llm-edu(ローカルLLMの応答人格・本名=暁瀬優依)",
    "設定所在": {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\yui.md",
     "口調ルール": null,
