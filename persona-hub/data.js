@@ -24,9 +24,9 @@ window.PERSONA_HUB_DATA = {
    },
    "アイコン": {
     "path": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
-    "sha1": "ed8d63ba9e6ea468f866097311c8ffba080fe973",
-    "bytes": 15288,
-    "mtime": 1791059381.642
+    "sha1": "c78053edec916b6719ad31712780d86d40322822",
+    "bytes": 15443,
+    "mtime": 1791059442.199
    },
    "原典": {
     "path": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md",
@@ -1932,14 +1932,16 @@ window.PERSONA_HUB_DATA = {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\yui-priconne.md",
     "口調ルール": null,
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": null,
+    "アイコン差分": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
     "スプライト": null,
     "文脈": null
    },
    "口調": null,
    "アイコン": {
-    "枚数": 0,
-    "url": []
+    "枚数": 1,
+    "url": [
+     "https://go5-sync.trustsignalbot.workers.dev/img/e78e1df50e056765ebd149a81449f18bed0372adec829eb105e625cba6781e9d"
+    ]
    },
    "呼称": {
     "この人をどう呼ぶか": {
