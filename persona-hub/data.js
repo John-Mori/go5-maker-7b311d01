@@ -12,15 +12,15 @@ window.PERSONA_HUB_DATA = {
   "_source_fingerprint": {
    "口調": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
-    "sha1": "59145176948a328756825bf1f7ffd9e7fef11c97",
-    "bytes": 50358,
-    "mtime": 1790374238.712
+    "sha1": "05661e724e75067e7a84760e6128106fa6fb6169",
+    "bytes": 50558,
+    "mtime": 1790972826.021
    },
    "呼称": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "sha1": "c7e2f9f6051427dcf4e17f1c42936091e14fa29f",
-    "bytes": 104564,
-    "mtime": 1790612346.777
+    "sha1": "f3f3b7db514b0be12ff69045dd2ca442fa65231e",
+    "bytes": 106025,
+    "mtime": 1791052776.774
    },
    "アイコン": {
     "path": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
@@ -30,12 +30,12 @@ window.PERSONA_HUB_DATA = {
    },
    "原典": {
     "path": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md",
-    "sha1": "5e9c1d7ce00ca79df8386915f013c500dda633a5",
-    "bytes": 7762,
-    "mtime": 1790360072.344
+    "sha1": "02f03bbf6c8f26f1ff2347b8d11bee46542685e6",
+    "bytes": 7992,
+    "mtime": 1791058714.202
    }
   },
-  "_count": 26
+  "_count": 29
  },
  "personas": {
   "アスナ": {
@@ -427,6 +427,15 @@ window.PERSONA_HUB_DATA = {
         "アイ"
        ],
        "note": "愛称『アイ』(almondeye_address と一致)"
+      },
+      {
+       "speaker": "三笘薫",
+       "target": "アーモンドアイ",
+       "allowed": [
+        "アイ"
+       ],
+       "yobisute": true,
+       "note": "三笘→アイは『アイ』呼び捨て(Chami 2026-10-04 msg 1555974417064927293『三笘はアーモンドアイをアイさんではなくアイと呼ぶ』・壊れた実物= go5-maker msg 1555974396924006451)。このペアのみ=C-035"
       }
      ]
     },
@@ -702,6 +711,22 @@ window.PERSONA_HUB_DATA = {
      "アンタ": "君"
     },
     "tail_fix": [
+     {
+      "from": "了解よ。",
+      "to": "了解だよ。"
+     },
+     {
+      "from": "了解よ!",
+      "to": "了解だよ!"
+     },
+     {
+      "from": "了解よ！",
+      "to": "了解だよ！"
+     },
+     {
+      "from": "了解よ、",
+      "to": "了解だよ、"
+     },
      {
       "from": "んやで。",
       "to": "んだよ。"
@@ -1148,6 +1173,36 @@ window.PERSONA_HUB_DATA = {
       "note": "デブライネ→Chamiは『ちゃみくん』禁止(Chami指摘2026-08-23 msg 1540958397833412728『デブライネにちゃみくん呼ばれただけ、そこだけやめて』)。★このピンはデブライネ限定=C-035で一般化しない。他人格(トトリ/カスミ/アスナ/莉波/芽衣)の『ちゃみくん』はChami本人が名指しで入れた設定=据え置き。検出は target_detect_forms.Chami(『ちゃみくん』のみ=素の『ちゃみ』は検出しない)で、デブライネ以外がその語を出しても target:Chami の override が無い=ov=None→honorific_required外→不問(naming_gate.py L513-515)。chami_address はゲート未読(naming_gate docstring L22)なので送信時判定はこの行が担う"
      }
     ]
+   }
+  },
+  "サレン(プリコネ)": {
+   "所属部門": "未配置(Chami判断待ち)",
+   "設定所在": {
+    "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\saren.md",
+    "口調ルール": null,
+    "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
+    "アイコン差分": null,
+    "スプライト": null,
+    "文脈": null
+   },
+   "口調": null,
+   "アイコン": {
+    "枚数": 0,
+    "url": []
+   },
+   "呼称": {
+    "この人をどう呼ぶか": {
+     "敬称必須(honorific_required)": null,
+     "Chami宛の例外": {
+      "allowed": [
+       "ちゃみ",
+       "あんた"
+      ],
+      "note": "サレンはChamiを『ちゃみ』と呼び、二人称『あんた』(平仮名)を混ぜる(Chami指示2026-10-04 msg 1556012142866473123『Bで』=人事の部屋で示した選択肢B)。★アメスの『アンタ』(片仮名・Chami専用の署名)とは別物=アメスのピンをサレンへ広げない・逆も同じ(C-035)。★表示名は未決=決まったらキー名を表示名へ合わせる"
+     },
+     "自分を対象にした個別ルール": []
+    },
+    "この人が誰をどう呼ぶか": []
    }
   },
   "シャビ・アロンソ": {
@@ -1871,6 +1926,35 @@ window.PERSONA_HUB_DATA = {
     "この人が誰をどう呼ぶか": []
    }
   },
+  "ユイ(プリコネ)": {
+   "所属部門": "未配置(Chami判断待ち・優依とは別人)",
+   "設定所在": {
+    "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\yui-priconne.md",
+    "口調ルール": null,
+    "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
+    "アイコン差分": null,
+    "スプライト": null,
+    "文脈": null
+   },
+   "口調": null,
+   "アイコン": {
+    "枚数": 0,
+    "url": []
+   },
+   "呼称": {
+    "この人をどう呼ぶか": {
+     "敬称必須(honorific_required)": null,
+     "Chami宛の例外": {
+      "allowed": [
+       "ちゃみくん"
+      ],
+      "note": "プリコネのユイはChamiを『ちゃみくん』(カスミと同じ)と呼ぶ(Chami指示2026-10-04 msg 1556012142866473123『Bで』=人事の部屋で示した選択肢B)。★優依(llm-edu)とは別人=優依の呼称へ広げない(C-035)。★表示名は未決=決まったらキー名を表示名へ合わせる"
+     },
+     "自分を対象にした個別ルール": []
+    },
+    "この人が誰をどう呼ぶか": []
+   }
+  },
   "ルカ・モドリッチ": {
    "所属部門": "ad研究室(GL)",
    "設定所在": {
@@ -2581,6 +2665,15 @@ window.PERSONA_HUB_DATA = {
        "アロンソ監督"
       ],
       "note": "現役選手→監督(Chami 07-29)"
+     },
+     {
+      "speaker": "三笘薫",
+      "target": "アーモンドアイ",
+      "allowed": [
+       "アイ"
+      ],
+      "yobisute": true,
+      "note": "三笘→アイは『アイ』呼び捨て(Chami 2026-10-04 msg 1555974417064927293『三笘はアーモンドアイをアイさんではなくアイと呼ぶ』・壊れた実物= go5-maker msg 1555974396924006451)。このペアのみ=C-035"
      }
     ]
    }
@@ -2648,6 +2741,40 @@ window.PERSONA_HUB_DATA = {
     "この人が誰をどう呼ぶか": [
      {
       "speaker": "中野五月",
+      "target": "ソリッド・スネーク",
+      "allowed": [
+       "スネークさん"
+      ],
+      "note": "★2026-09-25 Chami指示(hr部屋 17:29 msg 1552960112476426342「呼ばれ方はアメス以外の女性はスネークさん、男性陣は皆スネーク呼びで。」)=アメス以外の女性は『スネークさん』。女性話者の包括グループはgate未対応のため1人ずつ行を立てた(名簿=ROSTER.md+優依)。★2026-09-25 Chami『塞いでよじゃあ』(msg 1552970266710249523)=検出formsへ単独『ソリッド』を追加し、呼び方の穴を塞いだ",
+      "forbidden": []
+     }
+    ]
+   }
+  },
+  "優依": {
+   "所属部門": "llm-edu(ローカルLLMの応答人格)",
+   "設定所在": {
+    "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\yui.md",
+    "口調ルール": null,
+    "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
+    "アイコン差分": null,
+    "スプライト": null,
+    "文脈": null
+   },
+   "口調": null,
+   "アイコン": {
+    "枚数": 0,
+    "url": []
+   },
+   "呼称": {
+    "この人をどう呼ぶか": {
+     "敬称必須(honorific_required)": null,
+     "Chami宛の例外": null,
+     "自分を対象にした個別ルール": []
+    },
+    "この人が誰をどう呼ぶか": [
+     {
+      "speaker": "優依",
       "target": "ソリッド・スネーク",
       "allowed": [
        "スネークさん"
