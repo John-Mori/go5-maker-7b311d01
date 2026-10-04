@@ -24,9 +24,9 @@ window.PERSONA_HUB_DATA = {
    },
    "アイコン": {
     "path": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
-    "sha1": "16a32fab25c0edc325059203e6292e048c0aa407",
-    "bytes": 16676,
-    "mtime": 1791092397.078
+    "sha1": "3079dc42fea3a6f6dc2adfe3547002c4f1f69636",
+    "bytes": 16918,
+    "mtime": 1791092639.735
    },
    "原典": {
     "path": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md",
@@ -1986,11 +1986,13 @@ window.PERSONA_HUB_DATA = {
     "_note": "2026-10-04 人事部門(ククール)追加。learning-coach/-2 講師配置(Chami msg 1556170392958271569)・常駐名簿 d33148f の persona 名『ユイ(プリコネ)』と一致(括弧込みの正式名)。原典= yui-priconne.md 声の型(一人称わたし・敬語なし)。★llm-edu の『優依』(yui.md)とは別人=この項目を優依へ流用しない。一人称『わたし』は姫崎莉波と重なり識別力が無い=判定材料はレポート体の禁止語だけ。"
    },
    "アイコン": {
-    "枚数": 3,
+    "枚数": 5,
     "url": [
      "https://go5-sync.trustsignalbot.workers.dev/img/e78e1df50e056765ebd149a81449f18bed0372adec829eb105e625cba6781e9d",
      "https://go5-sync.trustsignalbot.workers.dev/img/b33930dcff155555a8f38381fc5e6778d3802040645bc9e4e3f7a856a625e5d5",
-     "https://go5-sync.trustsignalbot.workers.dev/img/024513e546081255238a1eed175870c3a30ded56fcefac261c57fb33a33bddab"
+     "https://go5-sync.trustsignalbot.workers.dev/img/024513e546081255238a1eed175870c3a30ded56fcefac261c57fb33a33bddab",
+     "https://go5-sync.trustsignalbot.workers.dev/img/2165a7178d1ca27aa673e3612df95d36f0420009d63070eff27e5bb4833e3b21",
+     "https://go5-sync.trustsignalbot.workers.dev/img/30ca37164c391b7f30b02bcfd89b923600ba25354f8602fafa283892066e36ca"
     ]
    },
    "呼称": {
