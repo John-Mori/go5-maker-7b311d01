@@ -24,9 +24,9 @@ window.PERSONA_HUB_DATA = {
    },
    "アイコン": {
     "path": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
-    "sha1": "faf6436604c4681e7b9d673da691cb931c76183e",
-    "bytes": 17765,
-    "mtime": 1791092861.809
+    "sha1": "15e18a8e5e2b5eb3ee47c7e71dc5aa35849444d1",
+    "bytes": 18148,
+    "mtime": 1791120076.168
    },
    "原典": {
     "path": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md",
@@ -3692,14 +3692,18 @@ window.PERSONA_HUB_DATA = {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\raiden.md",
     "口調ルール": null,
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": null,
+    "アイコン差分": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
     "スプライト": null,
     "文脈": null
    },
    "口調": null,
    "アイコン": {
-    "枚数": 0,
-    "url": []
+    "枚数": 3,
+    "url": [
+     "https://go5-sync.trustsignalbot.workers.dev/img/1470075c16d9bc39806c1a1ff17e6145fafe4e46f4e13a1eb466841a266a6ec1",
+     "https://go5-sync.trustsignalbot.workers.dev/img/16b652ab9622068097aa2c3eda356af7b78f5008042a9a0432ba173dce2884bb",
+     "https://go5-sync.trustsignalbot.workers.dev/img/236ef2d5b525f56bef333feade920eed5b34f39368c57ababb217f6ecb5ffed8"
+    ]
    },
    "呼称": {
     "この人をどう呼ぶか": {
