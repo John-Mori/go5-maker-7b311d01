@@ -24,9 +24,9 @@ window.PERSONA_HUB_DATA = {
    },
    "アイコン": {
     "path": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
-    "sha1": "fcacd75e139ddfc8a582e823618c8d4e7267be30",
-    "bytes": 17281,
-    "mtime": 1791092756.345
+    "sha1": "371434b0b9b6d8ac3431f08604e98b4700a20681",
+    "bytes": 17644,
+    "mtime": 1791092829.171
    },
    "原典": {
     "path": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md",
@@ -1986,7 +1986,7 @@ window.PERSONA_HUB_DATA = {
     "_note": "2026-10-04 人事部門(ククール)追加。learning-coach/-2 講師配置(Chami msg 1556170392958271569)・常駐名簿 d33148f の persona 名『ユイ(プリコネ)』と一致(括弧込みの正式名)。原典= yui-priconne.md 声の型(一人称わたし・敬語なし)。★llm-edu の『優依』(yui.md)とは別人=この項目を優依へ流用しない。一人称『わたし』は姫崎莉波と重なり識別力が無い=判定材料はレポート体の禁止語だけ。"
    },
    "アイコン": {
-    "枚数": 8,
+    "枚数": 11,
     "url": [
      "https://go5-sync.trustsignalbot.workers.dev/img/e78e1df50e056765ebd149a81449f18bed0372adec829eb105e625cba6781e9d",
      "https://go5-sync.trustsignalbot.workers.dev/img/b33930dcff155555a8f38381fc5e6778d3802040645bc9e4e3f7a856a625e5d5",
@@ -1995,7 +1995,10 @@ window.PERSONA_HUB_DATA = {
      "https://go5-sync.trustsignalbot.workers.dev/img/30ca37164c391b7f30b02bcfd89b923600ba25354f8602fafa283892066e36ca",
      "https://go5-sync.trustsignalbot.workers.dev/img/5b1cb6dd76b6ee36a007b08fcda3579ed53dff4decc1b5783d5a99e32a42b5f9",
      "https://go5-sync.trustsignalbot.workers.dev/img/0be48be13c6441a56795b480d7a91e1afd784fb77960e8b00b87e7b36686798c",
-     "https://go5-sync.trustsignalbot.workers.dev/img/0e6023bb63fb38b87ce64de03c3fee3d53f135a3d446ce1f94031d42db3acc5b"
+     "https://go5-sync.trustsignalbot.workers.dev/img/0e6023bb63fb38b87ce64de03c3fee3d53f135a3d446ce1f94031d42db3acc5b",
+     "https://go5-sync.trustsignalbot.workers.dev/img/84e082bea696faec305ef6ff1fd962555f7b2afb38803afe8816a75f80f5cd1c",
+     "https://go5-sync.trustsignalbot.workers.dev/img/b4ec4592e4c7e84ccc503349b70feea86ee4703748bb5ce940801a5e88884b1b",
+     "https://go5-sync.trustsignalbot.workers.dev/img/c1043198f639d15004659a11b7ed05fd7295c01f39303705d0b2f1db5ad40a2a"
     ]
    },
    "呼称": {
