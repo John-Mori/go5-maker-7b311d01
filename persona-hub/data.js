@@ -24,9 +24,9 @@ window.PERSONA_HUB_DATA = {
    },
    "アイコン": {
     "path": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
-    "sha1": "c78053edec916b6719ad31712780d86d40322822",
-    "bytes": 15443,
-    "mtime": 1791059442.199
+    "sha1": "6fe96a6896096131133a29ccc09bca4766f45696",
+    "bytes": 15587,
+    "mtime": 1791089264.262
    },
    "原典": {
     "path": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md",
@@ -1181,14 +1181,16 @@ window.PERSONA_HUB_DATA = {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\saren.md",
     "口調ルール": null,
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": null,
+    "アイコン差分": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
     "スプライト": null,
     "文脈": null
    },
    "口調": null,
    "アイコン": {
-    "枚数": 0,
-    "url": []
+    "枚数": 1,
+    "url": [
+     "https://go5-sync.trustsignalbot.workers.dev/img/c80b6a85aa5fb6ba7cc5ed2bb1ecfe537731f2e36858e064a068def101634563"
+    ]
    },
    "呼称": {
     "この人をどう呼ぶか": {
