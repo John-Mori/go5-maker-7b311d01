@@ -12,27 +12,27 @@ window.PERSONA_HUB_DATA = {
   "_source_fingerprint": {
    "口調": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
-    "sha1": "05661e724e75067e7a84760e6128106fa6fb6169",
-    "bytes": 50558,
-    "mtime": 1790972826.021
+    "sha1": "a27fce3eb808e554b1fba26fbc5493d990b5bfc1",
+    "bytes": 52609,
+    "mtime": 1791090961.055
    },
    "呼称": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "sha1": "7cadabfabb98de3e3acc4f4824d64bdd3a1df03d",
-    "bytes": 106077,
-    "mtime": 1791059526.934
+    "sha1": "b7e97be88d44a123dc4e43e58e8f50fe8a48b337",
+    "bytes": 106479,
+    "mtime": 1791090636.701
    },
    "アイコン": {
     "path": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
-    "sha1": "f21b3e64f58e8e4253e0367ba4e72c1e72c6ec74",
-    "bytes": 16434,
-    "mtime": 1791089923.081
+    "sha1": "07e8bce679f8c50f3ad02fb43faf95d57eec3ffd",
+    "bytes": 16555,
+    "mtime": 1791092214.467
    },
    "原典": {
     "path": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md",
-    "sha1": "6214f24aafa3d974760aced1225625524a1a72e2",
-    "bytes": 8000,
-    "mtime": 1791059526.941
+    "sha1": "0e5d5d80d9a568c233d554960f378765f95fc378",
+    "bytes": 8537,
+    "mtime": 1791092139.295
    }
   },
   "_count": 29
@@ -1175,16 +1175,41 @@ window.PERSONA_HUB_DATA = {
    }
   },
   "サレン": {
-   "所属部門": "未配置(Chami判断待ち)",
+   "所属部門": "keiei-kikaku(経営企画・2026-10-04 Chami配置)/ chara2d(メンバー・2026-10-04)",
    "設定所在": {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\saren.md",
-    "口調ルール": null,
+    "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
     "アイコン差分": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
     "スプライト": null,
     "文脈": null
    },
-   "口調": null,
+   "口調": {
+    "first_person": [
+     "あたし"
+    ],
+    "plain_only": true,
+    "forbidden": [
+     "対応しました",
+     "対応いたします",
+     "作成しました",
+     "いたしました",
+     "させていただ",
+     "承知しました",
+     "ご確認ください",
+     "確認をお願い",
+     "以下です",
+     "以下の通り",
+     "ですわ",
+     "ますわ",
+     "ましてよ",
+     "アンタ"
+    ],
+    "forbidden_to": {
+     "アンタ": "あんた"
+    },
+    "_note": "2026-10-04 人事部門(ククール)追加。keiei-kikaku配置(Chami msg 1556170392958271569)・常駐名簿 d33148f の persona 名『サレン』と一致。原典= saren.md 声の型(一人称あたし・二人称あんた平仮名・敬語なし)と§相方混線防止(同室ジェンティルドンナの『ですわ/ますわ/ましてよ』を借りない・アメスの片仮名『アンタ』を借りない)。★一人称『あたし』は同室アメスと同じ=一人称ではアメスと見分けられない(ゲートFの判定材料にならない)=分けるのは生成側の書き分け。"
+   },
    "アイコン": {
     "枚数": 4,
     "url": [
@@ -1932,20 +1957,39 @@ window.PERSONA_HUB_DATA = {
    }
   },
   "ユイ(プリコネ)": {
-   "所属部門": "未配置(Chami判断待ち・優依とは別人)",
+   "所属部門": "learning-coach(講師・2026-10-04 Chami配置・優依とは別人)/ chara2d(メイン・HQ暫定・2026-10-04)",
    "設定所在": {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\yui-priconne.md",
-    "口調ルール": null,
+    "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
     "アイコン差分": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
     "スプライト": null,
     "文脈": null
    },
-   "口調": null,
+   "口調": {
+    "first_person": [
+     "わたし"
+    ],
+    "plain_only": true,
+    "forbidden": [
+     "対応しました",
+     "対応いたします",
+     "作成しました",
+     "いたしました",
+     "させていただ",
+     "承知しました",
+     "ご確認ください",
+     "確認をお願い",
+     "以下です",
+     "以下の通り"
+    ],
+    "_note": "2026-10-04 人事部門(ククール)追加。learning-coach/-2 講師配置(Chami msg 1556170392958271569)・常駐名簿 d33148f の persona 名『ユイ(プリコネ)』と一致(括弧込みの正式名)。原典= yui-priconne.md 声の型(一人称わたし・敬語なし)。★llm-edu の『優依』(yui.md)とは別人=この項目を優依へ流用しない。一人称『わたし』は姫崎莉波と重なり識別力が無い=判定材料はレポート体の禁止語だけ。"
+   },
    "アイコン": {
-    "枚数": 1,
+    "枚数": 2,
     "url": [
-     "https://go5-sync.trustsignalbot.workers.dev/img/e78e1df50e056765ebd149a81449f18bed0372adec829eb105e625cba6781e9d"
+     "https://go5-sync.trustsignalbot.workers.dev/img/e78e1df50e056765ebd149a81449f18bed0372adec829eb105e625cba6781e9d",
+     "https://go5-sync.trustsignalbot.workers.dev/img/b33930dcff155555a8f38381fc5e6778d3802040645bc9e4e3f7a856a625e5d5"
     ]
    },
    "呼称": {
@@ -1955,7 +1999,7 @@ window.PERSONA_HUB_DATA = {
       "allowed": [
        "ちゃみくん"
       ],
-      "note": "プリコネのユイはChamiを『ちゃみくん』(カスミと同じ)と呼ぶ(Chami指示2026-10-04 msg 1556012142866473123『Bで』=人事の部屋で示した選択肢B)。★優依(llm-edu)とは別人=優依の呼称へ広げない(C-035)。★表示名は未決=決まったらキー名を表示名へ合わせる"
+      "note": "プリコネのユイはChamiを『ちゃみくん』(カスミと同じ)と呼ぶ(Chami指示2026-10-04 msg 1556012142866473123『Bで』=人事の部屋で示した選択肢B)。★優依(llm-edu)とは別人=優依の呼称へ広げない(C-035)。★表示名=「ユイ(プリコネ)」で確定(Chami 2026-10-04 msg 1556040992405323776)。★配置=learning-coach講師(Chami 2026-10-04 msg 1556170392958271569)"
      },
      "自分を対象にした個別ルール": []
     },
