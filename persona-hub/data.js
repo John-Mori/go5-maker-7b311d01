@@ -24,9 +24,9 @@ window.PERSONA_HUB_DATA = {
    },
    "アイコン": {
     "path": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
-    "sha1": "f1a399c813c5b345ba148e39771a3525fd4465ec",
-    "bytes": 16313,
-    "mtime": 1791089803.783
+    "sha1": "f21b3e64f58e8e4253e0367ba4e72c1e72c6ec74",
+    "bytes": 16434,
+    "mtime": 1791089923.081
    },
    "原典": {
     "path": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md",
@@ -2770,12 +2770,13 @@ window.PERSONA_HUB_DATA = {
    },
    "口調": null,
    "アイコン": {
-    "枚数": 4,
+    "枚数": 5,
     "url": [
      "https://go5-sync.trustsignalbot.workers.dev/img/2c28b44761830d16cdbd8437e5f1752c54382ccd15bddb3282b0854466f5008f",
      "https://go5-sync.trustsignalbot.workers.dev/img/3cc64e3f9f46ea5a503412684215cd66a91b83e62733b5fdc4df03b7386d5549",
      "https://go5-sync.trustsignalbot.workers.dev/img/2699bf89562bb2964b5cfab44603f13151fffc7d59a4b3fe1340cd3ac8225499",
-     "https://go5-sync.trustsignalbot.workers.dev/img/e9d884b74df21c918cde69ad0aaeec5523826c144c37d5bb73a563c1313e8829"
+     "https://go5-sync.trustsignalbot.workers.dev/img/e9d884b74df21c918cde69ad0aaeec5523826c144c37d5bb73a563c1313e8829",
+     "https://go5-sync.trustsignalbot.workers.dev/img/ec7814293ce57d412baae510a36af3a98c7f3a79ec7f008b4142ab7534b85f05"
     ]
    },
    "呼称": {
