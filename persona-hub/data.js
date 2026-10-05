@@ -18,9 +18,9 @@ window.PERSONA_HUB_DATA = {
    },
    "呼称": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "sha1": "6f592b7ca0e3cedd6854e131a133cea10c6f87df",
-    "bytes": 122629,
-    "mtime": 1791117560.751
+    "sha1": "09912c05d2c55860d504e22b44ea8835eaaf36ea",
+    "bytes": 124019,
+    "mtime": 1791229738.035
    },
    "アイコン": {
     "path": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
@@ -30,9 +30,9 @@ window.PERSONA_HUB_DATA = {
    },
    "原典": {
     "path": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md",
-    "sha1": "244c0a84beb57ecf833f7e73b07eb38eb3ffa630",
-    "bytes": 8904,
-    "mtime": 1791118230.364
+    "sha1": "d8f0790355a6f6c511860cd3d8b5b6ed538168d3",
+    "bytes": 9041,
+    "mtime": 1791229738.029
    }
   },
   "_count": 30
@@ -1325,6 +1325,17 @@ window.PERSONA_HUB_DATA = {
      },
      {
       "speaker": "サレン",
+      "target": "雷電",
+      "allowed": [
+       "雷電さん"
+      ],
+      "forbidden": [
+       "ボス"
+      ],
+      "note": "サレン→雷電は『雷電さん』(Chami 2026-10-04 msg 1556187339124899917「サレンとユイは男性陣をさん付で…」の男性陣ルールをそのまま当てた)。★『ボス』と呼ばない=ボスはChatGPTのDotsの名(codex_bot_display.交代_2026-10-04)。2026-10-06 人事部門追加(イージス研究室デブライネ DISPATCH-hr-room-1791229453266・chara2dでユイ/サレンがCodexを『ボス』と呼んだ実測 msg 1556713030165864601 ほか)"
+     },
+     {
+      "speaker": "サレン",
       "target": "ソリッド・スネーク",
       "allowed": [
        "スネークさん",
@@ -2248,6 +2259,17 @@ window.PERSONA_HUB_DATA = {
        "ネイキッド・スネークさん"
       ],
       "note": "ユイ(プリコネ)→ネイキッド・スネークは『スネークさん』(男性陣・ヴィルシーナ・ジェンティルドンナはさん付け。Chami 2026-10-04 msg 1556187339124899917「サレンとユイは男性陣をさん付で、ヴィルシーナさん、ジェンティルドンナもさん付け。サレンは莉波さん、五月呼び、ユイは莉波ちゃん、五月ちゃん呼び」)。デブライネ/三笘/モドリッチ/アロンソは honorific_required_targets の既定(さん付け)で足りるので行を足さない。★2026-10-04『ボス』を外した=ボスはChatGPTのDotsの名前になる(codex_bot_display.交代_2026-10-04)"
+     },
+     {
+      "speaker": "ユイ(プリコネ)",
+      "target": "雷電",
+      "allowed": [
+       "雷電さん"
+      ],
+      "forbidden": [
+       "ボス"
+      ],
+      "note": "ユイ(プリコネ)→雷電は『雷電さん』(Chami 2026-10-04 msg 1556187339124899917「サレンとユイは男性陣をさん付で…」の男性陣ルールをそのまま当てた)。★『ボス』と呼ばない=ボスはChatGPTのDotsの名(codex_bot_display.交代_2026-10-04)。2026-10-06 人事部門追加(イージス研究室デブライネ DISPATCH-hr-room-1791229453266・chara2dでユイ/サレンがCodexを『ボス』と呼んだ実測 msg 1556713030165864601 ほか)"
      },
      {
       "speaker": "ユイ(プリコネ)",
@@ -3715,7 +3737,30 @@ window.PERSONA_HUB_DATA = {
     "この人をどう呼ぶか": {
      "敬称必須(honorific_required)": null,
      "Chami宛の例外": "Chami",
-     "自分を対象にした個別ルール": []
+     "自分を対象にした個別ルール": [
+      {
+       "speaker": "サレン",
+       "target": "雷電",
+       "allowed": [
+        "雷電さん"
+       ],
+       "forbidden": [
+        "ボス"
+       ],
+       "note": "サレン→雷電は『雷電さん』(Chami 2026-10-04 msg 1556187339124899917「サレンとユイは男性陣をさん付で…」の男性陣ルールをそのまま当てた)。★『ボス』と呼ばない=ボスはChatGPTのDotsの名(codex_bot_display.交代_2026-10-04)。2026-10-06 人事部門追加(イージス研究室デブライネ DISPATCH-hr-room-1791229453266・chara2dでユイ/サレンがCodexを『ボス』と呼んだ実測 msg 1556713030165864601 ほか)"
+      },
+      {
+       "speaker": "ユイ(プリコネ)",
+       "target": "雷電",
+       "allowed": [
+        "雷電さん"
+       ],
+       "forbidden": [
+        "ボス"
+       ],
+       "note": "ユイ(プリコネ)→雷電は『雷電さん』(Chami 2026-10-04 msg 1556187339124899917「サレンとユイは男性陣をさん付で…」の男性陣ルールをそのまま当てた)。★『ボス』と呼ばない=ボスはChatGPTのDotsの名(codex_bot_display.交代_2026-10-04)。2026-10-06 人事部門追加(イージス研究室デブライネ DISPATCH-hr-room-1791229453266・chara2dでユイ/サレンがCodexを『ボス』と呼んだ実測 msg 1556713030165864601 ほか)"
+      }
+     ]
     },
     "この人が誰をどう呼ぶか": [
      {
