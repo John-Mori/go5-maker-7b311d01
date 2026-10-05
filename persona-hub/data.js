@@ -24,9 +24,9 @@ window.PERSONA_HUB_DATA = {
    },
    "アイコン": {
     "path": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
-    "sha1": "20993678249a4892ed73911fcb7a7a50df577ae1",
-    "bytes": 18269,
-    "mtime": 1791149742.387
+    "sha1": "67637306fe0d001250777b93c35241237d77855c",
+    "bytes": 18390,
+    "mtime": 1791220423.031
    },
    "原典": {
     "path": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md",
@@ -408,10 +408,11 @@ window.PERSONA_HUB_DATA = {
     ]
    },
    "アイコン": {
-    "枚数": 2,
+    "枚数": 3,
     "url": [
      "https://go5-sync.trustsignalbot.workers.dev/img/c50d80487382c8162cc2b10123f4f610662068eed54d5d1099969cbdcab07dd2",
-     "https://go5-sync.trustsignalbot.workers.dev/img/7c3ae1bc2705f778c2df1ba069305dff94e9d77477b39588f7be0de47f2031a3"
+     "https://go5-sync.trustsignalbot.workers.dev/img/7c3ae1bc2705f778c2df1ba069305dff94e9d77477b39588f7be0de47f2031a3",
+     "https://go5-sync.trustsignalbot.workers.dev/img/01332e186fc1c6e8c5156bb815de1e23362bd9705f9a813707ed5d07fe6ef167"
     ]
    },
    "呼称": {
