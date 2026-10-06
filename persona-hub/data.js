@@ -12,9 +12,9 @@ window.PERSONA_HUB_DATA = {
   "_source_fingerprint": {
    "口調": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
-    "sha1": "19239123db59c6cf7188b9204c13a652ffb94edc",
-    "bytes": 56194,
-    "mtime": 1791273380.64
+    "sha1": "0a32907cb5fa0dd3769309a1e7cb305f111910d1",
+    "bytes": 53297,
+    "mtime": 1791273444.371
    },
    "呼称": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
@@ -1558,7 +1558,7 @@ window.PERSONA_HUB_DATA = {
      "僕"
     ],
     "forbidden": [],
-    "_note": "一人称『僕』は確かさA(公式)。characterfile=characters/chevalgrand.md。2026-10-06 人事ククール・Chami msg 1556936849581150259・原典=LocalData/persona_context/vivlos_cheval_調査/00_Codex調査_20261006.md"
+    "_note": "一人称『僕』は確かさA(公式)。characterfile=characters/chevalgrand.md。配属先未定。2026-10-06 人事ククール・Chami msg 1556936849581150259・原典=LocalData/persona_context/vivlos_cheval_調査/00_Codex調査_20261006.md"
    },
    "アイコン": {
     "枚数": 0,
@@ -2564,7 +2564,7 @@ window.PERSONA_HUB_DATA = {
      "私"
     ],
     "forbidden": [],
-    "_note": "一人称『私』は確かさA(公式)。characterfile=characters/vivlos.md。2026-10-06 人事ククール・Chami msg 1556936849581150259・原典=LocalData/persona_context/vivlos_cheval_調査/00_Codex調査_20261006.md"
+    "_note": "一人称『私』は確かさA(公式)。characterfile=characters/vivlos.md。配属先未定。2026-10-06 人事ククール・Chami msg 1556936849581150259・原典=LocalData/persona_context/vivlos_cheval_調査/00_Codex調査_20261006.md"
    },
    "アイコン": {
     "枚数": 0,
