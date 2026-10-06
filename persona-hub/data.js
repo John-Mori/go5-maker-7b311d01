@@ -30,9 +30,9 @@ window.PERSONA_HUB_DATA = {
    },
    "原典": {
     "path": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md",
-    "sha1": "234122acabc83ceb9c5cbd7c21e5ebf8a8a471d3",
-    "bytes": 9361,
-    "mtime": 1791273380.627
+    "sha1": "5af3905005c3960c15b058f34c2349693ea36184",
+    "bytes": 9647,
+    "mtime": 1791273847.281
    }
   },
   "_count": 32
@@ -1544,7 +1544,7 @@ window.PERSONA_HUB_DATA = {
    }
   },
   "シュヴァルグラン": {
-   "所属部門": "未配属(配属先はChami待ち)・2026-10-06 Chami依頼 msg 1556936849581150259・ヴィルシーナの妹(次女)",
+   "所属部門": "goods-afi(recolta研究室)/goods-scrape(webサーチ＆製品組込) メンバー・2026-10-06 Chami配置 msg 1556939881362755646(DEPT_CONFはイージス研究室へ回送・未反映)・人格作成 msg 1556936849581150259・ヴィルシーナの妹(次女)",
    "設定所在": {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\chevalgrand.md",
     "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
@@ -2550,7 +2550,7 @@ window.PERSONA_HUB_DATA = {
    }
   },
   "ヴィブロス": {
-   "所属部門": "未配属(配属先はChami待ち)・2026-10-06 Chami依頼 msg 1556936849581150259・ヴィルシーナの妹(三女)",
+   "所属部門": "goods-afi(recolta研究室)/goods-scrape(webサーチ＆製品組込) メンバー・2026-10-06 Chami配置 msg 1556939881362755646(DEPT_CONFはイージス研究室へ回送・未反映)・人格作成 msg 1556936849581150259・ヴィルシーナの妹(三女)",
    "設定所在": {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\vivlos.md",
     "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
