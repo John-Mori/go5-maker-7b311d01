@@ -24,9 +24,9 @@ window.PERSONA_HUB_DATA = {
    },
    "アイコン": {
     "path": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
-    "sha1": "7c1864e601df02953f01bc9d26611e266469eabe",
-    "bytes": 19145,
-    "mtime": 1791275760.502
+    "sha1": "4ce728cce60f797a11a7d34069f231bb0603c260",
+    "bytes": 19304,
+    "mtime": 1791275802.604
    },
    "原典": {
     "path": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md",
@@ -1549,7 +1549,7 @@ window.PERSONA_HUB_DATA = {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\chevalgrand.md",
     "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": null,
+    "アイコン差分": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
     "スプライト": null,
     "文脈": null
    },
@@ -1561,8 +1561,10 @@ window.PERSONA_HUB_DATA = {
     "_note": "一人称『僕』は確かさA(公式)。characterfile=characters/chevalgrand.md。配属先未定。2026-10-06 人事ククール・Chami msg 1556936849581150259・原典=LocalData/persona_context/vivlos_cheval_調査/00_Codex調査_20261006.md"
    },
    "アイコン": {
-    "枚数": 0,
-    "url": []
+    "枚数": 1,
+    "url": [
+     "https://go5-sync.trustsignalbot.workers.dev/img/5394f78568c896eae39218bc0b8568fb6a55f4f86f3c70f751575dbe12678580"
+    ]
    },
    "呼称": {
     "この人をどう呼ぶか": {
