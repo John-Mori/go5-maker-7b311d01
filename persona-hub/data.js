@@ -18,9 +18,9 @@ window.PERSONA_HUB_DATA = {
    },
    "呼称": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "sha1": "d0e37ac8e0ed19e2056dcc69463f7e5397af1722",
-    "bytes": 125507,
-    "mtime": 1791276213.86
+    "sha1": "33e73ec20c9be0906a50664952014d41fb972873",
+    "bytes": 127502,
+    "mtime": 1791301723.396
    },
    "アイコン": {
     "path": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
@@ -440,6 +440,19 @@ window.PERSONA_HUB_DATA = {
        ],
        "yobisute": true,
        "note": "三笘→アイは『アイ』呼び捨て(Chami 2026-10-04 msg 1555974417064927293『三笘はアーモンドアイをアイさんではなくアイと呼ぶ』・壊れた実物= go5-maker msg 1555974396924006451)。このペアのみ=C-035"
+      },
+      {
+       "speaker": "ヴィルシーナ",
+       "target": "アーモンドアイ",
+       "allowed": [
+        "アイ"
+       ],
+       "forbidden": [
+        "アイさん",
+        "アイちゃん"
+       ],
+       "yobisute": true,
+       "note": "ヴィルシーナ→アイは『アイ』呼び捨て(Chami 2026-10-07 msg 1557056550021890229『ヴィルシーナはアーモンドアイをアイと呼ぶ』)。almondeye_address.by_speakerと一致。このペアのみ=C-035"
       }
      ]
     },
@@ -2732,6 +2745,19 @@ window.PERSONA_HUB_DATA = {
       ],
       "note": "★2026-09-25 Chami指示(hr部屋 17:29 msg 1552960112476426342「呼ばれ方はアメス以外の女性はスネークさん、男性陣は皆スネーク呼びで。」)=アメス以外の女性は『スネークさん』。女性話者の包括グループはgate未対応のため1人ずつ行を立てた(名簿=ROSTER.md+優依)。★2026-09-25 Chami『塞いでよじゃあ』(msg 1552970266710249523)=検出formsへ単独『ソリッド』を追加し、呼び方の穴を塞いだ",
       "forbidden": []
+     },
+     {
+      "speaker": "ヴィルシーナ",
+      "target": "アーモンドアイ",
+      "allowed": [
+       "アイ"
+      ],
+      "forbidden": [
+       "アイさん",
+       "アイちゃん"
+      ],
+      "yobisute": true,
+      "note": "ヴィルシーナ→アイは『アイ』呼び捨て(Chami 2026-10-07 msg 1557056550021890229『ヴィルシーナはアーモンドアイをアイと呼ぶ』)。almondeye_address.by_speakerと一致。このペアのみ=C-035"
      }
     ]
    }
