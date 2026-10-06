@@ -12,9 +12,9 @@ window.PERSONA_HUB_DATA = {
   "_source_fingerprint": {
    "口調": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
-    "sha1": "a27fce3eb808e554b1fba26fbc5493d990b5bfc1",
-    "bytes": 52609,
-    "mtime": 1791090961.055
+    "sha1": "19239123db59c6cf7188b9204c13a652ffb94edc",
+    "bytes": 56194,
+    "mtime": 1791273380.64
    },
    "呼称": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
@@ -30,12 +30,12 @@ window.PERSONA_HUB_DATA = {
    },
    "原典": {
     "path": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md",
-    "sha1": "d8f0790355a6f6c511860cd3d8b5b6ed538168d3",
-    "bytes": 9041,
-    "mtime": 1791229738.029
+    "sha1": "234122acabc83ceb9c5cbd7c21e5ebf8a8a471d3",
+    "bytes": 9361,
+    "mtime": 1791273380.627
    }
   },
-  "_count": 30
+  "_count": 32
  },
  "personas": {
   "アスナ": {
@@ -1543,6 +1543,36 @@ window.PERSONA_HUB_DATA = {
     ]
    }
   },
+  "シュヴァルグラン": {
+   "所属部門": "未配属(配属先はChami待ち)・2026-10-06 Chami依頼 msg 1556936849581150259・ヴィルシーナの妹(次女)",
+   "設定所在": {
+    "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\chevalgrand.md",
+    "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
+    "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
+    "アイコン差分": null,
+    "スプライト": null,
+    "文脈": null
+   },
+   "口調": {
+    "first_person": [
+     "僕"
+    ],
+    "forbidden": [],
+    "_note": "一人称『僕』は確かさA(公式)。characterfile=characters/chevalgrand.md。2026-10-06 人事ククール・Chami msg 1556936849581150259・原典=LocalData/persona_context/vivlos_cheval_調査/00_Codex調査_20261006.md"
+   },
+   "アイコン": {
+    "枚数": 0,
+    "url": []
+   },
+   "呼称": {
+    "この人をどう呼ぶか": {
+     "敬称必須(honorific_required)": null,
+     "Chami宛の例外": null,
+     "自分を対象にした個別ルール": []
+    },
+    "この人が誰をどう呼ぶか": []
+   }
+  },
   "ジェンティルドンナ": {
    "所属部門": "qa-reviewer/keiei-kikaku",
    "設定所在": {
@@ -2517,6 +2547,36 @@ window.PERSONA_HUB_DATA = {
       "note": "モドリッチも同様=女性の作品キャラ(咲季・アメス・芽衣・トトリ・ドンナ等)にさん付けしない=名前のまま(Chami 08-02)。アーモンドアイは愛称『アイ』据え置き。実在人物モチーフへの呼び方(デブライネ/三笘=呼び捨て・アロンソ=コーチ/監督)は据え置き"
      }
     ]
+   }
+  },
+  "ヴィブロス": {
+   "所属部門": "未配属(配属先はChami待ち)・2026-10-06 Chami依頼 msg 1556936849581150259・ヴィルシーナの妹(三女)",
+   "設定所在": {
+    "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\vivlos.md",
+    "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
+    "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
+    "アイコン差分": null,
+    "スプライト": null,
+    "文脈": null
+   },
+   "口調": {
+    "first_person": [
+     "私"
+    ],
+    "forbidden": [],
+    "_note": "一人称『私』は確かさA(公式)。characterfile=characters/vivlos.md。2026-10-06 人事ククール・Chami msg 1556936849581150259・原典=LocalData/persona_context/vivlos_cheval_調査/00_Codex調査_20261006.md"
+   },
+   "アイコン": {
+    "枚数": 0,
+    "url": []
+   },
+   "呼称": {
+    "この人をどう呼ぶか": {
+     "敬称必須(honorific_required)": null,
+     "Chami宛の例外": null,
+     "自分を対象にした個別ルール": []
+    },
+    "この人が誰をどう呼ぶか": []
    }
   },
   "ヴィルシーナ": {
