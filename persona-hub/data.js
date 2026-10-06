@@ -30,9 +30,9 @@ window.PERSONA_HUB_DATA = {
    },
    "原典": {
     "path": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md",
-    "sha1": "5af3905005c3960c15b058f34c2349693ea36184",
-    "bytes": 9647,
-    "mtime": 1791273847.281
+    "sha1": "a189a612826f62ca01d8a70a4fb8aff750c2224b",
+    "bytes": 9990,
+    "mtime": 1791273933.14
    }
   },
   "_count": 32
@@ -2550,7 +2550,7 @@ window.PERSONA_HUB_DATA = {
    }
   },
   "ヴィブロス": {
-   "所属部門": "goods-afi(recolta研究室)/goods-scrape(webサーチ＆製品組込) メンバー・2026-10-06 Chami配置 msg 1556939881362755646(DEPT_CONFはイージス研究室へ回送・未反映)・人格作成 msg 1556936849581150259・ヴィルシーナの妹(三女)",
+   "所属部門": "goods-afi(recolta研究室) メンバー/goods-scrape(webサーチ＆製品組込) 咲季ポジション(部屋の顔・フロント面)★goods-scrapeでは花海咲季の型(部屋の顔=既定人格・画面/見た目/使い勝手の側)をヴィブロスが担う(Chami 2026-10-06 msg 1556940109100748831「改修αで咲季とオタコンみたいに咲季のポジションをヴィブロスがやるイメージで」)・2026-10-06 Chami配置 msg 1556939881362755646(DEPT_CONFはイージス研究室へ回送・未反映)・人格作成 msg 1556936849581150259・ヴィルシーナの妹(三女)",
    "設定所在": {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\vivlos.md",
     "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
