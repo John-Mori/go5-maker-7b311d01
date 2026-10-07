@@ -12,9 +12,9 @@ window.PERSONA_HUB_DATA = {
   "_source_fingerprint": {
    "口調": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
-    "sha1": "0a32907cb5fa0dd3769309a1e7cb305f111910d1",
-    "bytes": 53297,
-    "mtime": 1791273444.371
+    "sha1": "63a2159bb7157bb4429ab12be55ced51e0d0b18a",
+    "bytes": 53400,
+    "mtime": 1791405391.123
    },
    "呼称": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
@@ -2278,7 +2278,12 @@ window.PERSONA_HUB_DATA = {
      "ご確認ください",
      "確認をお願い",
      "以下です",
-     "以下の通り"
+     "以下の通り",
+     "ごめん。",
+     "ごめん、",
+     "ごめん!",
+     "ごめん！",
+     "ごめん…"
     ],
     "_note": "2026-10-04 人事部門(ククール)追加。learning-coach/-2 講師配置(Chami msg 1556170392958271569)・常駐名簿 d33148f の persona 名『ユイ(プリコネ)』と一致(括弧込みの正式名)。原典= yui-priconne.md 声の型(一人称わたし・敬語なし)。★llm-edu の『優依』(yui.md)とは別人=この項目を優依へ流用しない。一人称『わたし』は姫崎莉波と重なり識別力が無い=判定材料はレポート体の禁止語だけ。"
    },
