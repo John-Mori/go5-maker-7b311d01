@@ -203,8 +203,11 @@
   // 表示ON/OFF(Chami依頼2026-07-16)。既定=ON。新規作成のリセット後もONへ戻す(clear参照)。
   // ★これはあくまで「出す気があるか」のスイッチ。セール判定(onSale)とはAND=定価の作品には
   //   チェックが入っていても出さない(Chami明示)。判定は active() に集約する。
-  var enabled = true;
-  try { var _e = localStorage.getItem('promo_label_enabled'); if (_e === '0') enabled = false; } catch (e) {}
+  // ★2026-10-08 Chami「ラベルも止めて」(DLサイト経由へ移行・今後の動画に◯%OFFを付けない)。
+  //   既定=OFF・新規作成でもONへ戻さない。旧キー promo_label_enabled は clear() が毎回'1'を書いていて
+  //   全端末で'1'のまま=読むと勝手にONへ戻るので、手でONにした時だけ立つ新キーへ切り替えた。
+  var enabled = false;
+  try { if (localStorage.getItem('promo_label_enabled_v2') === '1') enabled = true; } catch (e) {}
   try { var _t = localStorage.getItem('promo_label_type'); if (_t === 'price') ltype = 'price'; } catch (e) {}
   // ★大きさ(scale)/位置(fpos)はチャンネル別(__acc1/__acc2)に保持する(Chami依頼2026-08-05
   //   「チャンネルそれぞれで前回のタグの大きさ・位置をリセットせず保持・端末共通」)。acc1(baseW360)と
@@ -719,7 +722,7 @@
       en.checked = enabled;
       en.addEventListener('change', function () {
         enabled = !!en.checked;
-        try { localStorage.setItem('promo_label_enabled', enabled ? '1' : '0'); } catch (e) {}
+        try { localStorage.setItem('promo_label_enabled_v2', enabled ? '1' : '0'); } catch (e) {}
         updateRow(); redraw();
       });
     }
@@ -829,14 +832,12 @@
       if (String(cid || '') !== lastCid) { pct = 0; priceVal = 0; persist(); updateRow(); redraw(); }
     },
     // 新規作成の起点(Go5NewMovieReset)。位置は既定へ戻す。
-    // ★チェックは必ずONへ戻す(Chami指定2026-07-16「前の情報がリセットされた時もチェックを入れた状態に」)。
-    //   前回OFFにしていても、新しい動画では既定のONから始まる=消し忘れでラベルが出ない事故を防ぐ。
+    // ★チェックはONへ戻さない(2026-10-08 Chami「ラベルも止めて」で、07-16の「リセット時もチェックON」を撤回)。
+    //   ON/OFFは手で切り替えた状態をそのまま保つ。
     clear: function () {
       pct = 0; priceVal = 0; fpos = null; scale = DEFAULT_SCALE; // 新規動画は既定の位置・サイズから
-      enabled = true;
       ltype = 'discount'; // ⑥新規作成のたびに種類は既定の「◯%OFF」へ戻す(Chami依頼2026-08-02「デフォルトは常に%」)
-      try { localStorage.setItem('promo_label_enabled', '1'); } catch (e) {}
-      var en = document.getElementById('promoEnable'); if (en) en.checked = true;
+      var en = document.getElementById('promoEnable'); if (en) en.checked = enabled;
       var st = document.getElementById('promoType'); if (st) st.value = 'discount';
       persist(); updateRow(); redraw();
     },
