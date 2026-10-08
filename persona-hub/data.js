@@ -18,9 +18,9 @@ window.PERSONA_HUB_DATA = {
    },
    "呼称": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "sha1": "8e6ccca6332f41c735869a0541bd55b908dcc1ea",
-    "bytes": 129386,
-    "mtime": 1791324750.881
+    "sha1": "b75e483a6b353ffad22354d42a22d2b27e8a696a",
+    "bytes": 129420,
+    "mtime": 1791458887.293
    },
    "アイコン": {
     "path": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
@@ -1482,7 +1482,8 @@ window.PERSONA_HUB_DATA = {
       ],
       "forbidden": [
        "シャビさん"
-      ]
+      ],
+      "forbidden_autofix": true
      },
      "Chami宛の例外": {
       "allowed": [
