@@ -18,9 +18,9 @@ window.PERSONA_HUB_DATA = {
    },
    "呼称": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "sha1": "b75e483a6b353ffad22354d42a22d2b27e8a696a",
-    "bytes": 129420,
-    "mtime": 1791458887.293
+    "sha1": "fd997a6edcc6981ca94a6165e5f59df198cc8a1d",
+    "bytes": 129423,
+    "mtime": 1791464098.902
    },
    "アイコン": {
     "path": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
@@ -1484,7 +1484,7 @@ window.PERSONA_HUB_DATA = {
    "呼称": {
     "この人をどう呼ぶか": {
      "敬称必須(honorific_required)": {
-      "default": "アロンソさん",
+      "default": "アロンソコーチ",
       "bare_forms": [
        "アロンソ",
        "シャビ",
