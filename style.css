@@ -28,6 +28,16 @@ html[data-account="acc2"]{           /* 宵桜艶帖：宵の花明かり */
   --cta-from:#FBC6D6; --cta-to:#F193B4; --cta-ink:#4A1E3A;
   --field-bg:rgba(26,8,22,.40); --app-scrim:rgba(24,8,20,.28);
 }
+html[data-account="acc3"]{           /* DLサイト便(仮)：テロップ見本の紺×水色を仮流用(Chamiが後で本決定) */
+  --app-bg:#14223E; --card:rgba(255,255,255,.06); --line:rgba(255,255,255,.09);
+  --accent:#97E1E4; --accent2:#2bb3c0; --ink:#eef2f7; --sub:#b9d8da;
+  /* グラデ背景トークン(html{background}で使用) */
+  --app-bg-base:#1E3A66; --app-bg-mid:#162C4E; --app-bg-deep:#0E1E38;
+  --app-glow:rgba(151,225,228,.20); --app-counter:rgba(20,34,64,.30);
+  --glow-x:74%; --glow-y:-8%; --counter-x:6%; --counter-y:108%;
+  --cta-from:#B9EEF0; --cta-to:#5FC7CB; --cta-ink:#0E1E38;
+  --field-bg:rgba(8,16,30,.40); --app-scrim:rgba(8,16,30,.28);
+}
 /* ── ランキング・分析・候補タブはアカウントに関係なくクリーム色（後勝ちでアカウント色を上書き）。 ── */
 /* html 要素に直接 background を設定することで、body が短い時も確実にクリームが全面に出る。 */
 /* ★予約はアカウント帯のオーバーレイへ移設したため背景を変えない(Chami 2026-07-31)。 */

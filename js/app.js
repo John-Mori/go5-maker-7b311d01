@@ -61,6 +61,7 @@
   const ACCOUNTS = {
     acc1: { label: "月詠み色恋劇場", bg: "assets/bg_main.mp4" },
     acc2: { label: "宵桜艶帖～Yoizakura Tsuyacho～", bg: "assets/bg_account2.mp4?v=203" }, // S-1a: 5.0sシームレスループ版に差し替え。(継ぎ目21.2→27.0dB)?vはキャッシュ更新用
+    acc3: { label: "DLサイト便(仮)", bg: "assets/bg_main.mp4" },  // ★背景動画は未用意。acc1を仮流用(テロップ検証用・要差替)
   };
   let curAccount = "acc1";
 
@@ -95,13 +96,53 @@
       contour: "rgba(140,30,70,0.9)",       // 最内の細い同系濃色の輪郭(可読性確保・黒は使わない)
       iconFill: "#FFF0F5", iconHalo: "rgba(140,30,70,0.95)",  // アイコンも温白の芯＋同系濃色の輪郭で艶トーン統一
     },
+    // acc3＝DLサイト便(5S部門テロップ見本・2026-10-09 msg1558120965131599913)の仮実装。
+    // 色は全て仮(Chamiが後で決める)。bandRGBAuthor/bandRGBTitleで帯色を段ごとに分け、dividerColorで
+    // 見本どおり帯の上下に太い黒線を入れる。帯色・線色はここだけ差し替えれば済む(他の描画ロジックは不変)。
+    acc3: {
+      authorPrefix: "引用：",                 // 見本「引用：AOI-COMICS」と同じ作り。仮でサークル名を入れる(5S部門提案)
+      defaultDetail: DEFAULT_DETAIL,
+      detailMenu: true,
+      textFill: "#FFFFFF",                    // 出典・誘導行は白文字そのまま(縁なし)
+      stroke: "rgba(0,0,0,1)",
+      bandRGB: "20,34,64",                     // 既定(誘導行など)＝仮の紺
+      bandRGBAuthor: "20,34,64",               // 出典帯＝紺〜青(仮)
+      bandRGBTitle: "151,225,228",             // 題名帯＝水色(仮)
+      bandAlpha255: 255,                       // 見本は半透明ではない＝不透明
+      plainText: true,                         // 出典・誘導行は縁なし白文字(soft/glowは使わない)
+      dualOutline: true,                       // 題名行だけ：黒文字＋太い白フチ＋その外に細い黒フチ
+      titleFill: "#000000",
+      titleOutlineWhite: "#FFFFFF",
+      titleOutlineBlack: "#000000",
+      titleFontFamily: '"M PLUS Rounded 1c"',  // 見本の「極太の丸みがあるゴシック体」に近い丸ゴシック(仮採用・要報告)
+      dividerColor: "#000000",                 // 帯の上下に入れる太い黒線(仮)
+      iconFill: "#FFFFFF", iconHalo: "rgba(20,34,64,0.95)",
+    },
   };
   const theme = () => THEME[curAccount] || THEME.acc1;
 
   // 文字本体の描画。(テーマ依存)acc1＝黒縁＋白、acc2＝桜ピンク2層グロー＋温白の芯。
-  function paintGlyph(ln, x, y, px, sw, shadowScale) {
+  function paintGlyph(ln, x, y, px, sw, shadowScale, role) {
     const t = theme();
     var ss = shadowScale || 1;  // 影のスケール(大タイトル拡大に連動。既定=1)
+    if (t.dualOutline && role === "title") {
+      // acc3題名：黒文字＋太い白フチ＋その外側に細い黒フチ。(見本どおり・色は仮)
+      // strokeTextは中心線基準なので、外側の黒を先に太く描き、内側に白を重ねて細い黒の輪だけ外側に残す。
+      ctx.save();
+      ctx.lineJoin = "round";
+      var whiteW = Math.max(1, sw * 2.2);
+      var blackW = whiteW + Math.max(1, sw * 0.9) * 2;
+      ctx.lineWidth = blackW; ctx.strokeStyle = t.titleOutlineBlack; ctx.strokeText(ln, x, y);
+      ctx.lineWidth = whiteW; ctx.strokeStyle = t.titleOutlineWhite; ctx.strokeText(ln, x, y);
+      ctx.fillStyle = t.titleFill; ctx.fillText(ln, x, y);
+      ctx.restore();
+      return;
+    }
+    if (t.plainText) {
+      // acc3の出典・誘導行：縁なしの白文字そのまま。(見本の小さい出典表記に合わせる)
+      ctx.fillStyle = t.textFill; ctx.fillText(ln, x, y);
+      return;
+    }
     if (t.soft) {
       // acc1：淡金のごく弱いグロー＋可読性用の暗い影(参考: 0 0 6px rgba(245,230,184,.15), 0 1px 2px rgba(0,0,0,.5))。
       // px固定値はU()で基準フレームへ換算。(CSSの6/1/2px相当)黒い太縁は使わない。
@@ -140,7 +181,7 @@
     previewBtn: $("previewBtn"), makeBtn: $("makeBtn"), status: $("status"),
     resultArea: $("resultArea"), result: $("result"), saveBtn: $("saveBtn"), dl: $("dl"),
     voffSaveDefault: $("voffSaveDefault"), voffReset: $("voffReset"),
-    acctBtn1: $("acctBtn1"), acctBtn2: $("acctBtn2"),
+    acctBtn1: $("acctBtn1"), acctBtn2: $("acctBtn2"), acctBtn3: $("acctBtn3"),
   };
   els.detail.value = DEFAULT_DETAIL;
 
@@ -166,11 +207,12 @@
     const loads = [
       document.fonts.load('900 60px "Noto Sans JP"'),
       document.fonts.load('700 40px "Noto Sans JP"'),
+      document.fonts.load('900 60px "M PLUS Rounded 1c"'),  // acc3題名の仮フォント
     ];
     return Promise.all(loads).then(() => { fontReady = true; }).catch(() => { fontReady = true; });
   }
 
-  function setFont(px, weight) { ctx.font = `${weight || 700} ${px}px "Noto Sans JP", sans-serif`; }
+  function setFont(px, weight, family) { ctx.font = `${weight || 700} ${px}px ${family || '"Noto Sans JP"'}, sans-serif`; }
   function smoothstep(x) { x = Math.max(0, Math.min(1, x)); return x * x * (3 - 2 * x); }
   // 浮き上がりのイージング(前半で認識可能まで進み後半で緩やかに完成・Chami依頼2026-07-18 §5/§6)。
   //   ★仕様推奨の cubic-bezier(0.22,1,0.36,1) は前半が急でDUR2.4でもt=2.5sで100%に達し、狙い(2.9s完成・
@@ -232,12 +274,16 @@
   // off＝この段の縦オフセット比。帯と文字を一体で動かす。(帯は常に文字を包む＝各段に統合)
   //   送りy(次段位置)には反映しない＝この段を動かしても他段は不動。
   //   帯は「行ボックス」ではなく実際の字形インクに対称な余白(vpad)で囲う＝文字の上下と帯の余白が等しい。
-  function drawBlock(lines, y, px, pad, gap, bandAlpha, off, shadowScale) {
-    setFont(px, 700);
+  function drawBlock(lines, y, px, pad, gap, bandAlpha, off, shadowScale, role, family) {
+    setFont(px, 700, family);
     ctx.textBaseline = "top";
     const sw = Math.max(U(2), px / 12);
     const th = px * 1.04;
     const offY = H * (off || 0);  // 帯＋文字を一緒に縦シフト
+    // 段ごとの帯色上書き(acc3のみ)。未設定テーマは常に theme().bandRGB のまま(見た目不変)。
+    const bandRGB = role === "title" ? (theme().bandRGBTitle || theme().bandRGB)
+                  : role === "author" ? (theme().bandRGBAuthor || theme().bandRGB)
+                  : theme().bandRGB;
     for (const ln of lines) {
       const tw = ctx.measureText(ln).width;
       const x = (W - tw) / 2;
@@ -246,10 +292,10 @@
       const vpad = pad * 0.45 + mB;                 // 文字インクの上下に付ける対称な余白
       const ie = inkExtent(ln, drawY, px);
       const ba = theme().bandAlpha255 != null ? theme().bandAlpha255 : bandAlpha;  // テーマで固定不透明度があれば優先
-      ctx.fillStyle = `rgba(${theme().bandRGB},${ba / 255})`;
+      ctx.fillStyle = `rgba(${bandRGB},${ba / 255})`;
       roundRect(x - pad - mB, ie.top - vpad, tw + (pad + mB) * 2, (ie.bot - ie.top) + vpad * 2, pad + mB * 0.5);
       ctx.fill();
-      paintGlyph(ln, x, drawY, px, sw, shadowScale);
+      paintGlyph(ln, x, drawY, px, sw, shadowScale, role);
       y += th + pad + gap;  // 送りは基準位置のまま(オフセットの影響を受けない＝他段に波及しない)
     }
     return y;
@@ -279,7 +325,7 @@
 
   // 2段目(誘導文)：「：」→⋮、「説明」→≡説明 をインライン描画。
   // off＝この段の縦オフセット比。帯と文字(アイコン含む)を一体で動かす。
-  function drawDetail(text, y, px, pad, off) {
+  function drawDetail(text, y, px, pad, off, role) {
     setFont(px, 700);
     ctx.textBaseline = "middle";
     const sw = Math.max(U(2), px / 12), th = px * 1.04, ym = y + th / 2 + H * (off || 0);
@@ -304,7 +350,7 @@
     for (let k = 0; k < segs.length; k++) {
       const [kind, val] = segs[k], w = widths[k];
       if (kind === "text") {
-        paintGlyph(val, x, ym, px, sw);
+        paintGlyph(val, x, ym, px, sw, 1, role);
       } else if (kind === "kebab") kebab(x + w / 2, ym, px);
       else hamburger(x + iconPad, ym, px);
       x += w;
@@ -314,9 +360,9 @@
   }
 
   // 3段目コメントを「必ず1行」に。収まらない場合だけフォントを縮小する。
-  function fitOneLine(text, basePx, maxw, minPx) {
+  function fitOneLine(text, basePx, maxw, minPx, family) {
     text = String(text).replace(/\n/g, " ").trim();
-    setFont(basePx, 700);
+    setFont(basePx, 700, family);
     const w = ctx.measureText(text).width;
     let px = basePx;
     if (w > maxw && w > 0) px = Math.max(minPx || 14, Math.floor(basePx * (maxw / w) * 0.98));
@@ -324,11 +370,11 @@
   }
   // 3段目コメントの「2行モード」：★ユーザーの改行(\n)で分割。(1行目=改行前 / 2行目=改行後)
   //   改行が無ければ1行。各行が幅に収まる最大フォントを求める。(広い行に合わせて縮小)
-  function fitTwoLines(text, basePx, maxw, minPx) {
+  function fitTwoLines(text, basePx, maxw, minPx, family) {
     var parts = String(text).split("\n");
     var lines = [(parts[0] || "").trim()];
     if (parts.length >= 2) { var rest = parts.slice(1).join(" ").trim(); if (rest) lines.push(rest); }
-    setFont(basePx, 700);
+    setFont(basePx, 700, family);
     var widest = 0;
     for (var i = 0; i < lines.length; i++) { var wdt = ctx.measureText(lines[i]).width; if (wdt > widest) widest = wdt; }
     var px = basePx;
@@ -337,8 +383,8 @@
   }
   // 2行モードの大タイトル：帯は「両行をひとまとめに囲う1枚」。影の位置分離はせず、帯と文字は同じ
   //   blockOff(＝文字オフセット)で一緒に動く＝拡大/移動しても影が同量ずれる。文字は帯の中央に来る。
-  function drawTitleBlockUnified(lines, y, px, pad, gap, shadowScale, blockOff, bandAlpha) {
-    setFont(px, 700);
+  function drawTitleBlockUnified(lines, y, px, pad, gap, shadowScale, blockOff, bandAlpha, role, family) {
+    setFont(px, 700, family);
     ctx.textBaseline = "top";
     const sw = Math.max(U(2), px / 12);
     const th = px * 1.04, mB = sw;
@@ -352,13 +398,17 @@
     const ie1 = inkExtent(lines[0], line1Y, px), ieN = inkExtent(lines[lines.length - 1], lineNY, px);
     const inkTop = ie1.top, inkBot = ieN.bot, vpad = pad * 0.45 + mB;
     const ba = theme().bandAlpha255 != null ? theme().bandAlpha255 : (bandAlpha || 195);
-    ctx.fillStyle = `rgba(${theme().bandRGB},${ba / 255})`;
+    // 段ごとの帯色上書き(acc3のみ)。未設定テーマは常に theme().bandRGB のまま(見た目不変)。
+    const bandRGB = role === "title" ? (theme().bandRGBTitle || theme().bandRGB)
+                  : role === "author" ? (theme().bandRGBAuthor || theme().bandRGB)
+                  : theme().bandRGB;
+    ctx.fillStyle = `rgba(${bandRGB},${ba / 255})`;
     roundRect((W - maxTw) / 2 - pad - mB, inkTop - vpad, maxTw + (pad + mB) * 2, (inkBot - inkTop) + vpad * 2, pad + mB * 0.5);
     ctx.fill();
     let ly = y + offY;
     for (let j = 0; j < lines.length; j++) {
       const tw = ctx.measureText(lines[j]).width, x = (W - tw) / 2;
-      paintGlyph(lines[j], x, ly, px, sw, shadowScale);
+      paintGlyph(lines[j], x, ly, px, sw, shadowScale, role);
       ly += th + gap;
     }
     return y + blockH + pad;
@@ -367,6 +417,15 @@
   function isTwoLineMode() { var c = document.getElementById("topTwoLine"); return !!(c && c.checked); }
   // ①作者も「2行モード」で描くか。(作者欄横のチェックボックス。コメントと同仕様)
   function isAuthorTwoLineMode() { var c = document.getElementById("authorTwoLine"); return !!(c && c.checked); }
+
+  // acc3仮デザインの太い黒線(見本：帯の直後に1本)。dividerColor未設定のテーマ(acc1/acc2)では何もしない＝見た目不変。
+  function drawDivider(y) {
+    if (!theme().dividerColor) return y;
+    var lw = U(10);  // 線の太さ(仮)
+    ctx.fillStyle = theme().dividerColor;
+    ctx.fillRect(0, y, W, lw);
+    return y + lw;
+  }
 
   function drawText(author, detail, top) {
     const maxw = W * 0.9;
@@ -380,26 +439,29 @@
       if (isAuthorTwoLineMode()) {
         // 作者も2行モード(コメントと同仕様)：ユーザーの改行(\n)で最大2行・中央揃え・帯は両行を1枚で囲う。
         var fa2 = fitTwoLines(author, fA, maxw, U(11));
-        y = drawTitleBlockUnified(fa2.lines, y, fa2.px, U(11) + padExtra, U(3), 1, OFF.textAuthor, 175) + U(2) + rowGap;
+        y = drawTitleBlockUnified(fa2.lines, y, fa2.px, U(11) + padExtra, U(3), 1, OFF.textAuthor, 175, "author") + U(2);
       } else {
-        y = drawBlock(wrap(author, fA, maxw), y, fA, U(11) + padExtra, U(3), 175, OFF.textAuthor) + U(2) + rowGap;
+        y = drawBlock(wrap(author, fA, maxw), y, fA, U(11) + padExtra, U(3), 175, OFF.textAuthor, 1, "author") + U(2);
       }
+      y = drawDivider(y) + rowGap;  // acc3のみ：出典帯の直後に太い黒線
     }
-    if (detail) y = drawDetail(detail, y, fD, U(11) + padExtra, OFF.textDetail) + U(4) + rowGap;
+    if (detail) y = drawDetail(detail, y, fD, U(11) + padExtra, OFF.textDetail, "detail") + U(4) + rowGap;
     if (top) {
       // まず幅に収まる基準サイズを求め、その上に「大タイトル拡大」を掛ける＝拡大が幅上限で打ち消されない。
       // 影も同じ倍率(ss)で拡大。(drawBlock→paintGlyphへ伝播)
       var tScale = OFF.titleScale || 1;
+      var titleFamily = theme().titleFontFamily;  // acc3のみ丸ゴシック(仮)。他テーマはundefined=Noto Sans JPのまま
       if (isTwoLineMode()) {
         // 2行モード：最大2行・中央揃え。帯は両行を1枚で囲い、帯と文字は同じオフセット(textTitle)で一緒に動く。
-        var f2 = fitTwoLines(top, fT, maxw, U(14));
+        var f2 = fitTwoLines(top, fT, maxw, U(14), titleFamily);
         var tpx2 = Math.max(1, Math.round(f2.px * tScale));
-        y = drawTitleBlockUnified(f2.lines, y, tpx2, U(16) + padExtra, U(6), tScale, OFF.textTitle) + U(4);
+        y = drawTitleBlockUnified(f2.lines, y, tpx2, U(16) + padExtra, U(6), tScale, OFF.textTitle, undefined, "title", titleFamily) + U(4);
       } else {
-        var f = fitOneLine(top, fT, maxw, U(14));
+        var f = fitOneLine(top, fT, maxw, U(14), titleFamily);
         var tpx = Math.max(1, Math.round(f.px * tScale));
-        y = drawBlock([f.text], y, tpx, U(16) + padExtra, U(6), 195, OFF.textTitle, tScale) + U(4);
+        y = drawBlock([f.text], y, tpx, U(16) + padExtra, U(6), 195, OFF.textTitle, tScale, "title", titleFamily) + U(4);
       }
+      y = drawDivider(y);  // acc3のみ：題名帯の直後(画像の直前)に太い黒線
     }
   }
 
@@ -1212,7 +1274,7 @@
   (function migrateLayoutOnce() {
     try { if (localStorage.getItem("layout_acct_split_migrated") === "1") return; } catch (e) { return; }
     // 旧共通値(無ければ旧バージョンキー)を両アカウントの現在値へ、旧共通既定値を両既定値へ複製。
-    ["acc1", "acc2"].forEach((a) => {
+    ["acc1", "acc2", "acc3"].forEach((a) => {
       CONTROLS.forEach((c) => {
         const curKey = c.ls + "__" + a, defKey = c.lsDef + "__" + a;
         const liveOld = Store.getNum(c.ls); const legacyOld = c.legacy ? Store.getNum(c.legacy) : null;
@@ -1273,6 +1335,7 @@
     }
     if (els.acctBtn1) els.acctBtn1.classList.toggle("active", id === "acc1");
     if (els.acctBtn2) els.acctBtn2.classList.toggle("active", id === "acc2");
+    if (els.acctBtn3) els.acctBtn3.classList.toggle("active", id === "acc3");
     // ★背景動画は「動画作成タブが前面の時」だけメモリに載せる(2026-08-10・リロード緩和)。
     //   他タブ閲覧中にアカウントを切替えても動画は読み込まない=そのページを軽いままにする。
     //   動画作成タブへ入る時に bgRestoreSrc_ が当該アカウントの背景を貼り直す。
@@ -1461,6 +1524,7 @@
   // ---- アカウント切替ボタン配線・起動時復元 ----
   if (els.acctBtn1) els.acctBtn1.addEventListener("click", () => setAccount("acc1"));
   if (els.acctBtn2) els.acctBtn2.addEventListener("click", () => setAccount("acc2"));
+  if (els.acctBtn3) els.acctBtn3.addEventListener("click", () => setAccount("acc3"));
   let savedAcct = "acc1";
   try { savedAcct = localStorage.getItem("current_account") || "acc1"; } catch (e) {}
   setAccount(savedAcct);
