@@ -13,20 +13,20 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="ドラフト">
 <meta name="theme-color" content="#0b0f17">
-<link rel="manifest" href="manifest.webmanifest?v=970">
-<link rel="apple-touch-icon" href="assets/icons/app-180.png?v=970">
-<link rel="icon" type="image/png" href="assets/icons/app-192.png?v=970">
+<link rel="manifest" href="manifest.webmanifest?v=971">
+<link rel="apple-touch-icon" href="assets/icons/app-180.png?v=971">
+<link rel="icon" type="image/png" href="assets/icons/app-192.png?v=971">
 <title>ドラフト — 5秒動画メーカー</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=970">
+<link rel="stylesheet" href="style.css?v=971">
 <script>
 window.__go5StockStandalone = true;
 try {
   document.documentElement.setAttribute('data-tab', 'tabStock');
   var _a0 = localStorage.getItem('current_account') || 'acc1';
-  document.documentElement.setAttribute('data-account', _a0 === 'acc2' ? 'acc2' : 'acc1');
+  document.documentElement.setAttribute('data-account', 'acc3');  // 癒やし倉庫一本化(Chami 2026-10-10)
   localStorage.setItem('go5_active_tab', 'tabStock');
 } catch (e) {}
 </script>
@@ -36,8 +36,10 @@ try {
 
 <div class="acct-bar">
   <span class="acct-bar-label">アカウント</span>
-  <button id="acctBtn1" class="acct-btn active" type="button">月詠み色恋劇場</button>
-  <button id="acctBtn2" class="acct-btn" type="button">宵桜艶帖～Yoizakura Tsuyacho～</button>
+  <!-- 癒やし倉庫一本化(Chami 2026-10-10)：月詠み/宵桜艶帖は非表示のみ。削除せず温存。 -->
+  <button id="acctBtn1" class="acct-btn" type="button" hidden>月詠み色恋劇場</button>
+  <button id="acctBtn2" class="acct-btn" type="button" hidden>宵桜艶帖～Yoizakura Tsuyacho～</button>
+  <button id="acctBtn3" class="acct-btn active" type="button">癒やし倉庫</button>
   <div class="acct-launch-row">
     <button id="reserveBtn" class="cal-launch-btn" type="button" data-overlay="reserveBtn">⏰ 予約</button>
     <button id="calBtn" class="cal-launch-btn" type="button" data-overlay="calBtn">📅 カレンダー</button>
@@ -50,11 +52,11 @@ try {
 <nav class="tabbar">
   <button id="tabCand" class="tab" data-nav="KouhoLists.html">💡 候補</button>
   <button id="tabVerify" class="tab" data-nav="StockLists.html">📋 投稿履歴</button>
-  <button id="tabMovie" class="tab" data-go="tabMovie"><img class="emico" src="assets/icons/ic-movie.png?v=970" alt=""> 動画作成</button>
+  <button id="tabMovie" class="tab" data-go="tabMovie"><img class="emico" src="assets/icons/ic-movie.png?v=971" alt=""> 動画作成</button>
   <button id="tabStock" class="tab active">📦 ドラフト</button>
   <button id="tabYT" class="tab" data-go="tabYT"><svg viewBox="0 0 28 20" style="height:1em;width:1.4em;vertical-align:-0.18em" aria-hidden="true"><rect width="28" height="20" rx="6" fill="#FF0000"/><path d="M11 6 L11 14 L20 10 Z" fill="#fff"/></svg> 投稿</button>
-  <button id="tabPost" class="tab" data-go="tabPost"><img class="emico" src="assets/icons/ic-bsky.png?v=970" alt=""> 投稿</button>
-  <button id="tabAffi" class="tab" data-go="tabAffi"><img class="emico" src="assets/icons/ic-link.png?v=970" alt=""> AFIリンク</button>
+  <button id="tabPost" class="tab" data-go="tabPost"><img class="emico" src="assets/icons/ic-bsky.png?v=971" alt=""> 投稿</button>
+  <button id="tabAffi" class="tab" data-go="tabAffi"><img class="emico" src="assets/icons/ic-link.png?v=971" alt=""> AFIリンク</button>
   <button id="tabSettings" class="tab" data-go="tabSettings">⚙️ 詳細設定</button>
 </nav>
 
@@ -71,36 +73,36 @@ try {
      ドラフト専用ページでも投稿完了APIを確実に初期化するため、非表示の処理ホストだけ置く。 -->
 <div id="ytClickList" hidden aria-hidden="true"></div>
 
-<script src="core/util.js?v=970"></script>
-<script src="core/account.js?v=970"></script>
-<script src="core/storage-keys.js?v=970"></script>
-<script src="core/categories.js?v=970"></script>
-<script src="core/movie-attrs-core.js?v=970"></script>
-<script src="core/image-role.js?v=970"></script>
-<script src="core/idb-store.js?v=970"></script>
-<script src="core/sync.js?v=970"></script>
-<script src="core/image-cdn.js?v=970"></script>
-<script src="core/kaizen-log.js?v=970"></script>
-<script src="core/save-gate.js?v=970"></script>
-<script src="core/operation-gate.js?v=970"></script>
-<script src="core/video-integrity.js?v=970"></script>
-<script src="js/idgen.js?v=970"></script>
-<script src="js/promo-label.js?v=970"></script>
-<script src="js/affiliate-core.js?v=970"></script>
-<script src="js/fanza-core.js?v=970"></script>
-<script src="js/bluesky-core.js?v=970"></script>
-<script src="js/scheduler.js?v=970"></script>
-<script src="js/bluesky.js?v=970"></script>
-<script src="js/drive-upload.js?v=970"></script>
-<script src="js/verify-core.js?v=970"></script>
-<script src="schedule/data/holidays.js?v=970"></script>
-<script src="js/hist-merge-core.js?v=970"></script>
-<script src="core/regen-identity.js?v=970"></script>
-<script src="core/hist-store.js?v=970"></script>
-<script src="js/rank-core.js?v=970"></script>
-<script src="js/workshort-gate-core.js?v=970"></script>
-<script src="js/yt-clicks.js?v=970"></script>
-<script src="js/stock.js?v=970"></script>
+<script src="core/util.js?v=971"></script>
+<script src="core/account.js?v=971"></script>
+<script src="core/storage-keys.js?v=971"></script>
+<script src="core/categories.js?v=971"></script>
+<script src="core/movie-attrs-core.js?v=971"></script>
+<script src="core/image-role.js?v=971"></script>
+<script src="core/idb-store.js?v=971"></script>
+<script src="core/sync.js?v=971"></script>
+<script src="core/image-cdn.js?v=971"></script>
+<script src="core/kaizen-log.js?v=971"></script>
+<script src="core/save-gate.js?v=971"></script>
+<script src="core/operation-gate.js?v=971"></script>
+<script src="core/video-integrity.js?v=971"></script>
+<script src="js/idgen.js?v=971"></script>
+<script src="js/promo-label.js?v=971"></script>
+<script src="js/affiliate-core.js?v=971"></script>
+<script src="js/fanza-core.js?v=971"></script>
+<script src="js/bluesky-core.js?v=971"></script>
+<script src="js/scheduler.js?v=971"></script>
+<script src="js/bluesky.js?v=971"></script>
+<script src="js/drive-upload.js?v=971"></script>
+<script src="js/verify-core.js?v=971"></script>
+<script src="schedule/data/holidays.js?v=971"></script>
+<script src="js/hist-merge-core.js?v=971"></script>
+<script src="core/regen-identity.js?v=971"></script>
+<script src="core/hist-store.js?v=971"></script>
+<script src="js/rank-core.js?v=971"></script>
+<script src="js/workshort-gate-core.js?v=971"></script>
+<script src="js/yt-clicks.js?v=971"></script>
+<script src="js/stock.js?v=971"></script>
 <script>
 (function () {
   'use strict';
@@ -108,7 +110,8 @@ try {
     var b1 = document.getElementById('acctBtn1'), b2 = document.getElementById('acctBtn2');
     if (b1) b1.classList.toggle('active', id === 'acc1');
     if (b2) b2.classList.toggle('active', id === 'acc2');
-    document.documentElement.setAttribute('data-account', id === 'acc2' ? 'acc2' : 'acc1');
+    var b3 = document.getElementById('acctBtn3'); if (b3) b3.classList.toggle('active', id === 'acc3');
+    document.documentElement.setAttribute('data-account', (id === 'acc2' || id === 'acc3') ? id : 'acc1');
   }
   function setAcct(id) {
     try { localStorage.setItem('current_account', id); } catch (e) {}
@@ -118,7 +121,8 @@ try {
   var b1 = document.getElementById('acctBtn1'), b2 = document.getElementById('acctBtn2');
   if (b1) b1.addEventListener('click', function () { setAcct('acc1'); });
   if (b2) b2.addEventListener('click', function () { setAcct('acc2'); });
-  var cur = 'acc1'; try { cur = localStorage.getItem('current_account') || 'acc1'; } catch (e) {}
+  // 癒やし倉庫一本化(index.html の ONLY_ACCOUNT と同じ)。月詠み/宵桜艶帖へ戻す時はこの1行を外す。
+  var cur = 'acc3'; try { localStorage.setItem('current_account', cur); } catch (e) {}
   reflect(cur);
 
   document.querySelectorAll('.tabbar .tab[data-go]').forEach(function (btn) {

@@ -65,7 +65,9 @@
     //   ★2026-07-20b: チャンネル別ドメイン。月詠み(acc1)=5mgl.com / 宵桜艶帖(acc2)=yoz2.com。
     //   どちらも同一r2 worker・同一KVのカスタムドメイン=計測は一括・記録はch別。既存
     //   r2.workers.devのコードも生存。E2E検証済(POST→<domain>/xxxxx・GET→302転送)。
-    URL_BY_ACCT: { acc1: 'https://5mgl.com', acc2: 'https://yoz2.com' },
+    //   ★2026-10-10: 癒やし倉庫(acc3)の枠。新ドメインはChami取得待ち=空のまま。取れたらここへ 'https://<新ドメイン>' を入れるだけで
+    //   acc3の短縮(作品リンク計測・投稿URL短縮・一括投稿のリプURL)が月詠みと同じに動く。空の間は5mgl/yoz2へ落とさず生URLのまま。
+    URL_BY_ACCT: { acc1: 'https://5mgl.com', acc2: 'https://yoz2.com', acc3: '' },
     WORKER_URL: 'https://5mgl.com',   // 既定(acct不明時fallback。stats/listは同一KVなのでどのドメインでも可)
     // 「これは自前の計測リンクか」判定に使う全ドメイン(旧r2も含める=既存リンク互換)
     WORKER_HOSTS: ['https://5mgl.com', 'https://yoz2.com', 'https://r2.trustsignalbot.workers.dev'],
@@ -74,6 +76,7 @@
   try {
     SHORT.SHARED_SECRET = localStorage.getItem('short_shared_secret') || SHORT.SHARED_SECRET;
   } catch (e) {}
+  if (SHORT.URL_BY_ACCT.acc3) SHORT.WORKER_HOSTS.push(SHORT.URL_BY_ACCT.acc3);
 
   // ---- 汎用永続化 ----
   function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
@@ -1599,8 +1602,8 @@
   }
   function setShareOutputs(shortUrl, fallbackUrl) {
     var url = shortUrl || fallbackUrl || '';
-    // DLサイト便(acc3)は自前短縮ドメインを画面に出さない(Chami 2026-10-09)。記録(histAdd)は従来どおり短縮値で残す。
-    if (acctId() === 'acc3') url = fallbackUrl || '';
+    // 癒やし倉庫(acc3)は新ドメインが入るまで自前短縮ドメインを画面に出さない(Chami 2026-10-09/10-10)。記録(histAdd)は従来どおり。
+    if (acctId() === 'acc3' && !shortWorkerReady('acc3')) url = fallbackUrl || '';
     if (els.shortUrlOut) els.shortUrlOut.textContent = url || '(短縮URLを取得できませんでした)';
     if (url) { putUrlTop(url); prevShortUrl = url; lastShortUrl = url; }
   }
@@ -1920,6 +1923,8 @@
     var acc = account || ((typeof acctId === 'function') ? acctId() : 'acc1');
     try { var per = localStorage.getItem('short_worker_url__' + acc); if (per) return per; } catch (e) {}
     if (SHORT.URL_BY_ACCT[acc]) return SHORT.URL_BY_ACCT[acc];
+    // 枠は在るがドメイン未設定(acc3)=発行しない。共通上書き/既定の5mgl.comへ落とすと旧ドメインが出る(Chami 2026-10-09)。
+    if (Object.prototype.hasOwnProperty.call(SHORT.URL_BY_ACCT, acc)) return '';
     try { var legacy = localStorage.getItem('short_worker_url'); if (legacy) return legacy; } catch (e2) {}
     return SHORT.WORKER_URL;
   }
@@ -1931,7 +1936,7 @@
     var bare = String(u || '').replace(/^https?:\/\//, '');
     var hosts = SHORT.WORKER_HOSTS.slice();
     try {
-      ['acc1', 'acc2'].forEach(function (a) { var per = localStorage.getItem('short_worker_url__' + a); if (per) hosts.push(per); });
+      ['acc1', 'acc2', 'acc3'].forEach(function (a) { var per = localStorage.getItem('short_worker_url__' + a); if (per) hosts.push(per); });
       var ov = localStorage.getItem('short_worker_url'); if (ov) hosts.push(ov);
     } catch (e) {}
     for (var i = 0; i < hosts.length; i++) {
@@ -2098,13 +2103,14 @@
     });
   }
   function measureWorkLink_(text) {
-    // DLサイト便(acc3)は作品リンクを短縮しない=Chamiが貼ったリンクをそのまま出す(新ドメイン不使用・Chami 2026-10-09)
-    var raw = (acctId() === 'acc3') ? Promise.resolve({ text: text, workShort: null }) : _measureWorkLinkRaw_(text);
+    // 癒やし倉庫(acc3)は新ドメインが入るまで作品リンクを短縮しない=貼ったリンクのまま(Chami 2026-10-10「1・ドメインは準備だけ」)
+    var raw = (acctId() === 'acc3' && !shortWorkerReady('acc3')) ? Promise.resolve({ text: text, workShort: null }) : _measureWorkLinkRaw_(text);
     return raw.then(function (res) {
       return finalizeSalePlaceholder_(res.text).then(function (t2) { res.text = t2; return res; });
     });
   }
   try { window.__go5MeasureWork = measureWorkLink_; } catch (e) {} // 検証用フック
+  try { window.__go5ThreadReplyLink = function (u) { return threadReplyLink_(u); }; } catch (e) {} // 検証用フック
 
   function shortenAndShow(longUrl, postUri, title, onShort, account, meta, workShort) {
     if (!longUrl) return;
@@ -2345,12 +2351,12 @@
   // ---- 単体短縮(X返信ツリー等へ例外的に追加するURLを、チャンネル別ドメインで発行)----
   function manualShortAccount_() {
     var a = els.manualShortAccount && els.manualShortAccount.value;
-    return (a === 'acc2') ? 'acc2' : 'acc1';
+    return (a === 'acc2' || a === 'acc3') ? a : 'acc1';
   }
   function refreshManualShortDomain_(followCurrent) {
     if (els.manualShortAccount && followCurrent) els.manualShortAccount.value = acctId();
     var base = workerBase(manualShortAccount_()).replace(/^https?:\/\//, '').replace(/\/+$/, '');
-    if (els.manualShortDomain) els.manualShortDomain.textContent = '発行ドメイン: ' + base;
+    if (els.manualShortDomain) els.manualShortDomain.textContent = '発行ドメイン: ' + (base || '未設定(新ドメイン取得待ち・短縮せず元のURLのまま)');
   }
   refreshManualShortDomain_(true);
   if (els.manualShortAccount) els.manualShortAccount.addEventListener('change', function () { refreshManualShortDomain_(false); });
@@ -2725,9 +2731,23 @@
     });
   }
 
-  // ---- 一括投稿(親=手入力本文→ランダム秒数待機→リプにURL)：DLサイト便(acc3)向け ----
+  // ---- 一括投稿(親=手入力本文→ランダム秒数待機→リプにURL)：癒やし倉庫(acc3)向け ----
+  // リプのURL: FANZAの作品URLならアフィリンク化(af_id付与)→自前ドメインが設定済みなら計測用短縮へ。
+  //   DLsite等FANZA以外は貼った文字列のまま(FANZAのaf_idをDLsiteへ付けない)。短縮が取れなければアフィリンクのまま投稿する。
+  function threadReplyLink_(raw) {
+    var url = String(raw || '').trim();
+    if (!WORK_LINK_RE.test(url) || !window.ensureAffiliateLink) return Promise.resolve(url);
+    var built = window.ensureAffiliateLink(url, curAfId_());
+    var link = (built && built.ok && built.link) ? built.link : url;
+    var acc = acctId();
+    if (!shortWorkerReady(acc)) return Promise.resolve(link);
+    return makeShortAndShare(link, { account: acc }).then(function (r) {
+      var s = r && (r.shareUrl || r.shortUrl);
+      return (s && ourShortBase(s)) ? s : link;
+    }).catch(function () { return link; });
+  }
   //   親本文は composePostText/テンプレ帳を一切経由しない(Chami依頼2026-10-09「雛形から自動で作らないで」)。
-  //   URLもアフィリンク自動生成を経由せず、Chamiが貼った文字列をそのまま使う(要件37-39行目)。
+  //   URLは2026-10-10 Chami「1」で変更=FANZAは自動アフィ化(下の threadReplyLink_)、DLsite等は貼った文字列のまま。
   if (els.threadText && els.threadCount) {
     var updateThreadCount = function () { els.threadCount.textContent = countGraphemes(els.threadText.value) + ' / 300'; };
     els.threadText.addEventListener('input', updateThreadCount);
@@ -2738,15 +2758,18 @@
       function setThreadStatus(m, html) { if (!els.threadStatus) return; if (html) els.threadStatus.innerHTML = m; else els.threadStatus.textContent = m || ''; }
       var parentText = (els.threadText && els.threadText.value || '').trim();
       var replyUrl = (els.threadReplyUrl && els.threadReplyUrl.value || '').trim();
+      // 空欄なら作品URL欄のFANZA作品から自動で作る(Chami 2026-10-10「1」)。DLsite等は貼った物をそのまま使う。
+      if (!replyUrl) { var wu = captureWorkUrl_(); if (WORK_LINK_RE.test(wu)) replyUrl = wu; }
       if (!parentText) { setThreadStatus('親の投稿本文を入力してください。'); return; }
       if (countGraphemes(parentText) > 300) { setThreadStatus('親の本文が300文字を超えています。短くしてください。'); return; }
       if (!replyUrl) { setThreadStatus('リプライに吊り下げるURLを入力してください。'); return; }
       var c = creds(); if (!c.handle || !c.appPw) { setThreadStatus('⚙設定でハンドルとアプリパスワードを入れてください。'); return; }
       if (!window.BlueskyCore || !window.BlueskyCore.blueskyPostThread) { setThreadStatus('投稿モジュール未読込。'); return; }
       if (!window.confirm('親の投稿(本文はそのまま)を投稿し、ランダムな秒数(1分以内)を空けてからリプライにURLを投稿します。よろしいですか？')) return;
-      els.threadPostBtn.disabled = true; setThreadStatus('親を投稿中…');
+      els.threadPostBtn.disabled = true; setThreadStatus('リンクを準備中…');
       var f = selectedPostFile || photoFile();
-      (f ? compressFile(f) : Promise.resolve(null))
+      threadReplyLink_(replyUrl)
+        .then(function (link) { replyUrl = link; setThreadStatus('親を投稿中…'); return f ? compressFile(f) : null; })
         .then(function (blob) {
           return window.BlueskyCore.blueskyPostThread({ identifier: c.handle, appPassword: c.appPw, parentText: parentText, replyText: replyUrl, imageBlob: blob });
         })
