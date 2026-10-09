@@ -758,7 +758,7 @@
   function accountLabel(acc) {
     if (acc === 'acc1') return '月詠み色恋劇場';
     if (acc === 'acc2') return '宵桜艶帖';
-    if (acc === 'acc3') return 'DLサイト便(仮)';
+    if (acc === 'acc3') return '癒やし倉庫';
     return acc || '(未設定)';
   }
 

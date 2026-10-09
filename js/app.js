@@ -61,7 +61,7 @@
   const ACCOUNTS = {
     acc1: { label: "月詠み色恋劇場", bg: "assets/bg_main.mp4" },
     acc2: { label: "宵桜艶帖～Yoizakura Tsuyacho～", bg: "assets/bg_account2.mp4?v=203" }, // S-1a: 5.0sシームレスループ版に差し替え。(継ぎ目21.2→27.0dB)?vはキャッシュ更新用
-    acc3: { label: "DLサイト便(仮)", bg: "assets/bg_main.mp4" },  // ★背景動画は未用意。acc1を仮流用(テロップ検証用・要差替)
+    acc3: { label: "癒やし倉庫", bg: "assets/bg_main.mp4" },  // ★背景動画は未用意。acc1を仮流用(テロップ検証用・要差替)
   };
   // ★DLサイト便一本化(Chami 2026-10-10 msg1558233171961708595「月詠みと宵桜艶帖の項目削除して」)。
   //   acc1/acc2 はボタンを隠して起動時も acc3 へ寄せるだけ。定義・保存データ・FANZA経路は温存(戻す時はここを null に)。
