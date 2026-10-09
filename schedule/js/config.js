@@ -16,9 +16,21 @@ SCH.config = {
   protectConfirmedSlots: true,  // 予約済/公開済は時刻自動変更しない（要確認のみ・§7.5/§9）
   recalcScope: "run",           // 再計算範囲：連続ラン＋前後1日（§7.5）
 
+  // カレンダーに並べるチャンネル(左→右)。癒やし倉庫一本化(Chami 2026-10-10)。
+  //   もう1ch増える余地を残す(同日Chami「そこの余地は残しておくこと」)= 増やす時はここへ1行足し、
+  //   accountOffsetMin にずらし幅を入れるだけ。short=セルのバッジ(3字まで)。
+  channels: [
+    { id: "acc3", short: "癒やし", name: "癒やし倉庫" },
+  ],
+  // 運用を止めたch。カレンダーには出さないが、保存済みの実行記録は消さずに温存する(戻す時は channels へ移す)。
+  retiredChannels: [
+    { id: "acc1", short: "月詠み", name: "月詠み色恋劇場" },
+    { id: "acc2", short: "宵桜", name: "宵桜艶帖" },
+  ],
+
   // アカウント別の投稿時刻オフセット（分）。acc2 をずらして2アカウント同時刻を避ける。
   // acc2(宵桜艶帖)は既定+30分。ただし下の accountOffsetByTime で特定枠だけ個別に上書きする（Chami指示2026-08-03）。
-  accountOffsetMin: { acc1: 0, acc2: 30 },
+  accountOffsetMin: { acc1: 0, acc2: 30, acc3: 0 },
   // 特定のテンプレ基準時刻(base)ごとの個別オフセット（分）。キー=テンプレの生時刻。
   // acc2: 昼12:15枠→+5(=12:20)、深夜24:00枠→+20(=24:20)。それ以外は accountOffsetMin(+30)。
   accountOffsetByTime: { acc2: { "12:15": 5, "24:00": 20 } },
@@ -27,6 +39,17 @@ SCH.config = {
   statusEnum: ["未着手", "制作済・未予約", "予約登録済", "公開済", "取り下げ"],
   // 自動更新の対象になる空き枠（§7.5：未着手 / 制作済・未予約 のみ）
   autoUpdatableStatuses: ["未着手", "制作済・未予約"],
+};
+
+// チャンネル表の引き方(app/generator/store 共通)。
+SCH.chan = {
+  ids() { return SCH.config.channels.map((c) => c.id); },
+  isAcc(acc) { return /^acc\d+$/.test(String(acc || "")); },
+  isShown(acc) { return SCH.chan.ids().indexOf(acc) >= 0; },
+  info(acc) {
+    const all = SCH.config.channels.concat(SCH.config.retiredChannels || []);
+    return all.find((c) => c.id === acc) || { id: acc, short: acc, name: acc };
+  },
 };
 
 // 永続化アダプタ選択（§7.8）。'local' は開発用プレースホルダ。

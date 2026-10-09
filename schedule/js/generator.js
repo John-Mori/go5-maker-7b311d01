@@ -14,7 +14,7 @@ window.SCH = window.SCH || {};
   //   ここを curAccount_() 固定にしていたのが「宵桜の18:30が18:00で保存される」バグの真因
   //   (両ch生成なのに常に現在タブのオフセットを両方へ当てていた・2026-08-11)。
   function accOffsetMin_(config, baseTime, acc) {
-    if (acc !== 'acc1' && acc !== 'acc2') acc = curAccount_();
+    if (!/^acc\d+$/.test(String(acc || ''))) acc = curAccount_();
     var byTime = (config && config.accountOffsetByTime) || {};
     var ov = byTime[acc];
     if (ov && typeof ov[baseTime] === 'number') return ov[baseTime];

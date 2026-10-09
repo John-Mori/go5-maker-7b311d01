@@ -311,14 +311,12 @@ window.SCH = window.SCH || {};
         }
         // body に実行フィールドを残さない（exec を唯一の正とする＝他chへ漏れない）。
         for (const f of EXEC_FIELDS) delete stored[f];
-        // プリスティン判定：両チャンネルとも未着手 & プランフィールドが空
-        const execAcc1 = stored.exec && stored.exec.acc1 ? stored.exec.acc1 : {};
-        const execAcc2 = stored.exec && stored.exec.acc2 ? stored.exec.acc2 : {};
-        const bothPristine =
-          (!execAcc1.status || execAcc1.status === "未着手") &&
-          !execAcc1.video_id && !execAcc1.url && !execAcc1.post_uri &&
-          (!execAcc2.status || execAcc2.status === "未着手") &&
-          !execAcc2.video_id && !execAcc2.url && !execAcc2.post_uri;
+        // プリスティン判定：全チャンネル(acc1/acc2/acc3…)とも未着手 & プランフィールドが空
+        //   ★acc1/acc2だけを見ていると、acc3だけに記録した枠が「空」と判定されて消える(2026-10-10)。
+        const bothPristine = Object.keys(stored.exec || {}).every(function (k) {
+          const e = stored.exec[k] || {};
+          return (!e.status || e.status === "未着手") && !e.video_id && !e.url && !e.post_uri;
+        });
         const planPristine = !stored.title &&
           !stored.notes && !stored.desc_link && !stored.needs_review && !stored.verification;
         if (bothPristine && planPristine) {
@@ -333,7 +331,7 @@ window.SCH = window.SCH || {};
       // 自動公開判定を行ったチャンネルの exec だけを更新する。
       // acc1/acc2 は投稿時刻が異なるため、片方の判定で両方を公開済みにしない。
       async saveSlots(slotMap, acc) {
-        const targetAcc = acc === "acc2" ? "acc2" : "acc1";
+        const targetAcc = /^acc\d+$/.test(String(acc || "")) ? acc : "acc1";
         for (const id of Object.keys(slotMap)) {
           const s = slotMap[id];
           const existing = state.slotData[id];

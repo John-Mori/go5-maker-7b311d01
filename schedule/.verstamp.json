@@ -6,20 +6,20 @@
       "sha": "8f9ad3bc54a93fde"
     },
     "js/config.js": {
-      "v": 22,
-      "sha": "eafac11f7d174e7c"
+      "v": 23,
+      "sha": "f51a2ffef3de172f"
     },
     "js/generator.js": {
-      "v": 23,
-      "sha": "ea61f74a7447e6f2"
+      "v": 24,
+      "sha": "51ae3294b8d477b8"
     },
     "js/store.js": {
-      "v": 25,
-      "sha": "7bdc87b5722b4694"
+      "v": 26,
+      "sha": "fd6b483984f69d17"
     },
     "js/app.js": {
-      "v": 42,
-      "sha": "26e05d091072f26d"
+      "v": 43,
+      "sha": "d97f9faea7b5a278"
     }
   }
 }

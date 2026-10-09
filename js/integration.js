@@ -45,8 +45,8 @@
     //   重く端末差もあるので、iframe側でlocalStorageを読み直さず本体に一元化して問い合わせる。
     if (d.type === 'req-day-posts') {
       var dates = Array.isArray(d.dates) ? d.dates : (d.date ? [d.date] : []);
-      // acc=カレンダーで押したch(月詠み/宵桜)。指定があればそのchの投稿履歴だけを返す(Chami依頼2026-08-10)。
-      var reqAcc = (d.acc === 'acc1' || d.acc === 'acc2') ? d.acc : null;
+      // acc=カレンダーで押したch(acc◯)。指定があればそのchの投稿履歴だけを返す(Chami依頼2026-08-10)。
+      var reqAcc = /^acc\d+$/.test(String(d.acc || '')) ? d.acc : null;
       var byDate = {};
       try {
         if (window.Go5History && typeof window.Go5History.postsForDay === 'function') {

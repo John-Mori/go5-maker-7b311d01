@@ -19,24 +19,28 @@ window.SCH = window.SCH || {};
   // 開いている編集モーダルが「どのチャンネルの枠か」。両ch同時表示で月詠み/宵桜のセルを個別に押した時、
   //   そのchの投稿履歴を出す・そのchへ保存するために使う(Chami依頼2026-08-10)。null=現在ch(curAcc)。
   let editingAcc = null;
-  function effAcc() { return (editingAcc === "acc1" || editingAcc === "acc2") ? editingAcc : curAcc(); }
-  // id と ch から、その ch 用に合成済みのフラット枠を返す(左=slots1=月詠み / 右=slots2=宵桜)。
+  const chan = SCH.chan;
+  function effAcc() { return chan.isAcc(editingAcc) ? editingAcc : curAcc(); }
+  // id と ch から、その ch 用に合成済みのフラット枠を返す(並びは config.channels)。
   function slotForAcc(id, acc) {
     if (!lastRender) return null;
-    const m = acc === "acc2" ? lastRender.slots2 : lastRender.slots1;
+    const m = lastRender.byAcc && lastRender.byAcc[acc];
     return (m && m[id]) || (lastRender.slots && lastRender.slots[id]) || null;
   }
   // 枠ピックモード：ドラフト投稿モードの「公開枠を選ぶ」から enter-pick で入る。
   //   ONの間は編集モーダルに「この枠を公開枠に選ぶ」ボタンを出し、押すと slot-picked を親へ返す。
   let pickMode = (function () { try { return /[?&]pick=1(?:&|$)/.test(location.search); } catch (e) { return false; } })();
-  // ピック対象チャンネル：ドラフトの投稿先(acc1/acc2)。指定時はそのchの枠だけを表示する(Chami依頼2026-08-05)。
-  let pickAcc = (function () { try { var m = /[?&]acc=(acc1|acc2)/.exec(location.search); return m ? m[1] : null; } catch (e) { return null; } })();
+  // ピック対象チャンネル：ドラフトの投稿先(acc◯)。指定時はそのchの枠だけを表示する(Chami依頼2026-08-05)。
+  let pickAcc = (function () { try { var m = /[?&]acc=(acc\d+)/.exec(location.search); return m ? m[1] : null; } catch (e) { return null; } })();
   if (pickMode && typeof document !== "undefined" && document.body) { try { document.body.classList.add("pick-mode"); } catch (e) {} }
 
-  // 現在チャンネルを取得（localStorage から。acc1/acc2）。ピックモードでは投稿先ch(pickAcc)を優先。
+  // 現在チャンネルを取得（localStorage から）。ピックモードでは投稿先ch(pickAcc)を優先。
+  //   表示対象外のch(運用を止めた月詠み/宵桜等)が残っていたら、先頭の表示chへ寄せる。
   function curAcc() {
-    if (pickMode && pickAcc) return pickAcc;
-    try { return localStorage.getItem('current_account') || 'acc1'; } catch (e) { return 'acc1'; }
+    if (pickMode && chan.isShown(pickAcc)) return pickAcc;
+    let a = null;
+    try { a = localStorage.getItem('current_account'); } catch (e) {}
+    return chan.isShown(a) ? a : chan.ids()[0];
   }
 
   // ---- 日付（JST） ----
@@ -122,13 +126,19 @@ window.SCH = window.SCH || {};
     const overrides = store.getOverrides();
     const acc = curAcc();                 // ヘッダ・タブ用。カレンダー本体は両ch同時＝アカウント非連動(指示書v0.1 §1)
     const { genStart, genEnd } = genWindow();
-    // 両チャンネルを1画面へ統合。左=月詠み(acc1)固定・右=宵桜(acc2)固定。優先度・尺は両者同一、時刻のみ20分ずれ。
+    // config.channels の全chを1画面へ統合(左→右)。優先度・尺は全ch同一、時刻だけchごとのオフセットでずらす。
     // ★各chのオフセットは「そのch」で計算する。generateRange に acc を明示で渡す
-    //   (渡さないと generator が現在タブのchを両方へ当て、宵桜18:30が18:00で保存される・2026-08-11)。
-    const r1 = gen.generateRange(genStart, genEnd, master, config, overrides, store.getSlotDataForAccount("acc1"), "acc1");
-    const r2 = gen.generateRange(genStart, genEnd, master, config, overrides, store.getSlotDataForAccount("acc2"), "acc2");
-    const result = acc === "acc2" ? r2 : r1;   // 保存は現行タブの結果のみ(既存の永続化挙動を保つ)
-    lastRender = { slots: result.slots, dayMetas: r1.dayMetas, review: result.review, slots1: r1.slots, slots2: r2.slots };
+    //   (渡さないと generator が現在タブのchを全部へ当て、宵桜18:30が18:00で保存された・2026-08-11)。
+    const byAcc = {};
+    let first = null, cur = null;
+    chan.ids().forEach(function (id) {
+      const r = gen.generateRange(genStart, genEnd, master, config, overrides, store.getSlotDataForAccount(id), id);
+      byAcc[id] = r.slots;
+      if (!first) first = r;
+      if (id === acc) cur = r;
+    });
+    const result = cur || first;   // 保存は現行タブの結果のみ(既存の永続化挙動を保つ)
+    lastRender = { slots: result.slots, dayMetas: first.dayMetas, review: result.review, byAcc: byAcc };
     await store.saveSlots(result.slots, acc);  // 自動公開は判定したチャンネルだけを更新
     render(lastRender);
     autoSyncVisible();   // ④ 表示中の未公開枠を、同日・同時刻の投稿履歴と自動同期
@@ -171,7 +181,7 @@ window.SCH = window.SCH || {};
     const reviewCount = result.review.length;
     const acc = curAcc();
     const offMin = (config.accountOffsetMin && typeof config.accountOffsetMin[acc] === 'number') ? config.accountOffsetMin[acc] : 0;
-    const accLabel = offMin > 0 ? `${acc} / 時刻オフセット +${offMin}分` : `${acc}`;
+    const accLabel = chan.info(acc).name + (offMin > 0 ? ` / 時刻オフセット +${offMin}分` : "");
     document.getElementById("status-bar").innerHTML =
       `<span>表示: ${ds} 〜 ${dt.addDays(ds, config.displayWeeks * 7 - 1)}（${config.displayWeeks}週）</span>` +
       `<span class="muted">保存先: ${store.adapterName}</span>` +
@@ -233,16 +243,17 @@ window.SCH = window.SCH || {};
 
     // 型変更ボタン(休みにする 等)は day-head の「編集」→ ボトムシートへ移設。カード内には常設しない(コンパクト化)。
 
-    // 6枠＝1日6行を維持。1行に月詠み(左)・宵桜(右)を同時表示(指示書v0.1 §3)。優先度はch非依存(roleで決まる)
+    // 6枠＝1日6行を維持。1行に全chを左→右で同時表示(指示書v0.1 §3)。優先度はch非依存(roleで決まる)
     const slotWrap = document.createElement("div");
     slotWrap.className = "slots";
+    const lead = ctx.byAcc[chan.ids()[0]] || {};
     const dayslots1 = [];
     for (let idx = 0; idx < config.slotsPerDay; idx++) {
-      const s1 = ctx.slots1[gen.slotId(date, idx)];
+      const s1 = lead[gen.slotId(date, idx)];
       if (s1) dayslots1.push(s1);
     }
     assignPriorities(dayslots1);
-    dayslots1.forEach((s1) => slotWrap.appendChild(renderPairRow(s1, ctx.slots2[s1.id])));
+    dayslots1.forEach((s1) => slotWrap.appendChild(renderPairRow(s1, ctx)));
     cell.appendChild(slotWrap);
     return cell;
   }
@@ -254,8 +265,8 @@ window.SCH = window.SCH || {};
     ranked.forEach((s, i) => { s._priority = Math.min(i + 1, 5); });
   }
 
-  // 1スロット＝1ペア行：[優先度バー][月詠み 時刻 状態][宵桜 時刻 状態][優先度ラベル](指示書v0.1 §3)
-  function renderPairRow(s1, s2) {
+  // 1スロット＝1行：[優先度バー][ch1 時刻 状態][ch2 …][優先度ラベル](指示書v0.1 §3)。s1=先頭chの枠。
+  function renderPairRow(s1, ctx) {
     const el = document.createElement("div");
     const pri = (s1 && s1._priority) || 5;
     el.className = "slot pr-" + pri;
@@ -265,24 +276,25 @@ window.SCH = window.SCH || {};
     // 素の時刻(テンプレ生時刻=base)→左右へ各chのオフセットを当てる。ch差を1行に並置。
     // base_time があれば直接使う(オフセットが時刻ごとに異なるため逆算では復元不能)。無い旧枠は従来どおりフラットに逆算。
     const off = config.accountOffsetMin || {};
-    const curOff = (typeof off[curAcc()] === "number") ? off[curAcc()] : 0;
-    const base = (s1 && s1.base_time) ? s1.base_time : addMin(s1.time, -curOff);
-    const st1 = (s1 && s1.status) || "未着手";
-    const st2 = (s2 && s2.status) || "未着手";
-    if (st1 === "公開済" && st2 === "公開済") el.classList.add("cleared"); // 両ch済＝行ごと沈める
-
+    const leadId = chan.ids()[0];
+    const leadOff = (typeof off[leadId] === "number") ? off[leadId] : 0;
+    const base = (s1 && s1.base_time) ? s1.base_time : addMin(s1.time, -leadOff);
     // ピックモード(投稿先chを渡された時)は、そのchの列だけを出す(Chami依頼2026-08-05)。
-    const cell1 = chanCell("月詠み", addMin(base, acctOffAt(config, "acc1", base)), st1, "acc1");
-    const cell2 = chanCell("宵桜", addMin(base, acctOffAt(config, "acc2", base)), st2, "acc2");
-    const cells = (pickMode && pickAcc === "acc2") ? cell2
-      : (pickMode && pickAcc === "acc1") ? cell1
-      : (cell1 + cell2);
+    const ids = (pickMode && chan.isShown(pickAcc)) ? [pickAcc] : chan.ids();
+    let allDone = true;
+    const cells = ids.map(function (id) {
+      const s = (ctx.byAcc[id] || {})[s1.id];
+      const st = (s && s.status) || "未着手";
+      if (st !== "公開済") allDone = false;
+      return chanCell(chan.info(id).short, addMin(base, acctOffAt(config, id, base)), st, id);
+    }).join("");
+    if (allDone) el.classList.add("cleared"); // 全ch済＝行ごと沈める
     el.innerHTML =
       `<span class="bar"></span>` +
       cells +
       `<span class="prio">${pri === 1 ? '<span class="star"></span>本命' : "優先度" + pri}` +
       ((s1 && s1.needs_review) ? ' <span class="slot-review" title="要確認">!</span>' : "") + `</span>`;
-    // セルを押した ch の枠を開く(月詠み=左/宵桜=右)。両ch同時表示でも押したchの投稿履歴が出る(Chami2026-08-10)。
+    // セルを押した ch の枠を開く。複数ch同時表示でも押したchの投稿履歴が出る(Chami2026-08-10)。
     el.querySelectorAll(".cell[data-acc]").forEach(function (cellEl) {
       cellEl.addEventListener("click", function (ev) {
         ev.stopPropagation();
@@ -374,12 +386,11 @@ window.SCH = window.SCH || {};
   // ---- スロット編集モーダル ----
   function openEditor(s, forceAcc) {
     editingId = s.id;
-    editingAcc = (forceAcc === "acc1" || forceAcc === "acc2") ? forceAcc : null;
+    editingAcc = chan.isAcc(forceAcc) ? forceAcc : null;
     const acc = effAcc();
     // s はフラット（現チャンネルの exec が合成済み）なのでそのまま使う
     const m = document.getElementById("modal");
-    const accNames = { acc1: "月詠み色恋劇場", acc2: "宵桜艶帖" };
-    const accDisplayName = accNames[acc] || acc;
+    const accDisplayName = chan.info(acc).name;
     m.querySelector(".modal-body").innerHTML = `
       <h3>${s.date}（${s.day_type}） ${s.time} / ${s.role}</h3>
       <div class="ch-badge">チャンネル: <strong>${accDisplayName}</strong>（${acc}）の実行記録を編集</div>
@@ -530,7 +541,7 @@ window.SCH = window.SCH || {};
   // 枠へ投稿を結びつける＝現チャンネルの実行記録を「公開済」＋題名/URLで更新する。
   //   未保存のプリスティン枠は upsertExec が空振りするので、writeback と同じく upsertSlot で種ごと保存する。
   function applyLink(s, post, accArg) {
-    const acc = (accArg === "acc1" || accArg === "acc2") ? accArg : curAcc();
+    const acc = chan.isAcc(accArg) ? accArg : curAcc();
     const patch = {
       status: "公開済",
       title: post.title || s.title || "",
@@ -569,7 +580,7 @@ window.SCH = window.SCH || {};
     if (d.type === "show") { requestAnimationFrame(function () { scrollToToday(false); }); return; }
     if (d.type === "enter-pick") {
       pickMode = true;
-      if (d.acc === "acc1" || d.acc === "acc2") pickAcc = d.acc;   // 投稿先chを受け取り、その列だけに絞る
+      if (chan.isAcc(d.acc)) pickAcc = d.acc;   // 投稿先chを受け取り、その列だけに絞る
       try { document.body.classList.add("pick-mode"); } catch (e) {}
       if (editingId) closeEditor();
       recomputeAndRender();                                        // ch絞り込みを反映して再描画
@@ -586,7 +597,7 @@ window.SCH = window.SCH || {};
       return;
     }
     if (d.type !== "slot-writeback") return;
-    const acc = (d.account === "acc1" || d.account === "acc2") ? d.account : curAcc();
+    const acc = chan.isAcc(d.account) ? d.account : curAcc();
     // メッセージに明示された実行値だけを書き戻す。他chの表示用コピーを混ぜない。
     const patch = {};
     ["status", "url", "video_id", "post_uri", "post_url", "short_url", "posted_at"].forEach(function (key) {
@@ -596,7 +607,7 @@ window.SCH = window.SCH || {};
     if (stored) {
       store.upsertExec(d.id, acc, patch).then(recomputeAndRender);
     } else {
-      const sourceMap = lastRender && (acc === "acc2" ? lastRender.slots2 : lastRender.slots1);
+      const sourceMap = lastRender && lastRender.byAcc && lastRender.byAcc[acc];
       const source = sourceMap && sourceMap[d.id];
       if (!source) return;
       // 未保存の自動生成枠だけ、対象ch自身の表示値を種にして新規保存する。
