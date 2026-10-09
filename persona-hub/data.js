@@ -24,9 +24,9 @@ window.PERSONA_HUB_DATA = {
    },
    "アイコン": {
     "path": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
-    "sha1": "4ce728cce60f797a11a7d34069f231bb0603c260",
-    "bytes": 19304,
-    "mtime": 1791275802.604
+    "sha1": "17cae25f7d317f74ce525cfa40f630bc98a74e39",
+    "bytes": 19708,
+    "mtime": 1791583759.036
    },
    "原典": {
     "path": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md",
@@ -2728,14 +2728,18 @@ window.PERSONA_HUB_DATA = {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\klopp.md",
     "口調ルール": null,
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": null,
+    "アイコン差分": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
     "スプライト": null,
     "文脈": "D:\\SougouStartFolder\\LocalData\\persona_context\\klopp_context.md"
    },
    "口調": null,
    "アイコン": {
-    "枚数": 0,
-    "url": []
+    "枚数": 3,
+    "url": [
+     "https://go5-sync.trustsignalbot.workers.dev/img/0e5d3772120472a260de3f5cf810b53361f834f9759e21c4b6c1b04ddf8d89d1",
+     "https://go5-sync.trustsignalbot.workers.dev/img/2d47dab4dc0f2e8028aaae1a756905eebe38137b72acd427c1565411c32685fa",
+     "https://go5-sync.trustsignalbot.workers.dev/img/d9c5d82be60c5d71863133842c657b2d80844ae245eb125d71167020778d5afe"
+    ]
    },
    "呼称": {
     "この人をどう呼ぶか": {
