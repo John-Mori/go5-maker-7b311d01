@@ -2546,14 +2546,16 @@
     if (!sale) return '';
     return promoLabelType_() === 'price' ? String(sale.price) : String(sale.pct);
   }
+  // ★2026-10-09 Chami決定(5sec部門 msg 1558119855712895048)「1. 投稿文からも外す」:
+  //   販促ラベル(画像焼き込み・2026-10-08「ラベルも止めて」)と同じ扱いで、投稿文への割引率/価格の
+  //   自動差し込みも外す。_lastSaleForDisc 自体は保持(#promoType手動切替時の出し分け=755行目で使用)するが、
+  //   applyDiscount は呼ばない＝本文は手動ドロップダウン操作時だけ変わる(DISC/discApply自体は削除しない)。
   function autoApplyDiscountFromInfo_(info) {
     if (!info || !info.title) return; // 取得失敗＝手動フォールバックのため触らない
     var cid = info.cid || info.title; // cid欠落時はタイトルで代用
     var onSale = info.listPrice && info.price && info.discountPct > 0 && info.price < info.listPrice;
     _lastSaleForDisc = onSale ? { cid: cid, pct: info.discountPct, price: info.price } : null;
-    if (cid === _autoDiscDoneCid) return; // この作品には適用済み＝手動変更を尊重
-    _autoDiscDoneCid = cid;
-    applyDiscount(discNumForMode_(_lastSaleForDisc));
+    _autoDiscDoneCid = cid; // 重複適用防止の記録だけ更新(手動変更の保護は維持)
   }
   function fetchMovieWorkInfo(url) {
     var el = els.movieWorkInfo;
