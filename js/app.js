@@ -63,7 +63,10 @@
     acc2: { label: "宵桜艶帖～Yoizakura Tsuyacho～", bg: "assets/bg_account2.mp4?v=203" }, // S-1a: 5.0sシームレスループ版に差し替え。(継ぎ目21.2→27.0dB)?vはキャッシュ更新用
     acc3: { label: "DLサイト便(仮)", bg: "assets/bg_main.mp4" },  // ★背景動画は未用意。acc1を仮流用(テロップ検証用・要差替)
   };
-  let curAccount = "acc1";
+  // ★DLサイト便一本化(Chami 2026-10-10 msg1558233171961708595「月詠みと宵桜艶帖の項目削除して」)。
+  //   acc1/acc2 はボタンを隠して起動時も acc3 へ寄せるだけ。定義・保存データ・FANZA経路は温存(戻す時はここを null に)。
+  const ONLY_ACCOUNT = "acc3";
+  let curAccount = ONLY_ACCOUNT || "acc1";
 
   // ---- アカウント別テンプレ・テーマ(派生プリセット)----
   // 変えるのは「表示テキストと装飾色」のみ。レイアウト・座標・送り・生成フローは共通。(§3座標規約は不変)
@@ -1325,6 +1328,7 @@
   // ---- アカウント切替 ----
   function setAccount(id) {
     if (!ACCOUNTS[id]) id = "acc1";
+    if (ONLY_ACCOUNT) id = ONLY_ACCOUNT;
     curAccount = id;
     try { localStorage.setItem("current_account", id); } catch (e) {}
     // 誘導文が未編集(空 or いずれかのテーマ既定文)なら、当該テーマの既定文へ追従。ユーザーが書き換えた文面は尊重して残す。

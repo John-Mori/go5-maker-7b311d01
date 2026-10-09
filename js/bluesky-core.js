@@ -448,7 +448,8 @@
    * ・"N%" は割引率(opts.pct)、"N円"/"¥N" は実価格(opts.price)へ置換(値が無ければ N のまま=誤値を貼らない)。
    * ・%表示のときは接頭辞なしの "¥N" を含む価格専用行(例:期間限定今だけ¥N作品をご案内！)を行ごと削除(②)。
    * @param {string} text
-   * @param {{type:string, pct:(number|null), price:(number|null)}} opts
+   * ・opts.noPromo=true なら %:/¥: 行を両方削除(DLサイト便・割引率を出さない Chami 2026-10-09)。
+   * @param {{type:string, pct:(number|null), price:(number|null), noPromo:(boolean|undefined)}} opts
    * @returns {string}
    */
   function resolvePromoTemplate(text, opts) {
@@ -466,6 +467,7 @@
     for (var i = 0; i < lines.length; i++) {
       var line = lines[i];
       var m = line.match(/^\s*([%％¥￥])\s*[:：]\s?(.*)$/);
+      if (m && opts.noPromo) continue;        // 販促なし(DLサイト便)=%:/¥: 行は両方とも行ごと削除
       if (m) {
         var priceLine = (m[1] === '¥' || m[1] === '￥');
         if (isPrice !== priceLine) continue; // 選ばれなかった側は行ごと削除
@@ -474,6 +476,7 @@
         continue;                             // %表示のとき価格専用行(¥N)は行ごと削除
       }
       if (noDiscount && /N\s*[%％]/.test(line)) continue; // 割引0%=N%を含む行を丸ごと削除(①)
+      if (opts.noPromo && /N\s*[%％]|[%％]\s*(?:オフ|OFF)/.test(line)) continue; // 販促なし=接頭辞なしの割引行も外す
       out.push(line);
     }
     var res = out.join('\n');

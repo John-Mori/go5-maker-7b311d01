@@ -69,9 +69,10 @@ try {
 
 <div class="acct-bar">
   <span class="acct-bar-label">アカウント</span>
-  <button id="acctBtn1" class="acct-btn active" type="button">月詠み色恋劇場</button>
-  <button id="acctBtn2" class="acct-btn" type="button">宵桜艶帖～Yoizakura Tsuyacho～</button>
-  <button id="acctBtn3" class="acct-btn" type="button">DLサイト便(仮)</button>
+  <!-- DLサイト便一本化(Chami 2026-10-10)：月詠み/宵桜艶帖は非表示のみ。削除せず温存。 -->
+  <button id="acctBtn1" class="acct-btn" type="button" hidden>月詠み色恋劇場</button>
+  <button id="acctBtn2" class="acct-btn" type="button" hidden>宵桜艶帖～Yoizakura Tsuyacho～</button>
+  <button id="acctBtn3" class="acct-btn active" type="button">DLサイト便(仮)</button>
   <!-- ⏰予約 と 📅カレンダー は同じ行に揃える(アカウント帯の次の行で横並び・Chami 2026-07-31)。 -->
   <div class="acct-launch-row">
     <button id="reserveBtn" class="cal-launch-btn" type="button">⏰ 予約</button>
@@ -964,7 +965,6 @@ try {
 <script src="core/idb-store.js?v=968"></script>
 <script src="core/img-diag.js?v=968"></script>
 <script src="core/sync.js?v=968"></script>
-<script src="core/image-cdn.js?v=968"></script>
 <script src="core/kaizen-log.js?v=968"></script>
 <script src="core/save-gate.js?v=968"></script>
 <script src="core/operation-gate.js?v=968"></script>

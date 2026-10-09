@@ -146,9 +146,7 @@ try {
 <script src="core/image-role.js?v=968"></script>
 <script src="core/idb-store.js?v=968"></script>
 <script src="core/img-diag.js?v=968"></script>
-<script src="core/viewport-anchor.js?v=968"></script>
 <script src="core/sync.js?v=968"></script>
-<script src="core/image-cdn.js?v=968"></script>
 <script src="core/kaizen-log.js?v=968"></script>
 <script src="core/operation-gate.js?v=968"></script>
 <!-- ── 機能層(投稿履歴の描画に要るもの。app.js/affiliate.js は積まないが、stock.js は積む
@@ -186,11 +184,11 @@ try {
     started = true; attempts++;
     var s = document.createElement('script');
     s.id = 'go5CandidatesLazy';
-      s.src = 'js/candidates.js?v=968';
-      s.async = true;
-      s.onload = function () {
-        try { if (window.Go5Verify && window.Go5Verify.patchImages) window.Go5Verify.patchImages(); } catch (e) {}
-      };
+    s.src = 'js/candidates.js?v=968';
+    s.async = true;
+    s.onload = function () {
+      try { if (window.Go5Verify && window.Go5Verify.render) window.Go5Verify.render(); } catch (e) {}
+    };
     s.onerror = function () {
       started = false;
       try { s.remove(); } catch (e) {}

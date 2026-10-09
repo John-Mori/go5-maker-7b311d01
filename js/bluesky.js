@@ -604,6 +604,7 @@
   };
   // 割引文の挿入/差し替え/削除を行う純粋関数。(対象テキストを受け取り新テキストを返す)isNew=新作用/isDigest=総集編用の文面。
   function discApply(text, val, isNew, isJun, isDigest) {
+    if (acctId() === 'acc3') val = '';  // DLサイト便は割引行を入れない(既存の割引行は外す)
     var cfg = DISC[acctId()] || DISC.acc1;
     var lines = String(text == null ? '' : text).split('\n');
     var idx = -1;
@@ -1598,6 +1599,8 @@
   }
   function setShareOutputs(shortUrl, fallbackUrl) {
     var url = shortUrl || fallbackUrl || '';
+    // DLサイト便(acc3)は自前短縮ドメインを画面に出さない(Chami 2026-10-09)。記録(histAdd)は従来どおり短縮値で残す。
+    if (acctId() === 'acc3') url = fallbackUrl || '';
     if (els.shortUrlOut) els.shortUrlOut.textContent = url || '(短縮URLを取得できませんでした)';
     if (url) { putUrlTop(url); prevShortUrl = url; lastShortUrl = url; }
   }
@@ -1662,7 +1665,8 @@
       var snap = fanzaSnapForWorkUrl_(url);
       if (snap) { if (price == null) price = snap.price; if (pct == null) pct = snap.discountPct; }
     }
-    return { type: promoLabelType_(), price: price, pct: pct };
+    // DLサイト便(acc3)は投稿文に割引率/価格を出さない=%:/¥:行を両方外す(Chami 2026-10-09「1」)
+    return { type: promoLabelType_(), price: price, pct: pct, noPromo: acctId() === 'acc3' };
   }
   // 戦略ラベル(raw/戦略_画像選びとコメント.md §4): 狙い(成約/集客)とコメント型。(①〜⑧)
   // 動画ごとのラベルなので投稿後に未設定へ戻す。(前作の値が残ると分析を汚す)
@@ -2094,7 +2098,9 @@
     });
   }
   function measureWorkLink_(text) {
-    return _measureWorkLinkRaw_(text).then(function (res) {
+    // DLサイト便(acc3)は作品リンクを短縮しない=Chamiが貼ったリンクをそのまま出す(新ドメイン不使用・Chami 2026-10-09)
+    var raw = (acctId() === 'acc3') ? Promise.resolve({ text: text, workShort: null }) : _measureWorkLinkRaw_(text);
+    return raw.then(function (res) {
       return finalizeSalePlaceholder_(res.text).then(function (t2) { res.text = t2; return res; });
     });
   }

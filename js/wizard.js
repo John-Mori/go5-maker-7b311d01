@@ -322,8 +322,10 @@
       var nameEl = document.getElementById('wizAcctName');
       if (nameEl) nameEl.textContent = accountLabel(W.account);
     });
-    acctRow.appendChild(btn1);
-    acctRow.appendChild(btn2);
+    // 本体の切替ボタンが隠されている間(DLサイト便一本化・Chami 2026-10-10)はウィザード側も出さない
+    var main1 = document.getElementById('acctBtn1'), main2 = document.getElementById('acctBtn2');
+    if (!(main1 && main1.hidden)) acctRow.appendChild(btn1);
+    if (!(main2 && main2.hidden)) acctRow.appendChild(btn2);
     body.appendChild(acctRow);
 
     /* 作品URL入力 */
@@ -756,6 +758,7 @@
   function accountLabel(acc) {
     if (acc === 'acc1') return '月詠み色恋劇場';
     if (acc === 'acc2') return '宵桜艶帖';
+    if (acc === 'acc3') return 'DLサイト便(仮)';
     return acc || '(未設定)';
   }
 

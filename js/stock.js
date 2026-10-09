@@ -3008,7 +3008,8 @@
       if (price == null && meta.priceInfo.price != null) price = meta.priceInfo.price;
       if (pct == null && meta.priceInfo.pct != null) pct = meta.priceInfo.pct;
     }
-    return { type: type, price: price, pct: pct };
+    var acc = (meta && meta.account) || (window.getCurrentAccount ? window.getCurrentAccount() : '');
+    return { type: type, price: price, pct: pct, noPromo: acc === 'acc3' };  // DLサイト便は割引率を出さない
   }
   // 販促テンプレ(%:/¥: 候補行・N%/N円/¥N・%表示時の価格行削除)を解決する。純粋関数は bluesky-core 側。(Chami依頼2026-08-03①②)
   function applyPromo_(text, meta) {
