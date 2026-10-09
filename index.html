@@ -507,6 +507,22 @@ try {
     <div class="hint">af_id は「<img class="emico" src="assets/icons/ic-link.png?v=968" alt="リンク"> アフィリンク」タブの設定を流用。空欄なら本文だけ投稿します。この本文＋作品URLは<b>自動投稿(方法①)でも共通</b>。</div>
   </section>
 
+  <!-- 🧵 一括投稿(親本文は手入力・リプにURLを吊り下げ)：DLサイト便(acc3)向け。親本文は雛形からの自動生成の対象外(Chami原文2026-10-09 msg 1558122971250302978「本文の投稿文はこっちで考えるから別枠でテキストボックスで入力できるようにしといて」) -->
+  <section class="card">
+    <details class="bsky-adv" id="bskyThreadDetails">
+      <summary>🧵 一括投稿(親本文を手入力してリプにURL)</summary>
+      <div class="hint">親の投稿本文は雛形から自動で作りません。ここに直接入力してください。「🧵 一括投稿」を押すと、この本文で親を投稿し、ランダムな秒数(1分以内)を空けてから、下のURLをリプライに投稿します。</div>
+      <label class="field-label" for="bskyThreadText">親の投稿本文(手入力)</label>
+      <textarea id="bskyThreadText" rows="5" placeholder="ここに本文を入力してください" style="font-size:.8rem;width:100%;box-sizing:border-box;"></textarea>
+      <div class="counter" id="bskyThreadCount">0 / 300</div>
+      <label class="field-label" for="bskyThreadReplyUrl">リプライに吊り下げるURL(自分で貼ったアフィリンクをそのまま使用・本体は加工しません)</label>
+      <input id="bskyThreadReplyUrl" type="url" inputmode="url" placeholder="https://…" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="width:100%;box-sizing:border-box;">
+      <div class="hint" style="margin-top:4px;">画像は上の「📷 添付画像」の選択を使います。(未選択ならプレビュー/動画の画像を使用)</div>
+      <button id="bskyThreadPostBtn" class="primary" type="button" style="margin-top:8px;">🧵 一括投稿(親→リプにURL)</button>
+      <div id="bskyThreadStatus" class="status" style="margin-top:6px;"></div>
+    </details>
+  </section>
+
   <!-- 🔥 セール案内URL管理(複数保持・名前付き・追加/選択/保存/削除。選んだURLは次回も自動で使う・アカウント別)。★添付画像より上に配置(Chami指定2026-08-02) -->
   <section class="card">
     <details class="bsky-adv" id="discUrlsDetails">

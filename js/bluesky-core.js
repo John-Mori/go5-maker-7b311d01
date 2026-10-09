@@ -105,6 +105,7 @@
       langs: ['ja']
     };
     if (payload.facets && payload.facets.length) record.facets = payload.facets;
+    if (payload.reply && payload.reply.root && payload.reply.parent) record.reply = payload.reply; // リプライ投稿(root/parent は {uri,cid})
     var imageRefs = payload.imageRefs || (payload.imageRef ? [payload.imageRef] : []);
     if (imageRefs.length) {
       record.embed = {
@@ -226,6 +227,47 @@
       var rkey = String(res.uri || '').split('/').pop();
       var postUrl = (sess.handle && rkey) ? ('https://bsky.app/profile/' + sess.handle + '/post/' + rkey) : '';
       return { uri: res.uri, cid: res.cid, handle: sess.handle, rkey: rkey, postUrl: postUrl };
+    });
+  }
+
+  /**
+   * 一括投稿：親(本文はそのまま・手入力想定)を投稿 → ランダムな秒数を空ける →
+   * リプライ(URLを本文として)を親へぶら下げる。(Chami依頼2026-10-09「同時には出さない。
+   * 親を出した後、ランダムな秒数を空けてリプライを出す。1分以内に収め、その範囲から乱数で選ぶ」)
+   * delayMinMs/delayMaxMs は既定 8000〜55000(8〜55秒)。「1分以内」の指定に対し、瞬時投稿に見えない
+   * 下限と、60秒の上限に食い込まない余裕を両方取った範囲。呼び出し側で上書き可。
+   * @returns Promise<{ parent:{uri,cid,handle,rkey,postUrl}, reply:{...}, delayMs }>
+   */
+  function blueskyPostThread(o) {
+    o = o || {};
+    var service = o.service || DEFAULT_SERVICE;
+    var ident = String(o.identifier || '').trim().replace(/^@/, '');
+    var parentText = String(o.parentText || '');
+    var replyText = String(o.replyText || '');
+    var delayMin = (typeof o.delayMinMs === 'number') ? o.delayMinMs : 8000;
+    var delayMax = (typeof o.delayMaxMs === 'number') ? o.delayMaxMs : 55000;
+    var delayMs = Math.round(delayMin + Math.random() * Math.max(0, delayMax - delayMin));
+    var sess;
+    var blobs = (o.imageBlobs || []).concat(o.imageBlob ? [o.imageBlob] : []).filter(Boolean);
+    return createSession(service, ident, o.appPassword).then(function (s) {
+      sess = s;
+      if (!blobs.length) return [];
+      return Promise.all(blobs.slice(0, 4).map(function (b) { return uploadBlob(service, sess.accessJwt, b); }));
+    }).then(function (ups) {
+      var imageRefs = Array.isArray(ups) ? ups.map(function (u) { return u && u.blob; }).filter(Boolean) : [];
+      return createPost(service, sess, { text: parentText, facets: detectFacets(parentText), imageRefs: imageRefs });
+    }).then(function (res) {
+      var rkey = String(res.uri || '').split('/').pop();
+      var postUrl = (sess.handle && rkey) ? ('https://bsky.app/profile/' + sess.handle + '/post/' + rkey) : '';
+      var parentOut = { uri: res.uri, cid: res.cid, handle: sess.handle, rkey: rkey, postUrl: postUrl };
+      return new Promise(function (resolve) { setTimeout(resolve, delayMs); }).then(function () { return parentOut; });
+    }).then(function (parentOut) {
+      var replyRef = { root: { uri: parentOut.uri, cid: parentOut.cid }, parent: { uri: parentOut.uri, cid: parentOut.cid } };
+      return createPost(service, sess, { text: replyText, facets: detectFacets(replyText), reply: replyRef }).then(function (res2) {
+        var rkey2 = String(res2.uri || '').split('/').pop();
+        var postUrl2 = (sess.handle && rkey2) ? ('https://bsky.app/profile/' + sess.handle + '/post/' + rkey2) : '';
+        return { parent: parentOut, reply: { uri: res2.uri, cid: res2.cid, handle: sess.handle, rkey: rkey2, postUrl: postUrl2 }, delayMs: delayMs };
+      });
     });
   }
 
@@ -527,6 +569,7 @@
     blueskyPostWithImage: blueskyPostWithImage,
     detectFacets: detectFacets,
     blueskyPostRaw: blueskyPostRaw,
+    blueskyPostThread: blueskyPostThread,
     blueskyVerify: blueskyVerify,
     buildDiscountCacheKey: buildDiscountCacheKey,
     resolvePromoTemplate: resolvePromoTemplate

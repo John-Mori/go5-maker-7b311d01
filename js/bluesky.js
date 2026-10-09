@@ -37,7 +37,9 @@
     ytQSave: $('ytQSave'), ytQLoad: $('ytQLoad'), ytReset: $('ytReset'), ytUndo: $('ytUndo'), ytRedo: $('ytRedo'), ytQInfo: $('ytQInfo'),
     bskyQSave: $('bskyQSave'), bskyQLoad: $('bskyQLoad'), bskyReset: $('bskyReset'), bskyUndo: $('bskyUndo'), bskyRedo: $('bskyRedo'), bskyQInfo: $('bskyQInfo'),
     affiUrls: $('affiUrls'),
-    affiUrlsQSave: $('affiUrlsQSave'), affiUrlsQLoad: $('affiUrlsQLoad'), affiUrlsReset: $('affiUrlsReset'), affiUrlsUndo: $('affiUrlsUndo'), affiUrlsRedo: $('affiUrlsRedo'), affiUrlsQInfo: $('affiUrlsQInfo')
+    affiUrlsQSave: $('affiUrlsQSave'), affiUrlsQLoad: $('affiUrlsQLoad'), affiUrlsReset: $('affiUrlsReset'), affiUrlsUndo: $('affiUrlsUndo'), affiUrlsRedo: $('affiUrlsRedo'), affiUrlsQInfo: $('affiUrlsQInfo'),
+    threadText: $('bskyThreadText'), threadCount: $('bskyThreadCount'), threadReplyUrl: $('bskyThreadReplyUrl'),
+    threadPostBtn: $('bskyThreadPostBtn'), threadStatus: $('bskyThreadStatus')
   };
   if (!els.text) return;
 
@@ -2714,6 +2716,39 @@
         .then(function (res) { setPostStatus('✅ 投稿しました → <a href="' + res.postUrl + '" target="_blank" rel="noopener">投稿を開く</a>', true); notifyPosted(res, text, alt, postAcct, postMeta, _ws); })
         .catch(function (e) { setPostStatus('⚠️ 投稿に失敗：<br>' + friendlyLoginError(e && e.message ? e.message : e), true); })
         .then(function () { els.postNow.disabled = false; });
+    });
+  }
+
+  // ---- 一括投稿(親=手入力本文→ランダム秒数待機→リプにURL)：DLサイト便(acc3)向け ----
+  //   親本文は composePostText/テンプレ帳を一切経由しない(Chami依頼2026-10-09「雛形から自動で作らないで」)。
+  //   URLもアフィリンク自動生成を経由せず、Chamiが貼った文字列をそのまま使う(要件37-39行目)。
+  if (els.threadText && els.threadCount) {
+    var updateThreadCount = function () { els.threadCount.textContent = countGraphemes(els.threadText.value) + ' / 300'; };
+    els.threadText.addEventListener('input', updateThreadCount);
+    updateThreadCount();
+  }
+  if (els.threadPostBtn) {
+    els.threadPostBtn.addEventListener('click', function () {
+      function setThreadStatus(m, html) { if (!els.threadStatus) return; if (html) els.threadStatus.innerHTML = m; else els.threadStatus.textContent = m || ''; }
+      var parentText = (els.threadText && els.threadText.value || '').trim();
+      var replyUrl = (els.threadReplyUrl && els.threadReplyUrl.value || '').trim();
+      if (!parentText) { setThreadStatus('親の投稿本文を入力してください。'); return; }
+      if (countGraphemes(parentText) > 300) { setThreadStatus('親の本文が300文字を超えています。短くしてください。'); return; }
+      if (!replyUrl) { setThreadStatus('リプライに吊り下げるURLを入力してください。'); return; }
+      var c = creds(); if (!c.handle || !c.appPw) { setThreadStatus('⚙設定でハンドルとアプリパスワードを入れてください。'); return; }
+      if (!window.BlueskyCore || !window.BlueskyCore.blueskyPostThread) { setThreadStatus('投稿モジュール未読込。'); return; }
+      if (!window.confirm('親の投稿(本文はそのまま)を投稿し、ランダムな秒数(1分以内)を空けてからリプライにURLを投稿します。よろしいですか？')) return;
+      els.threadPostBtn.disabled = true; setThreadStatus('親を投稿中…');
+      var f = selectedPostFile || photoFile();
+      (f ? compressFile(f) : Promise.resolve(null))
+        .then(function (blob) {
+          return window.BlueskyCore.blueskyPostThread({ identifier: c.handle, appPassword: c.appPw, parentText: parentText, replyText: replyUrl, imageBlob: blob });
+        })
+        .then(function (res) {
+          setThreadStatus('✅ 親を投稿 → ' + Math.round(res.delayMs / 1000) + '秒後にリプライへURLを投稿しました。<br>親：<a href="' + res.parent.postUrl + '" target="_blank" rel="noopener">開く</a>／リプ：<a href="' + res.reply.postUrl + '" target="_blank" rel="noopener">開く</a>', true);
+        })
+        .catch(function (e) { setThreadStatus('⚠️ 投稿に失敗：<br>' + friendlyLoginError(e && e.message ? e.message : e), true); })
+        .then(function () { els.threadPostBtn.disabled = false; });
     });
   }
 
