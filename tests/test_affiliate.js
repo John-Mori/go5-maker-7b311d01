@@ -7,7 +7,10 @@
 'use strict';
 
 const assert = require('assert');
-const { buildAffiliateLink, buildFanzaListLink, normalizeWorkUrl } = require('../js/affiliate-core.js');
+const {
+  buildAffiliateLink, buildFanzaListLink, normalizeWorkUrl,
+  buildDlsiteAffiliateLink, isDlsiteUrl, hasRealAffiliateIdDlsite, buildAnyAffiliateLink
+} = require('../js/affiliate-core.js');
 
 let passed = 0;
 let failed = 0;
@@ -237,6 +240,78 @@ test('L-3: 他人のアフィリンク(al.fanza lurl包み) → 素URLを取り�
 test('L-4: 非URL → {ok:false, error:bad_url}', function () {
   assert.strictEqual(buildFanzaListLink('not a url', 'af001').error, 'bad_url');
   assert.strictEqual(buildFanzaListLink('', 'af001').error, 'empty');
+});
+
+// ────────────────────────────────────────────────────────────
+// D-1〜D-9  DLsiteアフィリエイトリンク(buildDlsiteAffiliateLink / isDlsiteUrl / buildAnyAffiliateLink)
+// ────────────────────────────────────────────────────────────
+test('D-1: DLsite作品URL(=/product_id/形式) → productId抽出・リンク生成', function () {
+  const url = 'https://www.dlsite.com/maniax/work/=/product_id/RJ01234567.html';
+  const result = buildDlsiteAffiliateLink(url, 'test-001');
+
+  assert.strictEqual(result.ok, true, 'ok should be true');
+  assert.strictEqual(result.productId, 'RJ01234567', 'productId mismatch');
+
+  const expectedLink = 'https://www.dlsite.com/home/dlaf/=/link/work/aid/test-001/product_id/RJ01234567.html';
+  assert.strictEqual(result.link, expectedLink, 'link mismatch\n  got:      ' + result.link + '\n  expected: ' + expectedLink);
+});
+
+test('D-2: DLsite Books(BJ)URL → productId=BJ...', function () {
+  const url = 'https://www.dlsite.com/books/work/=/product_id/BJ01234567.html';
+  const result = buildDlsiteAffiliateLink(url, 'af001');
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(result.productId, 'BJ01234567');
+  assert.ok(result.link.includes('/aid/af001/'), 'link should contain aid');
+  assert.ok(result.link.includes('/product_id/BJ01234567.html'), 'link should contain product_id');
+});
+
+test('D-3: product_id=形式(クエリ風)でも拾う', function () {
+  const url = 'https://www.dlsite.com/maniax/dlaf/=/link/work/product_id=RJ01234567';
+  const result = buildDlsiteAffiliateLink(url, 'af001');
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(result.productId, 'RJ01234567');
+});
+
+test('D-4: product_idが無いDLsite URL → no_product_id', function () {
+  const result = buildDlsiteAffiliateLink('https://www.dlsite.com/maniax/ranking/', 'af001');
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.error, 'no_product_id');
+});
+
+test('D-5: 空文字/非URL → empty / bad_url', function () {
+  assert.strictEqual(buildDlsiteAffiliateLink('', 'af001').error, 'empty');
+  assert.strictEqual(buildDlsiteAffiliateLink('not a url', 'af001').error, 'bad_url');
+});
+
+test('D-6: afId空 → af_id部分は【アフィID】(URLエンコード後)', function () {
+  const result = buildDlsiteAffiliateLink('https://www.dlsite.com/maniax/work/=/product_id/RJ01234567.html', '');
+  assert.strictEqual(result.ok, true);
+  assert.ok(result.link.includes(encodeURIComponent('【アフィID】')), 'link should contain encoded placeholder, got: ' + result.link);
+});
+
+test('D-7: isDlsiteUrl → dlsite.comのみtrue(FANZA/他ホストはfalse)', function () {
+  assert.strictEqual(isDlsiteUrl('https://www.dlsite.com/maniax/work/=/product_id/RJ01234567.html'), true);
+  assert.strictEqual(isDlsiteUrl('https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_748504/'), false);
+  assert.strictEqual(isDlsiteUrl(''), false);
+  assert.strictEqual(isDlsiteUrl('not a url'), false);
+});
+
+test('D-8: hasRealAffiliateIdDlsite → 実IDあり/プレースホルダ/無しを判定', function () {
+  assert.strictEqual(hasRealAffiliateIdDlsite('https://www.dlsite.com/home/dlaf/=/link/work/aid/MYID/product_id/RJ01.html'), true);
+  assert.strictEqual(hasRealAffiliateIdDlsite('https://www.dlsite.com/home/dlaf/=/link/work/aid/' + encodeURIComponent('【アフィID】') + '/product_id/RJ01.html'), false);
+  assert.strictEqual(hasRealAffiliateIdDlsite('https://www.dlsite.com/maniax/work/=/product_id/RJ01.html'), false);
+});
+
+test('D-9: buildAnyAffiliateLink → ホストでFANZA/DLsiteを自動振り分け', function () {
+  const dl = buildAnyAffiliateLink('https://www.dlsite.com/maniax/work/=/product_id/RJ01234567.html', 'af001');
+  assert.strictEqual(dl.ok, true);
+  assert.strictEqual(dl.provider, 'dlsite');
+  assert.ok(dl.link.startsWith('https://www.dlsite.com/home/dlaf/'));
+
+  const fz = buildAnyAffiliateLink('https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_748504/', 'af001');
+  assert.strictEqual(fz.ok, true);
+  assert.strictEqual(fz.provider, 'fanza');
+  assert.ok(fz.link.startsWith('https://al.fanza.co.jp/'));
 });
 
 // ────────────────────────────────────────────────────────────

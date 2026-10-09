@@ -133,6 +133,61 @@ function classifyPromoUrl(rawUrl, extraShortHosts) {
 }
 
 /**
+ * DLsite 作品ページ用アフィリエイトリンク生成 — 純粋関数。
+ * DLsiteの公式リダイレクト形式(ディープリンク)は作品のカテゴリ(maniax/books/pro等)を問わず
+ * 固定で `/home/dlaf/=/link/work/aid/{af_id}/product_id/{product_id}.html` を使う。
+ * (参照: 2026-10-09 WebSearch確認。DL研「DLSiteアフィリエイトリンクの仕組み」の記載形式と一致)
+ * @param {string} rawUrl - 作品ページURL(例: https://www.dlsite.com/maniax/work/=/product_id/RJ01234567.html)
+ * @param {string} afId   - アフィリエイトID(空の場合は【アフィID】で構造プレビュー)
+ * @returns {{ok:true, productId:string, link:string}|{ok:false, error:'empty'|'no_product_id'|'bad_url'}}
+ */
+function buildDlsiteAffiliateLink(rawUrl, afId) {
+  const raw = (rawUrl || '').trim();
+  if (!raw) return { ok: false, error: 'empty' };
+  if (!/^https?:\/\//i.test(raw)) return { ok: false, error: 'bad_url' };
+
+  // product_id= / product_id/【ID】.html のどちらの表記でも拾う。(RJ/RE/BJ/VJ等の2英字+数字)
+  let productId = null;
+  const m = raw.match(/product_id[=/]([A-Za-z]{2}\d+)/i);
+  if (m) productId = m[1];
+  if (!productId) return { ok: false, error: 'no_product_id' };
+
+  const af = (afId && afId.trim()) ? afId.trim() : '【アフィID】';
+  const link = `https://www.dlsite.com/home/dlaf/=/link/work/aid/${encodeURIComponent(af)}/product_id/${encodeURIComponent(productId)}.html`;
+  return { ok: true, productId, link };
+}
+
+/**
+ * URLがDLsiteの作品ページか(ホスト名判定・ネットワーク不使用)。
+ * @param {string} rawUrl
+ * @returns {boolean}
+ */
+function isDlsiteUrl(rawUrl) {
+  const u = (rawUrl || '').trim();
+  if (!u) return false;
+  try { return /(^|\.)dlsite\.com$/i.test(new URL(u).hostname); } catch (e) { return false; }
+}
+
+/**
+ * FANZA/DLsiteを問わず、作品URLからアフィリンクを作る(入口を1つにする切り替え窓口)。
+ * ホスト名で自動判定するので呼び出し側は提供元を気にしなくてよい。
+ * @param {string} rawUrl
+ * @param {string} afId
+ * @returns {{ok:true, link:string, provider:'fanza'|'dlsite'}|{ok:false, error:string}}
+ */
+function buildAnyAffiliateLink(rawUrl, afId) {
+  if (isDlsiteUrl(rawUrl)) {
+    const r = buildDlsiteAffiliateLink(rawUrl, afId);
+    return r.ok ? { ok: true, link: r.link, provider: 'dlsite' } : { ok: false, error: r.error };
+  }
+  const r1 = buildAffiliateLink(rawUrl, afId);
+  if (r1.ok) return { ok: true, link: r1.link, provider: 'fanza' };
+  const r2 = buildFanzaListLink(rawUrl, afId);
+  if (r2.ok) return { ok: true, link: r2.link, provider: 'fanza' };
+  return { ok: false, error: r2.error || r1.error };
+}
+
+/**
  * URLにaf_idが無ければ付与してアフィリンク化する。(cidが取れれば作品リンク、
  * 取れなければ一覧/キャンペーンページとして buildFanzaListLink で包む＝セール会場対応)
  * 既にaf_idが入っている場合は二重ラップせずそのまま返す。(冪等)
@@ -143,6 +198,12 @@ function classifyPromoUrl(rawUrl, extraShortHosts) {
 function ensureAffiliateLink(rawUrl, afId) {
   const url = (rawUrl || '').trim();
   if (!url) return { ok: false, error: 'empty' };
+  if (isDlsiteUrl(url)) {
+    if (hasRealAffiliateIdDlsite(url)) return { ok: true, link: url, wasAlready: true };
+    const rd = buildDlsiteAffiliateLink(url, afId);
+    if (rd.ok) return { ok: true, link: rd.link, wasAlready: false };
+    return { ok: false, error: rd.error };
+  }
   if (hasRealAffiliateId(url)) return { ok: true, link: url, wasAlready: true };
   const r1 = buildAffiliateLink(url, afId);
   if (r1.ok) return { ok: true, link: r1.link, wasAlready: false };
@@ -151,10 +212,29 @@ function ensureAffiliateLink(rawUrl, afId) {
   return { ok: false, error: r2.error || r1.error };
 }
 
+/**
+ * DLsiteアフィリンク(`/dlaf/=/link/.../aid/{ID}/...`)に実在のaidが入っているか。
+ * (FANZAの af_id= はクエリパラメータだがDLsiteはパス区切りなので別判定が必要)
+ * @param {string} rawUrl
+ * @returns {boolean}
+ */
+function hasRealAffiliateIdDlsite(rawUrl) {
+  const u = (rawUrl || '').trim();
+  const m = u.match(/\/aid\/([^/]+)\//);
+  if (!m) return false;
+  let v = m[1] || '';
+  try { v = decodeURIComponent(v); } catch (e) { /* デコード不能ならそのまま比較 */ }
+  return !!v && v !== '【アフィID】';
+}
+
 // ブラウザ環境向けグローバル公開
 if (typeof window !== 'undefined') {
   window.buildAffiliateLink = buildAffiliateLink;
   window.buildFanzaListLink = buildFanzaListLink;
+  window.buildDlsiteAffiliateLink = buildDlsiteAffiliateLink;
+  window.isDlsiteUrl = isDlsiteUrl;
+  window.hasRealAffiliateIdDlsite = hasRealAffiliateIdDlsite;
+  window.buildAnyAffiliateLink = buildAnyAffiliateLink;
   window.normalizeWorkUrl = normalizeWorkUrl;
   window.isShortenedUrl = isShortenedUrl;
   window.hasRealAffiliateId = hasRealAffiliateId;
@@ -165,7 +245,8 @@ if (typeof window !== 'undefined') {
 // Node.js(CommonJS)向けエクスポート
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
-    buildAffiliateLink, buildFanzaListLink, normalizeWorkUrl,
-    isShortenedUrl, hasRealAffiliateId, classifyPromoUrl, ensureAffiliateLink
+    buildAffiliateLink, buildFanzaListLink, buildDlsiteAffiliateLink, isDlsiteUrl,
+    hasRealAffiliateIdDlsite, buildAnyAffiliateLink,
+    normalizeWorkUrl, isShortenedUrl, hasRealAffiliateId, classifyPromoUrl, ensureAffiliateLink
   };
 }
