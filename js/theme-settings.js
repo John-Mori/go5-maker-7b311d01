@@ -143,7 +143,7 @@
 // ※インラインで --app-bg を設定しない＝ランキングタブ(html[data-tab])のクリーム上書きが効くようにする。
 (function () {
   function applyAccount(id) {
-    document.documentElement.setAttribute('data-account', (id === 'acc2') ? 'acc2' : 'acc1');
+    document.documentElement.setAttribute('data-account', /^acc\d+$/.test(String(id || '')) ? id : 'acc1');  // acc3(癒やし倉庫)以降もそのchのテーマへ
   }
   document.addEventListener('account-changed', function (e) {
     applyAccount(e.detail && e.detail.id);

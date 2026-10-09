@@ -28,15 +28,15 @@ html[data-account="acc2"]{           /* 宵桜艶帖：宵の花明かり */
   --cta-from:#FBC6D6; --cta-to:#F193B4; --cta-ink:#4A1E3A;
   --field-bg:rgba(26,8,22,.40); --app-scrim:rgba(24,8,20,.28);
 }
-html[data-account="acc3"]{           /* DLサイト便(仮)：テロップ見本の紺×水色を仮流用(Chamiが後で本決定) */
-  --app-bg:#14223E; --card:rgba(255,255,255,.06); --line:rgba(255,255,255,.09);
-  --accent:#97E1E4; --accent2:#2bb3c0; --ink:#eef2f7; --sub:#b9d8da;
-  /* グラデ背景トークン(html{background}で使用) */
-  --app-bg-base:#1E3A66; --app-bg-mid:#162C4E; --app-bg-deep:#0E1E38;
-  --app-glow:rgba(151,225,228,.20); --app-counter:rgba(20,34,64,.30);
+html[data-account="acc3"]{           /* 癒やし倉庫：候補タブのクリーム地を全ページへ＋黄色ベース(Chami 2026-10-10 msg 1558242533627273296) */
+  --app-bg:#f5edd7; --card:#fffdf6; --line:#e6d6ad;
+  --accent:#c99a00; --accent2:#e0a21b; --ink:#4b3f2c; --sub:#8a7a5c;
+  /* グラデ背景トークン(html{background}で使用)。地はクリーム一色、黄色はほのかな光だけ */
+  --app-bg-base:#f5edd7; --app-bg-mid:#f5edd7; --app-bg-deep:#f5edd7;
+  --app-glow:rgba(255,214,64,.16); --app-counter:transparent;
   --glow-x:74%; --glow-y:-8%; --counter-x:6%; --counter-y:108%;
-  --cta-from:#B9EEF0; --cta-to:#5FC7CB; --cta-ink:#0E1E38;
-  --field-bg:rgba(8,16,30,.40); --app-scrim:rgba(8,16,30,.28);
+  --cta-from:#FFE27A; --cta-to:#F5C431; --cta-ink:#4b3f2c;
+  --field-bg:#fffdf6; --app-scrim:transparent;
 }
 /* ── ランキング・分析・候補タブはアカウントに関係なくクリーム色（後勝ちでアカウント色を上書き）。 ── */
 /* html 要素に直接 background を設定することで、body が短い時も確実にクリームが全面に出る。 */
@@ -620,6 +620,7 @@ input.cand-refimg-line,textarea.cand-refimg-line,.cand-refimg-line{width:100%;bo
 /* 「今すぐ作成・投稿／予約して投稿」ボタンのアカウント別配色。 */
 html[data-account="acc1"] .acct-cta{background:#2C4C8F;color:#FFD65C;border-color:#2C4C8F;}
 html[data-account="acc2"] .acct-cta{background:#4A2A6B;color:#FF7BA8;border-color:#4A2A6B;}
+html[data-account="acc3"] .acct-cta{background:var(--cta-to);color:var(--cta-ink);border-color:#d9a91c;}
 .fanza-price-row .fp-sale-lbl{color:#ff6b8a;}
 .fanza-price-row .fp-sale{color:#ff6b8a;font-weight:700;}
 .fanza-price-row .fp-off{color:#04222a;background:#ff6b8a;border-radius:4px;padding:0 5px;font-weight:700;font-size:.68rem;white-space:nowrap;}
@@ -1423,3 +1424,61 @@ button, select, .ctl-btn, .tab, .acct-btn, .photo-btn { touch-action: manipulati
   .rsv-recent-count{max-width:100%;padding-left:20px;}
   .rsv-recent-row .vmetrics{gap:7px;}
 }
+/* ── 癒やし倉庫(acc3)：全ページクリーム地(Chami 2026-10-10)。暗色固定(#0e1422等)の入力欄・枠・ボタンをクリーム面へ寄せ、白字ピルを読める色へ。 ── */
+html[data-account="acc3"] input[type=text],
+html[data-account="acc3"] input[type=datetime-local],
+html[data-account="acc3"] textarea,
+html[data-account="acc3"] .photo-btn,
+html[data-account="acc3"] .promo-toggle select,
+html[data-account="acc3"] .ctl-btn,
+html[data-account="acc3"] .bsky-adv,
+html[data-account="acc3"] .vrow,
+html[data-account="acc3"] .vhide-remade-btn,
+html[data-account="acc3"] .comp-an-kpi,
+html[data-account="acc3"] .comp-an-tab,
+html[data-account="acc3"] .tools-fold,
+html[data-account="acc3"] .fz-modal,
+html[data-account="acc3"] #fzEditOverlay input,
+html[data-account="acc3"] .vedit-modal,
+html[data-account="acc3"] .vsum th,
+html[data-account="acc3"] #postSchedAt,
+html[data-account="acc3"] .rsv-row,
+html[data-account="acc3"] .rank-metric-tab,
+html[data-account="acc3"] #pcText,
+html[data-account="acc3"] .disc-url-item,
+html[data-account="acc3"] .disc-url-add input,
+html[data-account="acc3"] #bskyAppPw,
+html[data-account="acc3"] .affi-result,
+html[data-account="acc3"] .color-pick,
+html[data-account="acc3"] .vedit-tree-head input,
+html[data-account="acc3"] .vedit-tree-row,
+html[data-account="acc3"] .short-url,
+html[data-account="acc3"] .hist-row,
+html[data-account="acc3"] .hist-url,
+html[data-account="acc3"] .affi-code,
+html[data-account="acc3"] .cand-refimg-pick,
+html[data-account="acc3"] .vmetrics .vfanza input,
+html[data-account="acc3"] .refimg-url2-row .cand-url2-del,
+html[data-account="acc3"] .vyt-inp,
+html[data-account="acc3"] .vedit-field input,
+html[data-account="acc3"] .vedit-field select,
+html[data-account="acc3"] .vedit-merge-row .vedit-merge-url,
+html[data-account="acc3"] .vedit-gen-result,
+html[data-account="acc3"] .vgen-url,
+html[data-account="acc3"] .rbm-list .rbm-item,
+html[data-account="acc3"] .manual-aff-status{background:var(--field-bg);color:var(--ink);border-color:var(--line);}
+html[data-account="acc3"] .cand-refimg-loading,
+html[data-account="acc3"] .cand-refimg-missing,
+html[data-account="acc3"] .cand-refimg-checking,
+html[data-account="acc3"] .cand-refimg-stalled{background:var(--field-bg);}
+html[data-account="acc3"] .photo-btn{border-color:var(--accent);color:var(--accent);}
+html[data-account="acc3"] .photo-btn:active{background:#fbf1cf;}
+html[data-account="acc3"] input.cand-refimg-line,
+html[data-account="acc3"] textarea.cand-refimg-line,
+html[data-account="acc3"] .cand-add-imgslot{background:var(--field-bg);color:var(--ink);border-color:var(--line);}
+html[data-account="acc3"] input::placeholder,
+html[data-account="acc3"] textarea::placeholder{color:#b3a37f;}
+html[data-account="acc3"] #catEditBtn{background:var(--field-bg) !important;color:var(--sub) !important;border-color:var(--line) !important;}
+html[data-account="acc3"] button.primary{color:var(--cta-ink);}
+html[data-account="acc3"] .cal-launch-btn{color:var(--ink);border-color:#d9c48a;background:var(--card);}
+html[data-account="acc3"] .cal-launch-btn.active{background:var(--cta-to);color:var(--cta-ink);border-color:#d9a91c;}

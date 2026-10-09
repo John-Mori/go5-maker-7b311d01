@@ -367,3 +367,15 @@ body.verify-mode .slot:not(.has-verify) { opacity: 0.55; }
 }
 .typesheet-body button:active { background: #EFE7D8; }
 .typesheet-body button:last-child:nth-child(odd) { grid-column: 1 / -1; }  /* 5個目(自動に戻す等の端数)は全幅 */
+
+/* ── 癒やし倉庫(acc3)：アプリ枠(ヘッダ/状態帯/ナビ)も全ページ共通のクリーム地＋黄色へ(Chami 2026-10-10)。
+   data-account は index.html 冒頭で current_account から付与。acc1/acc2 の暗色枠は不変。 */
+html[data-account="acc3"] body { background: #f5edd7; color: #4b3f2c; }
+html[data-account="acc3"] .app-header,
+html[data-account="acc3"] .status-bar { background: #f5edd7; border-bottom-color: #e6d6ad; color: #4b3f2c; }
+html[data-account="acc3"] .app-header .sub,
+html[data-account="acc3"] .muted { color: #8a7a5c; }
+html[data-account="acc3"] .nav button { background: #fffdf6; color: #4b3f2c; border-color: #e6d6ad; }
+html[data-account="acc3"] .nav button:hover { border-color: #c99a00; }
+html[data-account="acc3"] .nav button.active { background: #F5C431; color: #4b3f2c; border-color: #d9a91c; }
+html[data-account="acc3"] #calendar { --slab: #f5edd7; box-shadow: none; }
