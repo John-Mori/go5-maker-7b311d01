@@ -14,6 +14,10 @@ on:
       - 'assets/**'
       - 'schedule/**'     # ★カレンダー iframe の資産変更でもスモークを回す(版ずれ検査の対象領域そのもの)
       - '.github/workflows/smoke.yml'
+      # ★定時の自動公開(データだけの差し替え)では回さない=5秒動画の画面は変わらないのに数分おきに走り、
+      #   赤の日は失敗メールが連打されていた(Chami 2026-10-10「このメールやめて欲しい」)。
+      - '!persona-hub/**'
+      - '!tools/vtomo_analyze/data/**'
   workflow_dispatch: {}
 
 permissions:
