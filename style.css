@@ -139,6 +139,7 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
    =min-content=1文字幅まで潰れ「一行の文が縦表示」になる(◯%OFFボタン追加=2026-08-02⑥で再発)。
    縦書き化を防ぐ本体は span の white-space:nowrap+flex-shrink:0(これで絶対に縦へ潰れない)。
    チェック文言＋切替ボタンは常に1行=nowrap(Chami依頼2026-08-02)。以後この行に子を足しても縦書き化しない。 */
+.promo-toggle[hidden]{display:none;}
 .promo-toggle{display:flex;flex-wrap:nowrap;align-items:center;gap:8px;justify-content:center;margin:6px auto 0;padding:6px 10px;
   background:var(--card);border:1px solid #24304a;border-radius:10px;cursor:pointer;user-select:none;width:fit-content;max-width:100%;}
 .promo-toggle input{accent-color:var(--accent);width:16px;height:16px;flex:none;cursor:pointer;}

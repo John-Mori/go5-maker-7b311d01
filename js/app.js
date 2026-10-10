@@ -422,6 +422,18 @@
   function isAuthorTwoLineMode() { var c = document.getElementById("authorTwoLine"); return !!(c && c.checked); }
 
   // acc3仮デザインの太い黒線(見本：帯の直後に1本)。dividerColor未設定のテーマ(acc1/acc2)では何もしない＝見た目不変。
+  // 大タイトルは「大タイトル拡大(titleScale)を掛けた後」に、帯ごとYouTubeの安全域(中央82%)へ収める。
+  //   拡大後の幅を測らず、しかも全幅の90%基準で決めていたため、長いコメントが実機/プレビューで左右切れしていた
+  //   (Chami 2026-10-11 スクショ「出られない部屋の正しい出方」)。短いコメントは従来どおり拡大が効く。
+  function capTitlePx(lines, px, bandPad, family) {
+    setFont(px, 700, family);
+    var widest = 0;
+    for (var i = 0; i < lines.length; i++) { var w = ctx.measureText(lines[i]).width; if (w > widest) widest = w; }
+    var limit = W * FG_SAFE_W_RATIO - 2 * bandPad;
+    var need = widest + 2 * Math.max(U(2), px / 12);  // 縁取り分(drawBlockのmB)込み
+    if (need > limit && widest > 0) px = Math.max(1, Math.floor(px * (limit / need) * 0.98));
+    return px;
+  }
   function drawDivider(y) {
     if (!theme().dividerColor) return y;
     var lw = U(10);  // 線の太さ(仮)
@@ -457,11 +469,11 @@
       if (isTwoLineMode()) {
         // 2行モード：最大2行・中央揃え。帯は両行を1枚で囲い、帯と文字は同じオフセット(textTitle)で一緒に動く。
         var f2 = fitTwoLines(top, fT, maxw, U(14), titleFamily);
-        var tpx2 = Math.max(1, Math.round(f2.px * tScale));
+        var tpx2 = capTitlePx(f2.lines, Math.max(1, Math.round(f2.px * tScale)), U(16) + padExtra, titleFamily);
         y = drawTitleBlockUnified(f2.lines, y, tpx2, U(16) + padExtra, U(6), tScale, OFF.textTitle, undefined, "title", titleFamily) + U(4);
       } else {
         var f = fitOneLine(top, fT, maxw, U(14), titleFamily);
-        var tpx = Math.max(1, Math.round(f.px * tScale));
+        var tpx = capTitlePx([f.text], Math.max(1, Math.round(f.px * tScale)), U(16) + padExtra, titleFamily);
         y = drawBlock([f.text], y, tpx, U(16) + padExtra, U(6), 195, OFF.textTitle, tScale, "title", titleFamily) + U(4);
       }
       y = drawDivider(y);  // acc3のみ：題名帯の直後(画像の直前)に太い黒線

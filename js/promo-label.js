@@ -208,6 +208,10 @@
   //   全端末で'1'のまま=読むと勝手にONへ戻るので、手でONにした時だけ立つ新キーへ切り替えた。
   var enabled = false;
   try { if (localStorage.getItem('promo_label_enabled_v2') === '1') enabled = true; } catch (e) {}
+  // ★2026-10-11 Chami「セールラベル機能を削除して(復活できるように非表示でok)」。
+  //   機能ごと止める主スイッチ。false=チェックが入っていても描かない・操作UIも出さない。
+  //   コードと保存値(位置/大きさ/種類/ON)は残してあるので、復活はここを true にするだけ。
+  var FEATURE_ON = false;
   try { var _t = localStorage.getItem('promo_label_type'); if (_t === 'price') ltype = 'price'; } catch (e) {}
   // ★大きさ(scale)/位置(fpos)はチャンネル別(__acc1/__acc2)に保持する(Chami依頼2026-08-05
   //   「チャンネルそれぞれで前回のタグの大きさ・位置をリセットせず保持・端末共通」)。acc1(baseW360)と
@@ -256,7 +260,7 @@
   }
   // 表示可否の唯一の判定点。val()>0 = セール中かつ値が正当(notifyがonSaleの時だけ値を入れる=定価は0)。
   // enabled = Chamiのチェックボックス。両方満たした時だけ描く。
-  function active() { return enabled && val() > 0; }
+  function active() { return FEATURE_ON && enabled && val() > 0; }
   // フォールバック帯の文言(テンプレ未読込時のみ)。
   function labelText(v) {
     if (ltype === 'price') return (acct() === 'acc2' ? '今宵の¥' + v + '作品案内🌸' : '月影に綴る¥' + v + '作品🌙');
@@ -689,6 +693,9 @@
     b.setAttribute('aria-pressed', ltype === 'price' ? 'true' : 'false');
   }
   function updateRow() {
+    // 機能停止中はチェック欄ごと隠す(index.html の .promo-toggle)。
+    var tg = document.querySelector('.promo-toggle');
+    if (tg) tg.hidden = !FEATURE_ON;
     var row = document.getElementById('promoPosRow');
     if (row) row.hidden = !active();
     updateSizeLabel();
