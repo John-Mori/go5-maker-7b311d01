@@ -25,6 +25,7 @@
     "movie_auto_attrs_cid": { "decision": "local", "why": "この端末でカテゴリ自動チェックを最後に適用したcid=二重適用よけの端末別マーカー。syncすると別端末で『適用済み』と誤判定され自動チェックが抑止される(2026-08-08)" },
     "movie_auto_ws_cid": { "decision": "local", "why": "movie_auto_attrs_cid と対の端末別マーカー(セール会場の自動適用よけ)。同上の理由でsyncしない(2026-08-08)" },
     "promo_label_enabled": { "decision": "sync", "why": "🏷割引/価格ラベルの表示ON=出力の見た目設定(2026-08-04 同期漏れ発見)" },
+    "promo_label_enabled_v2": { "decision": "local", "why": "🏷ラベル表示ONの新キー(既定OFF・2026-10-09)。旧キーはclear()が毎回'1'を書いて既定ONへ戻していたので切り替えた。同期の許可リスト(storage-keys.js)に入っておらず実挙動は端末別=その実挙動を台帳へ記す(2026-10-10 CI赤の解消)" },
     "promo_label_type": { "decision": "sync", "why": "🏷ラベル種別(割引/価格)=出力の見た目設定(2026-08-04 同期漏れ発見)" },
     "promo_label_scale": { "decision": "sync", "why": "🏷ラベル倍率=出力のレイアウト設定(2026-08-04 同期漏れ発見)" },
     "promo_label_fpos": { "decision": "sync", "why": "🏷ラベル位置{x,y}=出力のレイアウト設定・preview_と同性質(2026-08-04 同期漏れ発見)" },
