@@ -150,7 +150,8 @@
       : (it && it.videoId ? ('v:' + it.videoId)
         : (it && it.id ? ('i:' + it.id)
           : (it && it.postUri ? ('u:' + it.postUri) : itemKey(it || {}))));
-    return (account === 'acc2' ? 'acc2' : 'acc1') + '|' + spine;
+    var owner = /^acc\d+$/.test(String(account || '')) ? String(account) : 'acc1';
+    return owner + '|' + spine;
   }  function treeStoreLoad_() {
     try { var v = JSON.parse(localStorage.getItem(TREE_LINKS_KEY) || '{}'); return (v && typeof v === 'object' && !Array.isArray(v)) ? v : {}; }
     catch (e) { return {}; }
@@ -1282,7 +1283,7 @@
     if (!built || !built.ok || !built.link || !window.hasRealAffiliateId(built.link)) {
       treeShortStatus_(row, false, 'エラー：DMM/FANZAの作品URLとして認識できないか、アフィIDを付与できませんでした。'); return;
     }
-    var account = _treeContextAccount === 'acc2' ? 'acc2' : 'acc1';
+    var account = /^acc\d+$/.test(String(_treeContextAccount || '')) ? String(_treeContextAccount) : 'acc1';
     var go5 = window.Go5Short || {}, expectedBase = go5.base ? String(go5.base(account) || '').replace(/\/+$/, '') : '';
     var original = btn.textContent; btn.disabled = true; btn.textContent = '短縮中…';
     treeShortStatus_(row, true, 'アフィリンクと短縮先を確認中…');
@@ -1610,7 +1611,8 @@
     updateModalVideoTitle_(ytVal || '');
     $('veditBsky').value = bskyVal || '';
     setMergeRows_(mergeUrls); // 合算URL(導線1のみ)を復元
-    _treeContextItem = treeItem || null; _treeContextAccount = treeAccount === 'acc2' ? 'acc2' : 'acc1';
+    _treeContextItem = treeItem || null;
+    _treeContextAccount = /^acc\d+$/.test(String(treeAccount || '')) ? String(treeAccount) : 'acc1';
     setTreeRows_(treeLinks); // 返信ポストURLと返信内アフィ短縮URLを復元(空ならツリー1を表示)
     var plat = (platform === 'bsky') ? 'bsky' : 'x'; // 既定=X(Chami:これから原則X投稿)
     if ($('veditPlatX')) $('veditPlatX').checked = (plat === 'x');
@@ -1999,7 +2001,7 @@
   // 投稿日時を上書きしないよう postUrl は送らない。(既存行のカテゴリ列だけ更新する用途)
   // T5: シートへ送るchannelは背骨ID(videoId)接頭辞を優先。(現UIではなく作品の所属)
   //   混入アイテムを現アカウントのタブへ薄行として転写する『感染プリンタ』を止める。
-  function chOfVid_(videoId, fallback) { var m = String(videoId || '').match(/^(acc[12])-/); return m ? m[1] : (fallback || acct()); }
+  function chOfVid_(videoId, fallback) { var m = String(videoId || '').match(/^(acc\d+)-/); return m ? m[1] : (fallback || acct()); }
   function chForItem_(it) { return chOfVid_(it && it.videoId, acct()); }
   function pushItemToGas_(it) {
     var gasUrl = '';

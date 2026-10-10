@@ -28,17 +28,30 @@ test.describe('go5-maker 公開URL スモーク', () => {
     expect(errors, 'ロード時のコンソール/ページエラー').toEqual([]);
   });
 
-  test('全タブが例外なく切替わる(data-tab が追従する)', async ({ page }) => {
+  test('全タブが例外なく切替または専用ページへ遷移し、data-tab が追従する', async ({ page }) => {
     const errors = [];
     page.on('pageerror', (e) => errors.push(String(e)));
     await page.goto('index.html', { waitUntil: 'domcontentloaded' });
 
     const ids = await page.$$eval('.tabbar .tab', (els) => els.map((e) => e.id).filter(Boolean));
+    const dedicatedPages = {
+      tabCand: 'KouhoLists.html',
+      tabVerify: 'StockLists.html',
+      tabStock: 'Stock.html',
+    };
     expect(ids.length).toBeGreaterThanOrEqual(8);
     for (const id of ids) {
-      await page.locator('#' + id).click();
+      await page.goto('index.html', { waitUntil: 'domcontentloaded' });
+      if (dedicatedPages[id]) {
+        await Promise.all([
+          page.waitForURL(new RegExp('/' + dedicatedPages[id].replace('.', '\\.') + '$')),
+          page.locator('#' + id).click(),
+        ]);
+      } else {
+        await page.locator('#' + id).click();
+      }
       const dataTab = await page.evaluate(() => document.documentElement.getAttribute('data-tab'));
-      expect(dataTab, `#${id} クリック後に data-tab が更新されない`).toBe(id);
+      expect(dataTab, `#${id} クリック後に表示先の data-tab が更新されない`).toBe(id);
     }
     expect(errors, 'タブ切替中の例外').toEqual([]);
   });
@@ -70,20 +83,22 @@ test.describe('go5-maker 公開URL スモーク', () => {
 test.describe('投稿履歴の初期表示', () => {
   test('画像供給スクリプトが遅くてもPCでは履歴本文を先に表示する', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.addInitScript(() => {
+    await page.goto('StockLists.html', { waitUntil: 'domcontentloaded' });
+    await page.evaluate(() => {
       try {
-        localStorage.setItem('current_account', 'acc1');
+        const account = window.Go5Acct.current();
+        const videoId = account + '-20260825-1200-fast1';
         localStorage.setItem('bsky_gas_url', '');
         localStorage.setItem('hist_maint_at', String(Date.now()));
         localStorage.setItem('hist_metrics_at', String(Date.now()));
-        localStorage.setItem('short_hist__acc1', JSON.stringify([{
-          videoId: 'acc1-20260825-1200-fast1',
+        localStorage.setItem('short_hist__' + account, JSON.stringify([{
+          videoId,
           ts: Date.now(),
           title: 'PC投稿履歴の先行表示テスト',
-          account: 'acc1'
+          account
         }]));
-        localStorage.setItem('verify_manual__acc1', '[]');
-        localStorage.setItem('verify_yt__acc1', '{}');
+        localStorage.setItem('verify_manual__' + account, '[]');
+        localStorage.setItem('verify_yt__' + account, '{}');
       } catch (e) {}
     });
 
@@ -97,7 +112,7 @@ test.describe('投稿履歴の初期表示', () => {
       await route.continue();
     });
 
-    const navigation = page.goto('StockLists.html', { waitUntil: 'domcontentloaded' });
+    const navigation = page.reload({ waitUntil: 'domcontentloaded' });
     try {
       await expect.poll(() => candidateRequested).toBe(true);
       await expect(page.locator('.vrow-title').filter({ hasText: 'PC投稿履歴の先行表示テスト' }))
@@ -112,19 +127,19 @@ test.describe('投稿履歴の初期表示', () => {
   });
 
   test('表示中履歴は全件走査とpost読込が停止してもused画像を作品単位で表示する', async ({ page }) => {
-    const videoId = 'acc1-20260825-1230-direct-used';
     const image = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
-    await page.goto('__go5_seed__.html');
-    await page.evaluate(async ({ videoId, image }) => {
-      localStorage.setItem('current_account', 'acc1');
+    await page.goto('StockLists.html', { waitUntil: 'domcontentloaded' });
+    const videoId = await page.evaluate(async ({ image }) => {
+      const account = window.Go5Acct.current();
+      const videoId = account + '-20260825-1230-direct-used';
       localStorage.setItem('bsky_gas_url', '');
       localStorage.setItem('hist_maint_at', String(Date.now()));
       localStorage.setItem('hist_metrics_at', String(Date.now()));
-      localStorage.setItem('short_hist__acc1', JSON.stringify([{
-        videoId, ts: Date.now(), title: '履歴used直接復元テスト', account: 'acc1'
+      localStorage.setItem('short_hist__' + account, JSON.stringify([{
+        videoId, ts: Date.now(), title: '履歴used直接復元テスト', account
       }]));
-      localStorage.setItem('verify_manual__acc1', '[]');
-      localStorage.setItem('verify_yt__acc1', '{}');
+      localStorage.setItem('verify_manual__' + account, '[]');
+      localStorage.setItem('verify_yt__' + account, '{}');
       await new Promise((resolve, reject) => {
         const req = indexedDB.open('go5store', 1);
         req.onupgradeneeded = () => {
@@ -139,7 +154,8 @@ test.describe('投稿履歴の初期表示', () => {
           tx.onerror = () => reject(tx.error);
         };
       });
-    }, { videoId, image });
+      return videoId;
+    }, { image });
     await page.route('**/js/candidates.js?*', async (route) => {
       const response = await route.fetch();
       const original = await response.text();
@@ -157,7 +173,7 @@ test.describe('投稿履歴の初期表示', () => {
       await route.fulfill({ response, body: stalled + '\n' + original });
     });
 
-    await page.goto('StockLists.html', { waitUntil: 'domcontentloaded' });
+    await page.reload({ waitUntil: 'domcontentloaded' });
     await expect(page.locator('.vrow-title').filter({ hasText: '履歴used直接復元テスト' })).toBeVisible();
     const thumb = page.locator('.vrow-refimg[data-usedkey="' + videoId + '"]');
     await expect(thumb).toBeVisible({ timeout: 2500 });
@@ -169,19 +185,19 @@ test.describe('投稿履歴の初期表示', () => {
   });
 
   test('投稿履歴画像は4回失敗しても再読込なしで回復する', async ({ page }) => {
-    const videoId = 'acc1-20260826-history-retry';
     const image = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
-    await page.goto('__go5_seed__.html');
-    await page.evaluate(async ({ videoId, image }) => {
-      localStorage.setItem('current_account', 'acc1');
+    await page.goto('StockLists.html', { waitUntil: 'domcontentloaded' });
+    const videoId = await page.evaluate(async ({ image }) => {
+      const account = window.Go5Acct.current();
+      const videoId = account + '-20260826-history-retry';
       localStorage.setItem('bsky_gas_url', '');
       localStorage.setItem('hist_maint_at', String(Date.now()));
       localStorage.setItem('hist_metrics_at', String(Date.now()));
-      localStorage.setItem('short_hist__acc1', JSON.stringify([{
-        videoId, ts: Date.now(), title: '投稿履歴の継続再試行テスト', account: 'acc1'
+      localStorage.setItem('short_hist__' + account, JSON.stringify([{
+        videoId, ts: Date.now(), title: '投稿履歴の継続再試行テスト', account
       }]));
-      localStorage.setItem('verify_manual__acc1', '[]');
-      localStorage.setItem('verify_yt__acc1', '{}');
+      localStorage.setItem('verify_manual__' + account, '[]');
+      localStorage.setItem('verify_yt__' + account, '{}');
       await new Promise((resolve, reject) => {
         const req = indexedDB.open('go5store', 1);
         req.onupgradeneeded = () => {
@@ -196,7 +212,8 @@ test.describe('投稿履歴の初期表示', () => {
           tx.onerror = () => reject(tx.error);
         };
       });
-    }, { videoId, image });
+      return videoId;
+    }, { image });
 
     await page.route('**/js/candidates.js?*', async (route) => {
       const response = await route.fetch();
@@ -220,7 +237,7 @@ test.describe('投稿履歴の初期表示', () => {
       await route.fulfill({ response, body: shim + body });
     });
 
-    await page.goto('StockLists.html', { waitUntil: 'domcontentloaded' });
+    await page.reload({ waitUntil: 'domcontentloaded' });
     await expect(page.locator('.vrow-title').filter({ hasText: '投稿履歴の継続再試行テスト' })).toBeVisible();
     await expect(page.locator('.vrow-refimg[data-usedkey="' + videoId + '"]')).toBeVisible({ timeout: 5000 });
     await expect.poll(() => page.evaluate(() => window.__historyRetryAttempts || 0)).toBeGreaterThanOrEqual(5);
@@ -711,26 +728,28 @@ test.describe('候補ページの画像・投稿編集', () => {
   });
 });
 test.describe('動画作成中のチャンネル切替', () => {
-  test('月詠みから宵桜へ切り替えても作品URLとセールラベルを維持する', async ({ page }) => {
+  test('非表示の旧ch操作でも表示中chと作品URLを維持する', async ({ page }) => {
     const workUrl = 'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_sale_switch_test/';
     await page.goto('index.html', { waitUntil: 'domcontentloaded' });
-    await page.evaluate(({ workUrl }) => {
-      localStorage.setItem('current_account', 'acc1');
-      localStorage.removeItem('bsky_work_url__acc2');
+    const visible = await page.evaluate(({ workUrl }) => {
+      const account = window.getCurrentAccount();
+      localStorage.removeItem('bsky_work_url__' + account);
       sessionStorage.setItem('cand_to_movie_pending', JSON.stringify({
         it: { cid: 'd_sale_switch_test', title: 'セール作品の切替テスト', author: 'テスト作者', listPrice: 1000, price: 500, discountPct: 50 },
         imgDataUrl: '', comment: 'セール作品', workUrl, imageCid: '', imageIndex: 0
       }));
+      return { account, buttonId: document.querySelector('.acct-btn:not([hidden])').id };
     }, { workUrl });
     await page.reload({ waitUntil: 'domcontentloaded' });
 
     await expect(page.locator('#movieWorkUrl')).toHaveValue(workUrl);
-    await expect(page.locator('#promoPosRow')).toBeVisible();
-    await page.locator('#acctBtn2').click();
-    await expect(page.locator('#acctBtn2')).toHaveClass(/active/);
+    await expect(page.locator('#promoPosRow')).toBeHidden();
+    await page.evaluate(() => document.querySelector('.acct-btn[hidden]').click());
+    await expect(page.locator('#' + visible.buttonId)).toHaveClass(/active/);
+    expect(await page.evaluate(() => window.getCurrentAccount())).toBe(visible.account);
     await expect(page.locator('#movieWorkUrl')).toHaveValue(workUrl);
-    await expect(page.locator('#promoPosRow')).toBeVisible();
-    expect(await page.evaluate(() => localStorage.getItem('bsky_work_url__acc2'))).toBe(workUrl);
+    await expect(page.locator('#promoPosRow')).toBeHidden();
+    expect(await page.evaluate((account) => localStorage.getItem('bsky_work_url__' + account), visible.account)).toBe(workUrl);
   });
 });
 test.describe('ドラフト軽量ページ', () => {
@@ -741,9 +760,9 @@ test.describe('ドラフト軽量ページ', () => {
     await expect(page).toHaveTitle(/ドラフト.*5秒動画メーカー/);
 
     await page.evaluate(() => {
-      localStorage.setItem('current_account', 'acc1');
+      const account = window.Go5Acct.current();
       localStorage.setItem('go5_stock_meta', JSON.stringify([{
-        id: 'stk_e2e_light', ts: Date.now(), addedAt: Date.now(), account: 'acc1',
+        id: 'stk_e2e_light', ts: Date.now(), addedAt: Date.now(), account,
         label: 'ドラフト軽量ページ回帰', title: 'ドラフト軽量ページ回帰', author: 'test',
         bskyText: 'テスト本文', affiliateUrl: '', workUrl: '', videoName: 'test.mp4', videoId: 'vid_e2e_light', attrs: {}
       }]));
@@ -770,22 +789,22 @@ test.describe('ドラフト軽量ページ', () => {
 
   test('ドラフト投稿モードの即時投稿完了が投稿履歴へ実保存される', async ({ page }) => {
     const draftId = 'stk_e2e_complete_now';
-    const videoId = 'acc1-20260812-1200-e2e1';
     const ytUrl = 'https://www.youtube.com/shorts/AbCdEfGhI12';
     await page.goto('Stock.html', { waitUntil: 'domcontentloaded' });
-    await page.evaluate(({ draftId, videoId }) => {
-      localStorage.setItem('current_account', 'acc1');
-      localStorage.setItem('verify_manual__acc1', '[]');
-      localStorage.setItem('short_hist__acc1', '[]');
+    const identity = await page.evaluate(({ draftId }) => {
+      const account = window.Go5Acct.current();
+      const videoId = account + '-20260812-1200-e2e1';
+      localStorage.setItem('verify_manual__' + account, '[]');
+      localStorage.setItem('short_hist__' + account, '[]');
       localStorage.setItem('go5_stock_archive', '[]');
       localStorage.setItem('go5_stock_meta', JSON.stringify([{
-        id: draftId, ts: Date.now(), addedAt: Date.now(), account: 'acc1',
+        id: draftId, ts: Date.now(), addedAt: Date.now(), account,
         label: '即時投稿完了の回帰', title: '即時投稿完了の回帰', author: 'test',
         bskyText: 'テスト本文', affiliateUrl: '', workUrl: '', videoName: 'test.mp4',
         videoId, attrs: {}
       }]));
-
-    }, { draftId, videoId });
+      return { account, videoId };
+    }, { draftId });
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.evaluate(() => {
       // Drive保存の唯一の起点はドラフト作成確定時。投稿完了から再起動しないことをこの実物フローで固定する。
@@ -805,8 +824,8 @@ test.describe('ドラフト軽量ページ', () => {
     page.once('dialog', (dialog) => dialog.accept());
     await page.locator('#draftModalComplete').click();
 
-    await expect.poll(async () => page.evaluate(({ draftId, videoId, ytUrl }) => {
-      const hist = JSON.parse(localStorage.getItem('verify_manual__acc1') || '[]');
+    await expect.poll(async () => page.evaluate(({ account, draftId, videoId, ytUrl }) => {
+      const hist = JSON.parse(localStorage.getItem('verify_manual__' + account) || '[]');
       const drafts = JSON.parse(localStorage.getItem('go5_stock_meta') || '[]');
       const archive = JSON.parse(localStorage.getItem('go5_stock_archive') || '[]');
       return {
@@ -814,7 +833,7 @@ test.describe('ドラフト軽量ページ', () => {
         draftRemoved: !drafts.some((x) => x.id === draftId),
         archived: archive.some((x) => x.id === draftId),
       };
-    }, { draftId, videoId, ytUrl })).toEqual({ history: true, draftRemoved: true, archived: true });
+    }, { ...identity, draftId, ytUrl })).toEqual({ history: true, draftRemoved: true, archived: true });
     expect(await page.evaluate(() => window.__postCompleteDriveCalls)).toBe(0);
 
     // ★投稿履歴は軽量ページ化で専用ページ StockLists.html へ分離済(Stock.html #tabVerify=data-nav)。
@@ -826,28 +845,29 @@ test.describe('ドラフト軽量ページ', () => {
 
   test('history cap 200 keeps the newest completed draft', async ({ page }) => {
     const draftId = 'stk_e2e_complete_at_cap';
-    const videoId = 'acc1-20260813-1200-cap1';
     const ytUrl = 'https://www.youtube.com/shorts/ZyXwVuTsR98';
     await page.goto('Stock.html', { waitUntil: 'domcontentloaded' });
-    await page.evaluate(({ draftId, videoId }) => {
+    const identity = await page.evaluate(({ draftId }) => {
+      const account = window.Go5Acct.current();
+      const videoId = account + '-20260813-1200-cap1';
       const fullHistory = Array.from({ length: 200 }, (_, i) => ({
         manual: true,
         id: 'm:old-' + i,
         ts: Date.now() - (i + 1) * 60000,
         title: 'old post ' + i,
-        videoId: 'acc1-20260101-0000-old' + i
+        videoId: account + '-20260101-0000-old' + i
       }));
-      localStorage.setItem('current_account', 'acc1');
-      localStorage.setItem('verify_manual__acc1', JSON.stringify(fullHistory));
-      localStorage.setItem('short_hist__acc1', '[]');
+      localStorage.setItem('verify_manual__' + account, JSON.stringify(fullHistory));
+      localStorage.setItem('short_hist__' + account, '[]');
       localStorage.setItem('go5_stock_archive', '[]');
       localStorage.setItem('go5_stock_meta', JSON.stringify([{
-        id: draftId, ts: Date.now(), addedAt: Date.now(), account: 'acc1',
+        id: draftId, ts: Date.now(), addedAt: Date.now(), account,
         label: 'history cap latest post', title: 'history cap latest post', author: 'test',
         bskyText: 'test body', affiliateUrl: '', workUrl: '', videoName: 'test.mp4',
         videoId, attrs: {}
       }]));
-    }, { draftId, videoId });
+      return { account, videoId };
+    }, { draftId });
     await page.reload({ waitUntil: 'domcontentloaded' });
     await expect.poll(() => page.evaluate(() => typeof window.Go5History?.addCompletedPost)).toBe('function');
 
@@ -857,33 +877,34 @@ test.describe('ドラフト軽量ページ', () => {
     page.once('dialog', (dialog) => dialog.accept());
     await page.locator('#draftModalComplete').click();
 
-    await expect.poll(async () => page.evaluate(({ draftId, videoId, ytUrl }) => {
-      const hist = JSON.parse(localStorage.getItem('verify_manual__acc1') || '[]');
+    await expect.poll(async () => page.evaluate(({ account, draftId, videoId, ytUrl }) => {
+      const hist = JSON.parse(localStorage.getItem('verify_manual__' + account) || '[]');
       const drafts = JSON.parse(localStorage.getItem('go5_stock_meta') || '[]');
       return {
         count: hist.length,
         newestPersisted: hist.some((x) => x.videoId === videoId && x.ytUrl === ytUrl),
         draftRemoved: !drafts.some((x) => x.id === draftId)
       };
-    }, { draftId, videoId, ytUrl })).toEqual({ count: 200, newestPersisted: true, draftRemoved: true });
+    }, { ...identity, draftId, ytUrl })).toEqual({ count: 200, newestPersisted: true, draftRemoved: true });
   });
 
   test('投稿履歴APIが未準備ならドラフトを消さず再試行できる', async ({ page }) => {
     const draftId = 'stk_e2e_complete_failclosed';
-    const videoId = 'acc1-20260812-1201-e2e2';
     await page.goto('Stock.html', { waitUntil: 'domcontentloaded' });
-    await page.evaluate(({ draftId, videoId }) => {
-      localStorage.setItem('current_account', 'acc1');
-      localStorage.setItem('verify_manual__acc1', '[]');
-      localStorage.setItem('short_hist__acc1', '[]');
+    const identity = await page.evaluate(({ draftId }) => {
+      const account = window.Go5Acct.current();
+      const videoId = account + '-20260812-1201-e2e2';
+      localStorage.setItem('verify_manual__' + account, '[]');
+      localStorage.setItem('short_hist__' + account, '[]');
       localStorage.setItem('go5_stock_archive', '[]');
       localStorage.setItem('go5_stock_meta', JSON.stringify([{
-        id: draftId, ts: Date.now(), addedAt: Date.now(), account: 'acc1',
+        id: draftId, ts: Date.now(), addedAt: Date.now(), account,
         label: '履歴未準備fail-closed', title: '履歴未準備fail-closed', author: 'test',
         bskyText: 'テスト本文', affiliateUrl: '', workUrl: '', videoName: 'test.mp4',
         videoId, attrs: {}
       }]));
-    }, { draftId, videoId });
+      return { account, videoId };
+    }, { draftId });
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.locator('.stk-mode[data-id="' + draftId + '"]').click();
     await expect(page.locator('#draftPostModal')).toBeVisible();
@@ -896,8 +917,8 @@ test.describe('ドラフト軽量ページ', () => {
     });
     await page.locator('#draftModalComplete').click();
 
-    await expect.poll(async () => page.evaluate(({ draftId, videoId }) => {
-      const hist = JSON.parse(localStorage.getItem('verify_manual__acc1') || '[]');
+    await expect.poll(async () => page.evaluate(({ account, draftId, videoId }) => {
+      const hist = JSON.parse(localStorage.getItem('verify_manual__' + account) || '[]');
       const drafts = JSON.parse(localStorage.getItem('go5_stock_meta') || '[]');
       const archive = JSON.parse(localStorage.getItem('go5_stock_archive') || '[]');
       return {
@@ -905,27 +926,27 @@ test.describe('ドラフト軽量ページ', () => {
         draftKept: drafts.some((x) => x.id === draftId),
         archived: archive.some((x) => x.id === draftId),
       };
-    }, { draftId, videoId })).toEqual({ history: false, draftKept: true, archived: false });
+    }, { ...identity, draftId })).toEqual({ history: false, draftKept: true, archived: false });
     await expect(page.locator('#draftPostModal')).toBeVisible();
     expect(messages.join('\n')).toContain('投稿履歴の登録機能を読み込めませんでした');
   });
 
   test('投稿完了時に台帳縮小だけ失敗しても墓標でドラフトを残さず作成履歴へ退避する', async ({ page }) => {
     const draftId = 'stk_e2e_complete_quota_tomb';
-    const videoId = 'acc1-20260828-0715-tomb';
     await page.goto('Stock.html', { waitUntil: 'domcontentloaded' });
-    await page.evaluate(({ draftId, videoId }) => {
-      localStorage.setItem('current_account', 'acc1');
-      localStorage.setItem('verify_manual__acc1', '[]');
-      localStorage.setItem('short_hist__acc1', '[]');
+    await page.evaluate(({ draftId }) => {
+      const account = window.Go5Acct.current();
+      const videoId = account + '-20260828-0715-tomb';
+      localStorage.setItem('verify_manual__' + account, '[]');
+      localStorage.setItem('short_hist__' + account, '[]');
       localStorage.setItem('go5_stock_archive', '[]');
       localStorage.setItem('go5_stock_del', '{}');
       localStorage.setItem('go5_stock_meta', JSON.stringify([{
-        id: draftId, ts: Date.now(), addedAt: Date.now(), account: 'acc1',
+        id: draftId, ts: Date.now(), addedAt: Date.now(), account,
         label: '墓標表示回帰', title: '墓標表示回帰', author: 'test', bskyText: '本文',
         affiliateUrl: '', workUrl: '', videoName: 'test.mp4', videoId, attrs: {}
       }]));
-    }, { draftId, videoId });
+    }, { draftId });
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.locator(`.stk-mode[data-id="${draftId}"]`).click();
     await page.locator('#draftYtUrl').fill('https://youtu.be/AbCdEfGhI12');
@@ -958,10 +979,10 @@ test.describe('ドラフト軽量ページ', () => {
 
 test.describe('ドラフト投稿モードの短縮URL置換', () => {
   for (const accountCase of [
-    { account: 'acc1', domain: '5mgl.com', suffix: 'tsukuyomi' },
-    { account: 'acc2', domain: 'yoz2.com', suffix: 'yoizakura' },
+    { domain: 'e2e-short-a.example', suffix: 'visible-a' },
+    { domain: 'e2e-short-b.example', suffix: 'visible-b' },
   ]) {
-    test('保存済みX本文の作品・セールURLを' + accountCase.domain + 'へ置換する', async ({ page }) => {
+    test('表示中chの設定ドメインで保存済みX本文の作品・セールURLを' + accountCase.domain + 'へ置換する', async ({ page }) => {
       const draftId = 'stk_e2e_short_' + accountCase.suffix;
       const workCode = 'work-' + accountCase.suffix;
       const saleCode = 'sale-' + accountCase.suffix;
@@ -980,12 +1001,10 @@ test.describe('ドラフト投稿モードの短縮URL置換', () => {
           body: JSON.stringify({ short: 'https://' + accountCase.domain + '/' + code }),
         });
       });
-      await page.addInitScript(({ account }) => {
-        localStorage.setItem('current_account', account);
-      }, { account: accountCase.account });
       await page.goto('Stock.html', { waitUntil: 'domcontentloaded' });
-      await page.evaluate(({ account, draftId, workUrl, saleUrl, placeholderText }) => {
-        localStorage.setItem('current_account', account);
+      const account = await page.evaluate(({ domain, draftId, workUrl, saleUrl, placeholderText }) => {
+        const account = window.Go5Acct.current();
+        localStorage.setItem('short_worker_url__' + account, 'https://' + domain);
         localStorage.setItem('fanza_af_id', 'e2e-affiliate-001');
         localStorage.setItem('disc_urls_seeded__' + account, '1');
         localStorage.setItem('bsky_discount_urls__' + account, JSON.stringify([{
@@ -1000,7 +1019,8 @@ test.describe('ドラフト投稿モードの短縮URL置換', () => {
           videoId: account + '-20260813-1835-short', attrs: {},
         }]));
         localStorage.setItem('go5_draft_post_' + draftId, JSON.stringify({ xText: placeholderText }));
-      }, { account: accountCase.account, draftId, workUrl, saleUrl, placeholderText });
+        return account;
+      }, { domain: accountCase.domain, draftId, workUrl, saleUrl, placeholderText });
       await page.reload({ waitUntil: 'domcontentloaded' });
       await page.locator('.stk-mode[data-id="' + draftId + '"]').click();
       await expect(page.locator('#draftPostModal')).toBeVisible();
@@ -1014,7 +1034,7 @@ test.describe('ドラフト投稿モードの短縮URL置換', () => {
         discUrls: localStorage.getItem('bsky_discount_urls__' + localStorage.getItem('current_account')),
       }));
       expect(diagnostics, JSON.stringify(diagnostics)).toMatchObject({
-        account: accountCase.account, af: 'e2e-affiliate-001',
+        account, af: 'e2e-affiliate-001',
         go5MakeShort: 'function', saleFill: 'function', workPH: true, salePH: true,
       });
       await expect.poll(async () => {
@@ -1150,21 +1170,22 @@ test.describe('durable candidate images and Japanese IME search', () => {
   });
 
   test('Japanese composition keeps one live input and commits one character once', async ({ page }) => {
-    await page.addInitScript(() => {
-      localStorage.setItem('current_account', 'acc1');
+    await page.goto('StockLists.html', { waitUntil: 'domcontentloaded' });
+    await page.evaluate(() => {
+      const account = window.Go5Acct.current();
       localStorage.setItem('bsky_gas_url', '');
       localStorage.setItem('hist_maint_at', String(Date.now()));
       localStorage.setItem('hist_metrics_at', String(Date.now()));
-      localStorage.setItem('short_hist__acc1', JSON.stringify([{
-        videoId: 'acc1-20260828-0651-ime1',
+      localStorage.setItem('short_hist__' + account, JSON.stringify([{
+        videoId: account + '-20260828-0651-ime1',
         ts: Date.now(),
         title: '\u3042\u3044\u3046\u4f5c\u54c1',
-        account: 'acc1'
+        account
       }]));
-      localStorage.setItem('verify_manual__acc1', '[]');
-      localStorage.setItem('verify_yt__acc1', '{}');
+      localStorage.setItem('verify_manual__' + account, '[]');
+      localStorage.setItem('verify_yt__' + account, '{}');
     });
-    await page.goto('StockLists.html', { waitUntil: 'domcontentloaded' });
+    await page.reload({ waitUntil: 'domcontentloaded' });
     const input = page.locator('#histWorkSearch');
     await expect(input).toBeVisible();
     const result = await input.evaluate(async (el) => {

@@ -1,9 +1,9 @@
 {
-  "iframe": 43,
+  "iframe": 44,
   "assets": {
     "css/style.css": {
-      "v": 35,
-      "sha": "d67f0568218c8b68"
+      "v": 36,
+      "sha": "3343d52789ac3960"
     },
     "js/config.js": {
       "v": 23,
@@ -18,8 +18,8 @@
       "sha": "fd6b483984f69d17"
     },
     "js/app.js": {
-      "v": 43,
-      "sha": "d97f9faea7b5a278"
+      "v": 44,
+      "sha": "37cd9245bf3c35dd"
     }
   }
 }

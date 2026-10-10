@@ -171,6 +171,7 @@ window.SCH = window.SCH || {};
   function render(result) {
     const root = document.getElementById("calendar");
     root.innerHTML = "";
+    root.style.setProperty("--channel-count", String(Math.max(1, chan.ids().length)));
     document.body.classList.toggle("verify-mode", verificationMode);
 
     const ds = displayStart();

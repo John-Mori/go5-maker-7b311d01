@@ -64,25 +64,27 @@ test.describe('direct image CDN manifest', () => {
   });
 
   test('post-history used image renders from its stable URL before its IDB provider settles', async ({ page }) => {
-    const videoId = 'acc1-20260826-directcdn';
+    const videoSuffix = '-20260826-directcdn';
     await serveImage(page);
     await page.goto('StockLists.html', { waitUntil: 'domcontentloaded' });
-    await page.evaluate(({ videoId, hash }) => {
-      localStorage.setItem('current_account', 'acc1');
+    const videoId = await page.evaluate(({ videoSuffix, hash }) => {
+      const account = window.Go5Acct.current();
+      const videoId = account + videoSuffix;
       localStorage.setItem('sync2_url', location.origin);
       localStorage.removeItem('sync2_token');
       localStorage.setItem('bsky_gas_url', '');
       localStorage.setItem('hist_maint_at', String(Date.now()));
       localStorage.setItem('hist_metrics_at', String(Date.now()));
-      localStorage.setItem('verify_manual__acc1', '[]');
-      localStorage.setItem('verify_yt__acc1', '{}');
-      localStorage.setItem('short_hist__acc1', JSON.stringify([{
-        videoId, ts: Date.now(), title: '固定URLで即表示する投稿履歴画像', account: 'acc1'
+      localStorage.setItem('verify_manual__' + account, '[]');
+      localStorage.setItem('verify_yt__' + account, '{}');
+      localStorage.setItem('short_hist__' + account, JSON.stringify([{
+        videoId, ts: Date.now(), title: '固定URLで即表示する投稿履歴画像', account
       }]));
       localStorage.setItem('go5_image_manifest_v1', JSON.stringify({
         ['used:' + videoId]: { keys: [hash], prev: 1, at: Date.now() }
       }));
-    }, { videoId, hash: HASH });
+      return videoId;
+    }, { videoSuffix, hash: HASH });
 
     await page.route('**/js/candidates.js*', async (route) => {
       const response = await route.fetch();

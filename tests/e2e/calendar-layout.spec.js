@@ -15,7 +15,9 @@ test.describe('desktop calendar layout', () => {
     const frameWidth = await page.locator('#calFrame').evaluate((el) => el.getBoundingClientRect().width);
     expect(frameWidth).toBeGreaterThan(1300);
 
-    const result = await slots.evaluateAll((els) => {
+    const visibleAccounts = await frame.locator('body').evaluate(() => window.SCH.chan.ids());
+    expect(visibleAccounts.length).toBeGreaterThan(0);
+    const result = await slots.evaluateAll((els, channelCount) => {
       const intersects = (a, b) =>
         a.left < b.right - 0.5 && a.right > b.left + 0.5 &&
         a.top < b.bottom - 0.5 && a.bottom > b.top + 0.5;
@@ -24,7 +26,7 @@ test.describe('desktop calendar layout', () => {
         const parts = Array.from(slot.children);
         const cells = parts.filter((el) => el.classList.contains('cell'));
         const prio = parts.find((el) => el.classList.contains('prio'));
-        if (cells.length !== 2 || !prio) { failures.push('slot structure'); continue; }
+        if (cells.length !== channelCount || !prio) { failures.push('slot structure'); continue; }
 
         const groups = [[...cells, prio], ...cells.map((cell) => Array.from(cell.children))];
         for (const group of groups) {
@@ -45,7 +47,7 @@ test.describe('desktop calendar layout', () => {
         zoom: getComputedStyle(document.body).zoom,
         columns: getComputedStyle(document.querySelector('.week-grid')).gridTemplateColumns.split(' ').length,
       };
-    });
+    }, visibleAccounts.length);
 
     expect(result.zoom).toBe('1.2');
     expect(result.columns).toBe(7);
@@ -60,18 +62,15 @@ test.describe('desktop calendar layout', () => {
 
     const slot = await frame.locator('body').evaluate(() => {
       const firstDate = document.querySelector('.week-head').textContent.slice(0, 10);
-      return { id: window.SCH.gen.slotId(firstDate, 0), date: firstDate };
+      return { id: window.SCH.gen.slotId(firstDate, 0), date: firstDate, account: window.SCH.chan.ids()[0] };
     });
-    await page.evaluate(({ id, date }) => {
+    await page.evaluate(({ id, date, account }) => {
       localStorage.setItem('sch_state_v1', JSON.stringify({
         overrides: {},
         slotData: {
           [id]: {
             id, date, title: '同期テスト', updated_at: new Date().toISOString(),
-            exec: {
-              acc1: { status: '公開済', post_url: 'https://example.com/post', exec_updated_at: new Date().toISOString() },
-              acc2: { status: '未着手' },
-            },
+            exec: { [account]: { status: '公開済', post_url: 'https://example.com/post', exec_updated_at: new Date().toISOString() } },
           },
         },
       }));
@@ -87,21 +86,23 @@ test.describe('desktop calendar layout', () => {
 
     const result = await page.locator('body').evaluate(async () => {
       const oldStamp = '2026-08-01T00:00:00.000Z';
+      const primary = window.SCH.chan.ids()[0];
+      const secondary = (window.SCH.config.retiredChannels || []).map((c) => c.id).find((id) => id !== primary) || 'acc999';
       localStorage.setItem('sch_state_v1', JSON.stringify({
         overrides: {},
         slotData: {
           edit: {
             id: 'edit', title: '旧題', notes: '旧メモ', updated_at: oldStamp,
             exec: {
-              acc1: { status: '公開済', video_id: 'acc1-video', url: 'https://acc1.example/', exec_updated_at: oldStamp },
-              acc2: { status: '未着手' },
+              [primary]: { status: '公開済', video_id: primary + '-video', url: 'https://primary.example/', exec_updated_at: oldStamp },
+              [secondary]: { status: '未着手' },
             },
           },
           auto: {
             id: 'auto', updated_at: oldStamp,
             exec: {
-              acc1: { status: '予約登録済', exec_updated_at: oldStamp },
-              acc2: { status: '予約登録済', exec_updated_at: oldStamp },
+              [primary]: { status: '予約登録済', exec_updated_at: oldStamp },
+              [secondary]: { status: '予約登録済', exec_updated_at: oldStamp },
             },
           },
         },
@@ -110,16 +111,16 @@ test.describe('desktop calendar layout', () => {
       await testStore.init();
       await testStore.upsertSlot({
         id: 'edit', title: '新題', notes: '新メモ',
-        status: '公開済', video_id: 'acc1-video', url: 'https://acc1.example/',
-      }, 'acc1');
-      await testStore.saveSlots({ auto: { status: '公開済' } }, 'acc1');
-      return JSON.parse(localStorage.getItem('sch_state_v1'));
+        status: '公開済', video_id: primary + '-video', url: 'https://primary.example/',
+      }, primary);
+      await testStore.saveSlots({ auto: { status: '公開済' } }, primary);
+      return { state: JSON.parse(localStorage.getItem('sch_state_v1')), primary, secondary };
     });
 
-    expect(result.slotData.edit.title).toBe('新題');
-    expect(result.slotData.edit.exec.acc1.exec_updated_at).toBe('2026-08-01T00:00:00.000Z');
-    expect(result.slotData.auto.exec.acc1.status).toBe('公開済');
-    expect(result.slotData.auto.exec.acc2.status).toBe('予約登録済');
+    expect(result.state.slotData.edit.title).toBe('新題');
+    expect(result.state.slotData.edit.exec[result.primary].exec_updated_at).toBe('2026-08-01T00:00:00.000Z');
+    expect(result.state.slotData.auto.exec[result.primary].status).toBe('公開済');
+    expect(result.state.slotData.auto.exec[result.secondary].status).toBe('予約登録済');
   });
 
   test('writes a posted result only to the specified account', async ({ page }) => {
@@ -130,24 +131,26 @@ test.describe('desktop calendar layout', () => {
 
     const slot = await frame.locator('body').evaluate(() => {
       const firstDate = document.querySelector('.week-head').textContent.slice(0, 10);
-      return { id: window.SCH.gen.slotId(firstDate, 0), date: firstDate };
+      const primary = window.SCH.chan.ids()[0];
+      const secondary = (window.SCH.config.retiredChannels || []).map((c) => c.id).find((id) => id !== primary) || 'acc999';
+      return { id: window.SCH.gen.slotId(firstDate, 0), date: firstDate, primary, secondary };
     });
-    await page.evaluate(({ id, date }) => {
+    await page.evaluate(({ id, date, primary, secondary }) => {
       localStorage.setItem('sch_state_v1', JSON.stringify({
         overrides: {},
         slotData: {
           [id]: {
             id, date, title: 'アカウント分離テスト', updated_at: '2026-08-01T00:00:00.000Z',
             exec: {
-              acc1: {
+              [primary]: {
                 status: '公開済',
-                video_id: 'acc1-video',
-                post_url: 'https://acc1.example/post',
+                video_id: primary + '-video',
+                post_url: 'https://primary.example/post',
                 exec_updated_at: '2026-08-01T00:00:00.000Z',
               },
-              acc2: {
+              [secondary]: {
                 status: '予約登録済',
-                video_id: 'acc2-video',
+                video_id: secondary + '-video',
                 exec_updated_at: '2026-08-01T00:00:00.000Z',
               },
             },
@@ -158,38 +161,39 @@ test.describe('desktop calendar layout', () => {
     }, slot);
     await expect(frame.locator('.slot').first().locator('.cell').first()).toHaveClass(/done/);
 
-    await page.evaluate(({ id }) => {
+    await page.evaluate(({ id, secondary }) => {
       document.getElementById('calFrame').contentWindow.postMessage({
         target: 'sch-calendar',
         type: 'slot-writeback',
         id,
-        account: 'acc2',
+        account: secondary,
         status: '公開済',
-        post_url: 'https://acc2.example/post',
+        post_url: 'https://secondary.example/post',
       }, '*');
     }, slot);
 
-    await expect.poll(async () => page.evaluate(({ id }) => {
+    await expect.poll(async () => page.evaluate(({ id, secondary }) => {
       const state = JSON.parse(localStorage.getItem('sch_state_v1'));
-      return state.slotData[id].exec.acc2.status;
+      return state.slotData[id].exec[secondary].status;
     }, slot)).toBe('公開済');
     const saved = await page.evaluate(({ id }) => JSON.parse(localStorage.getItem('sch_state_v1')).slotData[id], slot);
-    expect(saved.exec.acc1.post_url).toBe('https://acc1.example/post');
-    expect(saved.exec.acc1.video_id).toBe('acc1-video');
-    expect(saved.exec.acc2.post_url).toBe('https://acc2.example/post');
-    expect(saved.exec.acc2.video_id).toBe('acc2-video');
+    expect(saved.exec[slot.primary].post_url).toBe('https://primary.example/post');
+    expect(saved.exec[slot.primary].video_id).toBe(slot.primary + '-video');
+    expect(saved.exec[slot.secondary].post_url).toBe('https://secondary.example/post');
+    expect(saved.exec[slot.secondary].video_id).toBe(slot.secondary + '-video');
   });
 
   test('does not mark a slot done merely by opening it', async ({ page }) => {
     await page.goto('index.html', { waitUntil: 'domcontentloaded' });
     await page.locator('#calBtn').click();
     const frame = page.frameLocator('#calFrame');
-    const firstCell = frame.locator('.slot').first().locator('.cell[data-acc="acc1"]');
+    const account = await frame.locator('body').evaluate(() => window.SCH.chan.ids()[0]);
+    const firstCell = frame.locator('.slot').first().locator('.cell[data-acc="' + account + '"]');
     await expect(firstCell).toHaveClass(/pending/);
-    const info = await frame.locator('body').evaluate(() => ({
+    const info = await frame.locator('body').evaluate((_body, activeAccount) => ({
       date: document.querySelector('.week-head').textContent.slice(0, 10),
-      hhmm: document.querySelector('.slot .cell[data-acc="acc1"] .time').textContent.trim(),
-    }));
+      hhmm: document.querySelector('.slot .cell[data-acc="' + activeAccount + '"] .time').textContent.trim(),
+    }), account);
     await firstCell.click();
     await page.evaluate(({ date, hhmm }) => {
       document.getElementById('calFrame').contentWindow.postMessage({

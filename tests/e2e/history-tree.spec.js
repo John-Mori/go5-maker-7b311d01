@@ -1,38 +1,51 @@
 // @ts-check
 const { test, expect } = require('@playwright/test');
 
+const SHORT_BASE = 'https://e2e-short.example';
+const VIDEO_SUFFIX = '-20260827-1200-tree1';
+
+async function currentIdentity(page) {
+  return page.evaluate((suffix) => {
+    const account = window.Go5Acct.current();
+    return { account, videoId: account + suffix };
+  }, VIDEO_SUFFIX);
+}
+
 test.describe('投稿履歴のツリー設定', () => {
   test.beforeEach(async ({ page }) => {
-    await page.addInitScript(() => {
-      const videoId = 'acc1-20260827-1200-tree1';
-      localStorage.setItem('current_account', 'acc1');
+    await page.goto('StockLists.html', { waitUntil: 'domcontentloaded' });
+    await page.evaluate(({ shortBase, videoSuffix }) => {
+      const account = window.Go5Acct.current();
+      const videoId = account + videoSuffix;
       localStorage.setItem('bsky_gas_url', '');
       localStorage.setItem('hist_maint_at', String(Date.now()));
       localStorage.setItem('hist_metrics_at', String(Date.now()));
-      localStorage.setItem('short_hist__acc1', JSON.stringify([{
-        videoId, ts: Date.now(), title: 'ツリー計測テスト作品', account: 'acc1',
+      localStorage.setItem('short_worker_url__' + account, shortBase);
+      localStorage.setItem('short_hist__' + account, JSON.stringify([{
+        videoId, ts: Date.now(), title: 'ツリー計測テスト作品', account,
         ytUrl: 'https://youtu.be/AbCdEfGhI12',
-        shortUrl: 'https://5mgl.com/parent1', workShortUrl: 'https://5mgl.com/work01'
+        shortUrl: shortBase + '/parent1', workShortUrl: shortBase + '/work01'
       }]));
-      localStorage.setItem('verify_manual__acc1', '[]');
-      localStorage.setItem('verify_yt__acc1', '{}');
+      localStorage.setItem('verify_manual__' + account, '[]');
+      localStorage.setItem('verify_yt__' + account, '{}');
       localStorage.setItem('clicks_cache', JSON.stringify({ parent1: 2, work01: 4, tree01: 17 }));
       localStorage.setItem('yt_meta_cache', JSON.stringify({ AbCdEfGhI12: { title: 'YouTube動画の題名' } }));
       localStorage.setItem('fanza_af_id', 'sample-001');
       localStorage.removeItem('go5_tree_links_v1');
-      sessionStorage.setItem('go5_manual_short_last__acc1', JSON.stringify({
-        shortUrl: 'https://5mgl.com/tree01', affiliateOk: true, at: Date.now()
+      sessionStorage.setItem('go5_manual_short_last__' + account, JSON.stringify({
+        shortUrl: shortBase + '/tree01', affiliateOk: true, at: Date.now()
       }));
-    });
-    await page.route('https://5mgl.com/api/list**', async (route) => {
+    }, { shortBase: SHORT_BASE, videoSuffix: VIDEO_SUFFIX });
+    await page.route('**/api/list**', async (route) => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, links: [
         { code: 'parent1', clicks: 2, today: 0, yesterday: 0, week: 0 }, { code: 'work01', clicks: 4, today: 0, yesterday: 0, week: 0 }, { code: 'tree01', clicks: 17, today: 8, yesterday: 5, week: 13 }
       ] }) });
     });
+    await page.reload({ waitUntil: 'domcontentloaded' });
   });
 
   test('返信URLは短縮せず、表示名とピンク矢印クリック数を親履歴へ保存する', async ({ page }) => {
-    await page.goto('StockLists.html', { waitUntil: 'domcontentloaded' });
+    const identity = await currentIdentity(page);
     await expect(page.locator('.vrow').first()).toBeVisible();
     await page.locator('.vedit-btn').first().click();
     await expect(page.getByText('🌳 ツリー設定')).toBeVisible();
@@ -40,7 +53,7 @@ test.describe('投稿履歴のツリー設定', () => {
     const row = page.locator('.vedit-tree-row').first();
     await row.locator('.vedit-tree-name').fill('続編はこちら');
     await row.locator('.vedit-tree-post').fill('https://x.com/example/status/1234567890');
-    await expect(row.locator('.vedit-tree-short')).toHaveValue('https://5mgl.com/tree01');
+    await expect(row.locator('.vedit-tree-short')).toHaveValue(SHORT_BASE + '/tree01');
     await page.locator('#veditSave').click();
 
     const tree = page.locator('.vrow-tree-row').first();
@@ -52,45 +65,43 @@ test.describe('投稿履歴のツリー設定', () => {
     await expect(tree.locator('img').first()).toHaveAttribute('src', 'assets/icons/ic-cursor-pink.png');
 
     const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('go5_tree_links_v1') || '{}'));
-    const rec = saved['acc1|v:acc1-20260827-1200-tree1'];
+    const rec = saved[identity.account + '|v:' + identity.videoId];
     expect(rec.trees).toHaveLength(1);
-    expect(rec.trees[0]).toMatchObject({ name: '続編はこちら', postUrl: 'https://x.com/example/status/1234567890', shortUrl: 'https://5mgl.com/tree01' });
+    expect(rec.trees[0]).toMatchObject({ name: '続編はこちら', postUrl: 'https://x.com/example/status/1234567890', shortUrl: SHORT_BASE + '/tree01' });
   });
 
   test('元作品URLをアフィ化し、チャンネルの新ドメインで短縮してからOKを表示する', async ({ page }) => {
     let destination = '';
-    await page.route('https://5mgl.com/api/shorten', async (route) => {
+    await page.route(SHORT_BASE + '/api/shorten', async (route) => {
       const body = route.request().postData() || '';
       destination = new URLSearchParams(body).get('url') || '';
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ short: 'https://5mgl.com/tree99', url: destination }) });
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ short: SHORT_BASE + '/tree99', url: destination }) });
     });
-    await page.goto('StockLists.html', { waitUntil: 'domcontentloaded' });
     await page.locator('.vedit-btn').first().click();
     const row = page.locator('.vedit-tree-row').first();
     await row.locator('.vedit-tree-short').fill('https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_123456/');
     await row.locator('.vedit-tree-shorten').click();
-    await expect(row.locator('.vedit-tree-short')).toHaveValue('https://5mgl.com/tree99');
+    await expect(row.locator('.vedit-tree-short')).toHaveValue(SHORT_BASE + '/tree99');
     await expect(row.locator('.vedit-tree-status')).toContainText('アフィリンクOK・短縮先OK');
     expect(destination).toContain('https://al.fanza.co.jp/');
     expect(new URL(destination).searchParams.get('af_id')).toBe('sample-001');
   });
   test('X/Bluesky投稿URLでない値は保存せず、モーダル内で理由を出す', async ({ page }) => {
-    await page.goto('StockLists.html', { waitUntil: 'domcontentloaded' });
     await page.locator('.vedit-btn').first().click();
     const row = page.locator('.vedit-tree-row').first();
     await row.locator('.vedit-tree-post').fill('https://example.com/not-a-social-post');
-    await row.locator('.vedit-tree-short').fill('https://5mgl.com/tree01');
+    await row.locator('.vedit-tree-short').fill(SHORT_BASE + '/tree01');
     await page.locator('#veditSave').click();
     await expect(page.locator('#veditError')).toContainText('返信ポストURLを確認');
     await expect(page.locator('#veditOverlay')).toBeVisible();
   });
 
   test('ツリー2以降は返信URLなし・短縮前の作品URLだけでも仮保存し、開き直して保持する', async ({ page }) => {
-    await page.goto('StockLists.html', { waitUntil: 'domcontentloaded' });
+    const identity = await currentIdentity(page);
     await page.locator('.vedit-btn').first().click();
     const first = page.locator('.vedit-tree-row').first();
     await first.locator('.vedit-tree-post').fill('https://x.com/example/status/1234567890');
-    await first.locator('.vedit-tree-short').fill('https://5mgl.com/tree01');
+    await first.locator('.vedit-tree-short').fill(SHORT_BASE + '/tree01');
     await page.locator('#veditTreeAdd').click();
     const second = page.locator('.vedit-tree-row').nth(1);
     await second.locator('.vedit-tree-name').fill('ツリー2仮保存');
@@ -99,7 +110,7 @@ test.describe('投稿履歴のツリー設定', () => {
     await page.locator('#veditSave').click();
 
     const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('go5_tree_links_v1') || '{}'));
-    const rec = saved['acc1|v:acc1-20260827-1200-tree1'];
+    const rec = saved[identity.account + '|v:' + identity.videoId];
     expect(rec.trees).toHaveLength(2);
     expect(rec.trees[1]).toMatchObject({ name: 'ツリー2仮保存', postUrl: '', shortUrl: rawWorkUrl });
 
@@ -113,7 +124,6 @@ test.describe('投稿履歴のツリー設定', () => {
 
   test('iPhone幅でも返信URLと貼り付けを同列にし、作品URL欄は同じ高さにする', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto('StockLists.html', { waitUntil: 'domcontentloaded' });
     await page.locator('.vedit-btn').first().click();
     const row = page.locator('.vedit-tree-row').first();
     const layout = await row.evaluate((el) => {

@@ -2377,7 +2377,10 @@
   }
   try {
     window.Go5ManualShortLast = function (account) {
-      try { return JSON.parse(sessionStorage.getItem('go5_manual_short_last__' + (account === 'acc2' ? 'acc2' : 'acc1')) || 'null'); } catch (e) { return null; }
+      try {
+        var a = /^acc\d+$/.test(String(account || '')) ? String(account) : 'acc1';
+        return JSON.parse(sessionStorage.getItem('go5_manual_short_last__' + a) || 'null');
+      } catch (e) { return null; }
     };
   } catch (e) {}
   if (els.manualShortBtn) els.manualShortBtn.addEventListener('click', function () {
@@ -2412,6 +2415,25 @@
     var btn = els.manualShortBtn, orig = btn.textContent;
     var account = manualShortAccount_();
     var expectedBase = workerBase(account).replace(/\/+$/, '');
+    // ドメイン枠はあるが未設定のチャンネル(acc3など)は、旧チャンネルの
+    // 5mgl/yoz2へ落とさず、画面の案内どおり変換済みの元URLをそのまま使う。
+    if (!expectedBase) {
+      if (els.manualOut) {
+        els.manualOut.textContent = targetUrl;
+        els.manualOut.setAttribute('data-url', targetUrl);
+      }
+      if (els.manualResult) els.manualResult.hidden = false;
+      if (useAffiliate) {
+        manualAffStatus_('ok', 'アフィリンクOK・短縮なし');
+        rememberManualAffiliateShort_(account, targetUrl, targetUrl);
+      } else {
+        manualAffStatus_('off', 'アフィリンクなし・短縮なし(元URL)');
+      }
+      btn.textContent = '✓ 元URLを使用';
+      setTimeout(function () { btn.textContent = orig; }, 1600);
+      if (els.manualUrl) els.manualUrl.value = '';
+      return;
+    }
     btn.disabled = true; btn.textContent = '短縮中…';
     makeShortAndShare(targetUrl, { account: account }).then(function (res) {
       var s = (res && (res.shareUrl || res.shortUrl)) || '';

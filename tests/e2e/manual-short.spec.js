@@ -42,6 +42,14 @@ test.describe('単体短縮リンク発行', () => {
 
       await page.goto('index.html', { waitUntil: 'domcontentloaded' });
       await page.locator('#tabAffi').click();
+      // 旧2chは運用画面から隠しただけ。テスト内だけ選択肢を戻し、保持された
+      // ドメイン定義とアフィ検証経路が消えていないことを直接確認する。
+      await page.locator('#manualShortAccount').evaluate((select, accountCase) => {
+        const option = document.createElement('option');
+        option.value = accountCase.account;
+        option.textContent = accountCase.channel;
+        select.appendChild(option);
+      }, accountCase);
       await page.locator('#manualShortAccount').selectOption(accountCase.account);
       await expect(page.locator('#manualAffiliateOn')).toBeChecked();
       await expect(page.locator('#manualShortDomain')).toHaveText('発行ドメイン: ' + accountCase.domain);
@@ -64,25 +72,29 @@ test.describe('単体短縮リンク発行', () => {
     });
   }
 
-  test('チェックを外した場合だけ生URLをそのまま短縮し、アフィリンクなしを明示する', async ({ page }) => {
+  test('表示中chのドメインが空なら旧ドメインへ落とさず元URLを使う', async ({ page }) => {
     const longUrl = 'https://example.com/reply-guide';
-    let savedDestination = '';
+    let legacyCalls = 0;
     await page.addInitScript(() => {
-      localStorage.setItem('current_account', 'acc1');
       localStorage.setItem('fanza_af_id', 'test-affiliate-990');
+      localStorage.removeItem('short_worker_url__acc3');
+      localStorage.setItem('short_worker_url', 'https://legacy-short.invalid');
     });
-    await page.route('https://5mgl.com/api/shorten', async (route) => {
-      savedDestination = new URLSearchParams(route.request().postData() || '').get('url') || '';
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ short: 'https://5mgl.com/raw01', url: savedDestination }) });
+    await page.route(/https:\/\/(?:5mgl\.com|yoz2\.com|legacy-short\.invalid)\/api\/shorten/, async (route) => {
+      legacyCalls++;
+      await route.abort();
     });
     await page.goto('index.html', { waitUntil: 'domcontentloaded' });
     await page.locator('#tabAffi').click();
+    await expect(page.locator('#manualShortAccount')).toHaveValue(await page.evaluate(() => window.getCurrentAccount()));
+    await expect(page.locator('#manualShortDomain')).toContainText('未設定');
     await page.locator('#manualAffiliateOn').uncheck();
     await page.locator('#manualUrl').fill(longUrl);
     await page.locator('#manualShortBtn').click();
-    await expect(page.locator('#manualOut')).toHaveText('https://5mgl.com/raw01');
-    await expect(page.locator('#manualAffStatus')).toContainText('アフィリンクなし');
-    expect(savedDestination).toBe(longUrl);
+    await expect(page.locator('#manualOut')).toHaveText(longUrl);
+    await expect(page.locator('#manualOut')).toHaveAttribute('data-url', longUrl);
+    await expect(page.locator('#manualAffStatus')).toContainText('アフィリンクなし・短縮なし');
+    expect(legacyCalls).toBe(0);
   });
 
   test('アフィIDが無い場合は誤った短縮リンクを発行しない', async ({ page }) => {
