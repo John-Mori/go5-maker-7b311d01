@@ -61,7 +61,7 @@
   const ACCOUNTS = {
     acc1: { label: "月詠み色恋劇場", bg: "assets/bg_main.mp4" },
     acc2: { label: "宵桜艶帖～Yoizakura Tsuyacho～", bg: "assets/bg_account2.mp4?v=203" }, // S-1a: 5.0sシームレスループ版に差し替え。(継ぎ目21.2→27.0dB)?vはキャッシュ更新用
-    acc3: { label: "癒やし倉庫", bg: "assets/bg_main.mp4" },  // ★背景動画は未用意。acc1を仮流用(テロップ検証用・要差替)
+    acc3: { label: "癒やし倉庫", bg: "assets/bg_account3.mp4" },  // 青空と雲(Chami支給2026-10-11 msg1558743429410717706)。中央9:16切出し・5.0sシームレスループ(継ぎ目38.9dB)
   };
   // ★DLサイト便一本化(Chami 2026-10-10 msg1558233171961708595「月詠みと宵桜艶帖の項目削除して」)。
   //   acc1/acc2 はボタンを隠して起動時も acc3 へ寄せるだけ。定義・保存データ・FANZA経路は温存(戻す時はここを null に)。
@@ -122,6 +122,8 @@
       // ★ピンクは大タイトルの背後だけ(Chami依頼2026-10-11 msg1558693622189138002「ピンクのところはタイトルだけでok・
       //   誘導文と作者部分は透明で背景の動画を使う」)。上下ともfade(H比)でぼかし、箱の輪郭は作らない。
       headerWash: { top: "252,228,236", mid: "248,187,208", fade: 0.03, titleOnly: true },
+      // 文字の大きさ(Chami依頼2026-10-11 msg1558743429410717706「文字を少し大きめに、誘導文、作者を若干小さめに」)。他テーマは未設定=1倍。
+      titleSizeK: 1.12, detailSizeK: 0.9, authorSizeK: 0.9,
       textFill: "#880E4F",                     // 誘導行：深いローズ(プラム)＋白フチ(detailHalo)で背景動画の上でも読める
       detailHalo: "#FFFFFF",
       titleFill: "#FFFFFF",                    // 題名：白文字＋濃ローズのフチ＋外に細い白フチ(ピンク地で浮く)
@@ -471,7 +473,8 @@
 
   function drawText(author, detail, top) {
     const maxw = W * 0.9;
-    const fA = Math.round(H * 0.025), fD = Math.round(H * 0.027), fT = Math.round(H * 0.048);
+    const th_ = theme();
+    const fA = Math.round(H * 0.025 * (th_.authorSizeK || 1)), fD = Math.round(H * 0.027 * (th_.detailSizeK || 1)), fT = Math.round(H * 0.048 * (th_.titleSizeK || 1));
     const padExtra = H * OFF.bandPad;   // 黒帯の余白(厚み)を全段に加算
     const rowGap = H * OFF.rowGap;      // 段と段の間に足す縦スペース
     let y = Math.round(H * (0.020 + OFF.whole));  // 軸1：構成全体の縦オフセットを加算
@@ -504,13 +507,15 @@
         // 2行モード：最大2行・中央揃え。帯は両行を1枚で囲い、帯と文字は同じオフセット(textTitle)で一緒に動く。
         var f2 = fitTwoLines(top, fT, maxw, U(14), titleFamily);
         var tpx2 = capTitlePx(f2.lines, Math.max(1, Math.round(f2.px * tScale)), U(16) + padExtra, titleFamily);
-        y = drawTitleBlockUnified(f2.lines, y, tpx2, U(16) + padExtra, U(6), tScale, OFF.textTitle, undefined, "title", titleFamily) + U(4);
+        y = drawTitleBlockUnified(f2.lines, y, tpx2, U(16) + padExtra, U(6), tScale, OFF.textTitle, undefined, "title", titleFamily);
+        var titleY1 = y; y += U(4);
       } else {
         var f = fitOneLine(top, fT, maxw, U(14), titleFamily);
         var tpx = capTitlePx([f.text], Math.max(1, Math.round(f.px * tScale)), U(16) + padExtra, titleFamily);
-        y = drawBlock([f.text], y, tpx, U(16) + padExtra, U(6), 195, OFF.textTitle, tScale, "title", titleFamily) + U(4);
+        y = drawBlock([f.text], y, tpx, U(16) + padExtra, U(6), 195, OFF.textTitle, tScale, "title", titleFamily);
+        var titleY1 = y; y += U(4);
       }
-      titleSpan_ = { top: titleY0 + H * (OFF.textTitle || 0), bot: y + H * (OFF.textTitle || 0) };  // headerWash(titleOnly)用=段オフセット込みの題名の上下
+      titleSpan_ = { top: titleY0 + H * (OFF.textTitle || 0), bot: titleY1 + H * (OFF.textTitle || 0) };  // headerWash(titleOnly)用=段オフセット込みの題名の上下
       y = drawDivider(y);  // dividerColorのあるテーマのみ：題名帯の直後(画像の直前)に太い黒線
     }
     return y;
@@ -527,8 +532,10 @@
     ctx.restore();
     if (hw.titleOnly) {
       // 題名の背後だけ：上下をfadeで透明へ溶かす(誘導文・作者の段は背景動画がそのまま見える)。
+      // 題名の上下中央にそろえる＝上下のぼかし幅を同じにする(Chami依頼2026-10-11 msg1558743429410717706)。
+      //   titleSpan_は題名ブロックの実寸なので、2行モードでは縦幅が自動で伸びる。
       if (!titleSpan_) return;
-      var f = H * hw.fade, y0 = Math.max(0, titleSpan_.top - f * 0.4), y1 = titleSpan_.bot + f;
+      var f = H * hw.fade * 0.5, y0 = Math.max(0, titleSpan_.top - f), y1 = titleSpan_.bot + f;
       var gt = ctx.createLinearGradient(0, y0, 0, y1), span = y1 - y0;
       gt.addColorStop(0, `rgba(${hw.top},0)`);
       gt.addColorStop(Math.min(0.49, (titleSpan_.top - y0) / span), `rgba(${hw.top},1)`);
