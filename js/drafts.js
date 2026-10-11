@@ -328,7 +328,7 @@
     if (!arr.length) {
       // 別アカウントに下書きがある場合はそれも案内。(アカウント別保存のため「消えた?」を防ぐ)
       var other = (acctId() === 'acc2') ? 'acc1' : 'acc2';
-      var otherName = (other === 'acc2') ? '宵桜艶帖' : '月詠み';
+      var otherName = (window.Go5Acct && Go5Acct.labelOf) ? Go5Acct.labelOf(other) : (other === 'acc2' ? '宵桜艶帖' : other === 'acc3' ? '癒やし倉庫' : '月詠み');
       var otherN = 0;
       try { otherN = (JSON.parse(localStorage.getItem('movie_drafts__' + other) || '[]') || []).length; } catch (e) {}
       list.innerHTML = '<p style="color:var(--sub);font-size:.88rem;line-height:1.7;">' +

@@ -245,7 +245,7 @@
           '<div class="field-label" style="margin-bottom:4px;">🎬 YouTube 公開待ち(非公開/予約公開)</div>' +
           '<div class="hint" style="margin-bottom:12px;">投稿履歴のYouTube URLのうち、まだ公開されていない作品です。(投稿履歴を更新すると最新化・公開されると自動で消えます)予約公開の正確な時刻はYouTube側の仕様で取得できないため「公開待ち」と表示します。</div>' +
           ytList.map(function (y) {
-            var label = y.account === 'acc2' ? '宵桜艶帖' : '月詠み';
+            var label = (window.Go5Acct && Go5Acct.labelOf) ? Go5Acct.labelOf(y.account) : (y.account === 'acc2' ? '宵桜艶帖' : y.account === 'acc3' ? '癒やし倉庫' : '月詠み');
             var cls = y.account === 'acc2' ? 'rsv-badge-acc2' : 'rsv-badge-acc1';
             return '<div class="rsv-tab-row">' +
               '<span class="rsv-badge ' + cls + '">' + label + '</span>' +
@@ -261,7 +261,7 @@
       html += '<div class="card">' +
         '<div class="field-label" style="margin-bottom:8px;">⏰ 予約済み投稿一覧(Bluesky)</div>' +
         (pend.length ? pend.map(function (it) {
-          var label = it.account === 'acc2' ? '宵桜艶帖' : '月詠み';
+          var label = (window.Go5Acct && Go5Acct.labelOf) ? Go5Acct.labelOf(it.account) : (it.account === 'acc2' ? '宵桜艶帖' : it.account === 'acc3' ? '癒やし倉庫' : '月詠み');
           var cls = it.account === 'acc2' ? 'rsv-badge-acc2' : 'rsv-badge-acc1';
           return '<div class="rsv-tab-row">' +
             '<span class="rsv-badge ' + cls + '">' + label + '</span>' +

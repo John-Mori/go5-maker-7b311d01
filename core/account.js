@@ -56,6 +56,13 @@
     if (acc && /^did:/.test(did || "")) { try { localStorage.setItem("bsky_did__" + acc, did); } catch (e) {} }
   }
 
+  // ── カード/一覧に出すアカウントの短い表示名(唯一の正本・2026-10-11) ──
+  //   ★旧実装は各所で `acc === 'acc2' ? '宵桜艶帖' : '月詠み'` の二択だったため、acc3(癒やし倉庫)のドラフトが
+  //     「月詠み」と表示された(Chami報告2026-10-11「表示が月詠みになってる」)。ここへ寄せて二択を断つ。
+  var ACCT_LABELS = { acc1: "月詠み", acc2: "宵桜艶帖", acc3: "癒やし倉庫" };
+  // 未知のIDは空文字=別chの名前を騙らない。
+  function labelOf(acc) { return ACCT_LABELS[acc || current()] || ""; }
+
   // アカウント切替の購読。(app.js が document に 'account-changed' を dispatch)
   function onChange(cb) {
     if (typeof document === "undefined" || typeof cb !== "function") return;
@@ -65,7 +72,8 @@
   }
 
   var API = { current: current, key: key, handleOf: handleOf, didOf: didOf, setDid: setDid, onChange: onChange, FALLBACK: FALLBACK,
-              X_ACCOUNTS: X_ACCOUNTS, xHandleOf: xHandleOf, xNameOf: xNameOf };
+              X_ACCOUNTS: X_ACCOUNTS, xHandleOf: xHandleOf, xNameOf: xNameOf,
+              ACCT_LABELS: ACCT_LABELS, labelOf: labelOf };
 
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   if (root) root.Go5Acct = API;

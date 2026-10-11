@@ -114,6 +114,11 @@
 
   function $(id) { return document.getElementById(id); }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); }
+  // カードのch表示名。正本は Go5Acct.labelOf(旧二択はacc3を「月詠み」と誤表示した・Chami報告2026-10-11)。
+  function acctLabel_(acc) {
+    if (window.Go5Acct && Go5Acct.labelOf) return Go5Acct.labelOf(acc);
+    return acc === 'acc2' ? '宵桜艶帖' : acc === 'acc3' ? '癒やし倉庫' : '月詠み';
+  }
   function fmtTs(ts) {
     try { var d = new Date(ts), p = function (n) { return (n < 10 ? '0' : '') + n; }; return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()); }
     catch (e) { return ''; }
@@ -1164,21 +1169,45 @@
     var toP = new Promise(function (res) { setTimeout(function () { res(null); }, 45000); });
     return Promise.race([fetchP, toP]);
   }
+  // primaryFn() が delayMs 以内に使える値を返さなければ fallbackFn() も並走させ、先に使える値を返した方を採る。
+  //   両方とも使えない値で終われば null。(primary が使えない値/拒否で終わった時は待たずに即 fallback を始める)
+  function raceWithFallback_(primaryFn, fallbackFn, delayMs, usable) {
+    return new Promise(function (resolve) {
+      var done = false, pending = 1, fbStarted = false;
+      function take(v) {
+        if (done) return;
+        if (usable(v)) { done = true; resolve(v); return; }
+        if (--pending === 0 && fbStarted) { done = true; resolve(null); }
+      }
+      function startFb() {
+        if (fbStarted || done) return;
+        fbStarted = true; pending++;
+        Promise.resolve().then(fallbackFn).then(take, function () { take(null); });
+      }
+      Promise.resolve().then(primaryFn).then(function (v) { if (!usable(v)) startFb(); take(v); }, function () { startFb(); take(null); });
+      if (!(delayMs > 0)) startFb(); else setTimeout(startFb, delayMs);
+    });
+  }
+  // IDB が病んでいる(直近の読み書きが無応答/失敗)か。病んでいる時は手元を待たず雲を同時に引く。
+  function idbSick_(store) { try { return !!(store && store.isHealthy && !store.isHealthy()); } catch (e) { return false; } }
+  // 手元IDBが返事をしない時に雲(R2)を並走させるまでの猶予。
+  var VID_IDB_HEAD_START_MS = 2500;
   function resolveVideoBlob_(id) {
     if (_vidMem[id] && isUsableVideoBlob_(_vidMem[id])) return Promise.resolve(_vidMem[id]); // 第1層=メモリ(IDB非依存)
     var store = idb();
     if (!store) return resolveVideoFromR2_(id);
-    return store.get('stock_v_' + id).then(function (blob) {
-      if (isUsableVideoBlob_(blob)) { putVidMem_(id, blob); return blob; }
-      // オブジェクト自体がtruthyでも空/破損なら手元成功にしない。雲の正常な控えへフォールバックする。
-      return resolveVideoFromR2_(id);
+    // ★手元IDB→雲R2 の「直列」をやめ、IDBが2.5秒で答えなければR2を並走させる(Chami報告2026-10-11
+    //   「ドラフトで準備中のまま」)。iOS Safari のIDBは無言で固まり、番犬(8秒)×張り直し(open+tx)で get が
+    //   最大30秒前後かかってから初めてR2(最大45秒)へ進んでいた=合計がDL番犬60秒を超え「⬇ 準備中…」で止まる。
+    //   IDBが既に病んでいると分かっている時は猶予なしで同時に引く。IDBの reject/空/破損は従来どおりR2へ倒す
+    //   (2026-08-13 fail-open・Chami報告2026-08-12①の根治は不変)。
+    return raceWithFallback_(function () {
+      return store.get('stock_v_' + id);
     }, function () {
-      // ★IDB get が iOS Safari で idb-timeout / idb-open-timeout 等で reject した時も R2 へ倒す(2026-08-13)。
-      //   従来は reject が .then を素通りして downloadStock_ の catch(「動画データの取得に失敗しました」)へ
-      //   直行し、作成直後に ensureVideoMirror_ で R2 へ上げた実体があっても一切取りに行けなかった
-      //   (Chami報告2026-08-12①「動画データの取得に失敗。3回くらい出た」の根治)。拒否=手元が無応答なので
-      //   雲の控えを見に行く=これが可用性を喋る側へ倒す fail-open。
       return resolveVideoFromR2_(id);
+    }, idbSick_(store) ? 0 : VID_IDB_HEAD_START_MS, isUsableVideoBlob_).then(function (blob) {
+      if (blob) putVidMem_(id, blob);
+      return blob;
     });
   }
 
@@ -2441,18 +2470,18 @@
   // ── レンダリング ──
   function renderItem_(meta, thumbUrl) {
     var id = meta.id;
-    var acctLabel = meta.account === 'acc2' ? '宵桜艶帖' : '月詠み';
+    var acctLabel = acctLabel_(meta.account);
     var bskyPre = (meta.bskyText || '').replace(/\n/g, ' ');
     if (bskyPre.length > 40) bskyPre = bskyPre.slice(0, 40) + '…';
     var hasYt = !!(meta.youtubeUrl);
     var btnBase = 'width:auto;margin:0;padding:5px 10px;font-size:.76rem;border-radius:6px;cursor:pointer;white-space:nowrap;';
-    return '<div data-item-id="' + esc(id) + '" style="display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid #2a3346;">' +
+    return '<div class="stk-row" data-item-id="' + esc(id) + '" style="display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid #2a3346;">' +
       (thumbUrl ? '<img src="' + esc(thumbUrl) + '" alt="" style="width:48px;height:85px;object-fit:cover;border-radius:5px;flex:0 0 auto;">'
-                : '<div title="サムネイル未取得" style="width:48px;height:85px;border-radius:5px;background:linear-gradient(160deg,#17243a,#0e1422);border:1px solid #31405a;display:flex;align-items:center;justify-content:center;color:#7a8fa3;font-size:.6rem;line-height:1.2;text-align:center;flex:0 0 auto;">確認中</div>') +
+                : '<div class="stk-thumb-ph" title="サムネイル未取得" style="width:48px;height:85px;border-radius:5px;background:linear-gradient(160deg,#17243a,#0e1422);border:1px solid #31405a;display:flex;align-items:center;justify-content:center;color:#7a8fa3;font-size:.6rem;line-height:1.2;text-align:center;flex:0 0 auto;">確認中</div>') +
       '<div style="flex:1 1 0;min-width:0;">' +
-        '<div style="font-size:.86rem;font-weight:700;color:#eef2f7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(meta.label) + '</div>' +
-        '<div style="font-size:.74rem;color:#7a8fa3;margin-top:1px;">' + esc(acctLabel) + ' · ' + esc(fmtTs(meta.ts)) + '</div>' +
-        (bskyPre ? '<div style="font-size:.74rem;color:#9fb0c3;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(bskyPre) + '</div>' : '') +
+        '<div class="stk-title" style="font-size:.86rem;font-weight:700;color:#eef2f7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(meta.label) + '</div>' +
+        '<div class="stk-meta" style="font-size:.74rem;color:#7a8fa3;margin-top:1px;">' + esc(acctLabel) + ' · ' + esc(fmtTs(meta.ts)) + '</div>' +
+        (bskyPre ? '<div class="stk-sub" style="font-size:.74rem;color:#9fb0c3;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(bskyPre) + '</div>' : '') +
         (meta.affiliateUrl ? '<div style="font-size:.71rem;color:#4a7060;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🔗 ' + esc(meta.affiliateUrl.replace(/^https?:\/\//, '').slice(0, 44)) + '</div>' : '') +
         (hasYt ? '<div style="font-size:.71rem;color:var(--accent);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">✅ <a href="' + esc(meta.youtubeUrl) + '" target="_blank" rel="noopener" style="color:var(--accent);">' + esc((meta.youtubeUrl).replace(/^https?:\/\//, '').slice(0, 44)) + '</a></div>' : '') +
         '<div style="display:flex;gap:5px;margin-top:7px;flex-wrap:wrap;">' +
@@ -2468,17 +2497,17 @@
   // ★保存中(未着地)ドラフトの1行。着地までのページ内表示(B・Fable5設計2026-08-17)用。
   //   まだ手元/雲に着地していない=操作ボタンは出さない(DL/投稿は着地後の通常カードで)。
   function renderPendingItem_(meta) {
-    var acctLabel = meta.account === 'acc2' ? '宵桜艶帖' : '月詠み';
+    var acctLabel = acctLabel_(meta.account);
     var thumbUrl = meta.thumbDataUrl || '';
     var status = meta._failed
       ? '<span style="color:#e6a23c;font-weight:700;">⚠ 保存に失敗。下の「もう一度保存」で再確認できます</span>'
       : '<span style="color:var(--accent);">⏳ 保存中…(この端末と雲へ確認しています)</span>';
-    return '<div style="display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid #2a3346;opacity:.92;">' +
+    return '<div class="stk-row" style="display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid #2a3346;opacity:.92;">' +
       (thumbUrl ? '<img src="' + esc(thumbUrl) + '" alt="" style="width:48px;height:85px;object-fit:cover;border-radius:5px;flex:0 0 auto;">'
-                : '<div style="width:48px;height:85px;border-radius:5px;background:linear-gradient(160deg,#17243a,#0e1422);border:1px solid #31405a;display:flex;align-items:center;justify-content:center;color:#7a8fa3;font-size:.6rem;text-align:center;flex:0 0 auto;">保存中</div>') +
+                : '<div class="stk-thumb-ph" style="width:48px;height:85px;border-radius:5px;background:linear-gradient(160deg,#17243a,#0e1422);border:1px solid #31405a;display:flex;align-items:center;justify-content:center;color:#7a8fa3;font-size:.6rem;text-align:center;flex:0 0 auto;">保存中</div>') +
       '<div style="flex:1 1 0;min-width:0;">' +
-        '<div style="font-size:.86rem;font-weight:700;color:#eef2f7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(meta.label) + '</div>' +
-        '<div style="font-size:.74rem;color:#7a8fa3;margin-top:1px;">' + esc(acctLabel) + ' · ' + esc(fmtTs(meta.ts)) + '</div>' +
+        '<div class="stk-title" style="font-size:.86rem;font-weight:700;color:#eef2f7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(meta.label) + '</div>' +
+        '<div class="stk-meta" style="font-size:.74rem;color:#7a8fa3;margin-top:1px;">' + esc(acctLabel) + ' · ' + esc(fmtTs(meta.ts)) + '</div>' +
         '<div style="font-size:.74rem;margin-top:4px;">' + status + '</div>' +
       '</div>' +
     '</div>';
@@ -2487,7 +2516,7 @@
   // 作成履歴(退避済み)の1行。復元・動画DL(blobは残してある)・完全削除。
   function renderArchItem_(meta, thumbUrl) {
     var id = meta.id;
-    var acctLabel = meta.account === 'acc2' ? '宵桜艶帖' : '月詠み';
+    var acctLabel = acctLabel_(meta.account);
     var hasYt = !!(meta.youtubeUrl);
     // ★Drive保存の実物確認状態を1行で見せる(ボタンではなくテキスト行=幅レイアウトに触れない)。
     var _dsv = driveSavedState_(id);
@@ -2507,8 +2536,8 @@
       //   だから「確認中/確認できていないだけ・自動で粘っている・急ぐなら手動でも押せる」と読める中立表現にする。
       //   押下直後もこの状態行が受領を語る(realSaveNow_のrender()でボタン自体は作り直されて押下感が消えるため)。
       driveLine = _stuck
-        ? '<div style="font-size:.71rem;color:#7a8fa3;margin-top:2px;white-space:normal;">☁️ まだDrive保存を確認できていません(開いている間は自動で再確認を続けます) · 急ぐ場合は下の「☁️ Drive保存」で再試行</div>'
-        : '<div style="font-size:.71rem;color:#7a8fa3;margin-top:2px;">☁️ 保存を受け付けました · 実物を確認中…(ふつうは数秒・最大3分)</div>';
+        ? '<div class="stk-meta" style="font-size:.71rem;color:#7a8fa3;margin-top:2px;white-space:normal;">☁️ まだDrive保存を確認できていません(開いている間は自動で再確認を続けます) · 急ぐ場合は下の「☁️ Drive保存」で再試行</div>'
+        : '<div class="stk-meta" style="font-size:.71rem;color:#7a8fa3;margin-top:2px;">☁️ 保存を受け付けました · 実物を確認中…(ふつうは数秒・最大3分)</div>';
     } else if (_dsv && _dsv.state === 'novideo') {
       // ★動画の実体がこの端末にもクラウド(R2)にも見つからず、Driveへ保存できない=沈黙で諦めず「見える失敗」にする
       //   (Fable5診断2026-08-18。旧実装は無言で8回再送して静かに諦めていた)。「復元」して作り直すか手動投入を促す。
@@ -2525,12 +2554,12 @@
     //     width:100% を読み、flex:0 0 auto+wrap で各ボタンが全幅→縦積みになる(Chami msg1536784731872698439「余計に悪くなってる」の真因)。
     //     ドラフト側btnBase(703行)や draftPostModal(1206行コメント)と同じ既知の罠=INC-47系。ここが幅騒動の元凶だった。
     var btnBase = 'width:auto;margin:0;padding:4px 8px;font-size:.72rem;border-radius:6px;cursor:pointer;white-space:nowrap;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;gap:3px;';
-    return '<div data-item-id="' + esc(id) + '" style="display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid #2a3346;opacity:.92;">' +
+    return '<div class="stk-row" data-item-id="' + esc(id) + '" style="display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid #2a3346;opacity:.92;">' +
       (thumbUrl ? '<img src="' + esc(thumbUrl) + '" alt="" style="width:40px;height:71px;object-fit:cover;border-radius:5px;flex:0 0 auto;">'
-                : '<div style="width:40px;height:71px;border-radius:5px;background:#0e1422;flex:0 0 auto;"></div>') +
+                : '<div class="stk-thumb-ph" style="width:40px;height:71px;border-radius:5px;background:#0e1422;flex:0 0 auto;"></div>') +
       '<div style="flex:1 1 0;min-width:0;">' +
-        '<div style="font-size:.84rem;font-weight:700;color:#cbd5e3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(meta.label) + '</div>' +
-        '<div style="font-size:.72rem;color:#7a8fa3;margin-top:1px;">' + esc(acctLabel) + ' · 完了 ' + esc(fmtTs(meta.completedTs || meta.ts)) + '</div>' +
+        '<div class="stk-title" style="font-size:.84rem;font-weight:700;color:#cbd5e3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(meta.label) + '</div>' +
+        '<div class="stk-meta" style="font-size:.72rem;color:#7a8fa3;margin-top:1px;">' + esc(acctLabel) + ' · 完了 ' + esc(fmtTs(meta.completedTs || meta.ts)) + '</div>' +
         (hasYt ? '<div style="font-size:.71rem;color:var(--accent);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">✅ <a href="' + esc(meta.youtubeUrl) + '" target="_blank" rel="noopener" style="color:var(--accent);">' + esc((meta.youtubeUrl).replace(/^https?:\/\//, '').slice(0, 44)) + '</a></div>' : '') +
         driveLine +
         '<div style="display:flex;gap:6px;margin-top:7px;flex-wrap:wrap;">' +
@@ -2707,6 +2736,21 @@
       if (_thumbCache[m.id]) return Promise.resolve(_thumbCache[m.id]);
       if (m.thumbDataUrl) return Promise.resolve(m.thumbDataUrl);
       if (!store) return Promise.resolve(null);
+      // ★手元のサムネ系は最大4段のIDB読み=IDBが固まる端末では「確認中」が分単位で続いた(Chami報告2026-10-11
+      //   スクショ)。IDBが3秒で答えなければ(病んでいれば即)雲の元画像 go5src:<id> を並走させ、先に出た方を採る。
+      return raceWithFallback_(function () { return thumbFromIdb_(m); }, function () { return thumbFromR2_(m); },
+        idbSick_(store) ? 0 : 3000, function (u) { return !!u; });
+    });
+    function thumbFromR2_(m) {
+      // 「1回だけ」取り寄せる(null時は _r2ThumbTried で再取得を止め、毎描画のfetch連打を防ぐ)。
+      if (_r2ThumbTried[m.id] || !(window.Go5Sync && Go5Sync.fetchBlobR2At)) return Promise.resolve(null);
+      _r2ThumbTried[m.id] = 1;
+      return Go5Sync.fetchBlobR2At('go5src:' + m.id).then(function (rb) {
+        if (rb && rb.size) { _thumbCache[m.id] = _thumbCache[m.id] || URL.createObjectURL(rb); return _thumbCache[m.id]; }
+        return null;
+      }).catch(function () { return null; });
+    }
+    function thumbFromIdb_(m) {
       return store.get('stock_t_' + m.id).then(function (blob) {
         if (blob) {
           _thumbCache[m.id] = URL.createObjectURL(blob);
@@ -2725,19 +2769,12 @@
               // ★手元のサムネ系が全滅(iOSがIDBを退避)=作成時にR2へ控えた元画像 go5src:<id> をサムネ代わりに
               //   「1回だけ」取り寄せて「確認中」を絵に戻す(2026-08-17・Fable5診断P3)。null時は _r2ThumbTried で
               //   再取得を止め、毎描画のfetch連打を防ぐ。
-              if (!_r2ThumbTried[m.id] && window.Go5Sync && Go5Sync.fetchBlobR2At) {
-                _r2ThumbTried[m.id] = 1;
-                return Go5Sync.fetchBlobR2At('go5src:' + m.id).then(function (rb) {
-                  if (rb && rb.size) { _thumbCache[m.id] = URL.createObjectURL(rb); return _thumbCache[m.id]; }
-                  return null;
-                }).catch(function () { return null; });
-              }
-              return null;
+              return thumbFromR2_(m);
             }).catch(function () { return null; });
           }).catch(function () { return null; });
         }).catch(function () { return null; });
       }).catch(function () { return null; });
-    });
+    }
 
     // ★サムネは「解決したカードから1枚ずつ即差し替え」る(2026-08-18 Fable5診断/Chami「サムネが遅すぎる」)。
     //   旧実装は Promise.all(thumbPs) で全カードの解決を待ってから一括 paint_ していたため、iOS SafariでIDB read が

@@ -1490,3 +1490,17 @@ html[data-account="acc3"] #catEditBtn{background:var(--field-bg) !important;colo
 html[data-account="acc3"] button.primary{color:var(--cta-ink);}
 html[data-account="acc3"] .cal-launch-btn{color:var(--ink);border-color:#d9c48a;background:var(--card);}
 html[data-account="acc3"] .cal-launch-btn.active{background:var(--cta-to);color:var(--cta-ink);border-color:#d9a91c;}
+
+/* 癒やし倉庫(acc3)：ドラフト/作成履歴カードの暗色インライン色をクリーム地で読める色へ(Chami報告2026-10-11 msg1558832193441234974「先生も寂しい」の題が地に溶けて読めない)。
+   カードはJSのインラインstyleで描くため !important で上書き。acc1/acc2 の暗色カードは不変。 */
+html[data-account="acc3"] .stk-row{border-bottom-color:var(--line) !important;}
+html[data-account="acc3"] .stk-row .stk-title{color:var(--ink) !important;}
+html[data-account="acc3"] .stk-row .stk-meta{color:var(--sub) !important;}
+html[data-account="acc3"] .stk-row .stk-sub{color:#6e5f43 !important;}
+html[data-account="acc3"] .stk-row .stk-thumb-ph{background:#f3e7c4 !important;border-color:var(--line) !important;color:var(--sub) !important;}
+html[data-account="acc3"] .stk-row .stk-dl,
+html[data-account="acc3"] .stk-row .stk-drive,
+html[data-account="acc3"] .stk-row .stk-remake{background:var(--field-bg) !important;border-color:#d9c48a !important;color:var(--ink) !important;}
+html[data-account="acc3"] .stk-row .stk-del{background:var(--field-bg) !important;border-color:#d9c48a !important;color:#9a8a6a !important;}
+html[data-account="acc3"] .stk-row .stk-arch-del{border-color:#d9a0a0 !important;color:#b04a4a !important;}
+html[data-account="acc3"] .stk-row button:disabled{opacity:.7;}

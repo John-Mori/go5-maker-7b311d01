@@ -3193,7 +3193,7 @@
   // カードの「投稿済みpill」の配線：タップで投稿詳細モーダル。(未投稿pillは data-posted-acct を持たない＝無反応)
   function wireAcctRow_(root) {
     root.querySelectorAll('[data-posted-acct]').forEach(function (b) {
-      var handler = function (e) { e.stopPropagation(); var a = b.getAttribute('data-posted-acct'), c = b.getAttribute('data-posted-cid'); var lbl = (a === 'acc2') ? '宵桜艶帖' : '月詠み'; openPostedDetailModal_(c, a, lbl); };
+      var handler = function (e) { e.stopPropagation(); var a = b.getAttribute('data-posted-acct'), c = b.getAttribute('data-posted-cid'); var lbl = (window.Go5Acct && Go5Acct.labelOf) ? Go5Acct.labelOf(a) : (a === 'acc2' ? '宵桜艶帖' : a === 'acc3' ? '癒やし倉庫' : '月詠み'); openPostedDetailModal_(c, a, lbl); };
       b.addEventListener('click', handler);
       b.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(e); } });
     });
@@ -3202,7 +3202,7 @@
       var handler = function (e) {
         e.stopPropagation();
         var a = b.getAttribute('data-poston-acct'), c = b.getAttribute('data-poston-cid');
-        var lbl = (a === 'acc2') ? '宵桜艶帖' : '月詠み';
+        var lbl = (window.Go5Acct && Go5Acct.labelOf) ? Go5Acct.labelOf(a) : (a === 'acc2' ? '宵桜艶帖' : a === 'acc3' ? '癒やし倉庫' : '月詠み');
         if (!c) { alert('この作品はcidが解決できないため手動指定できません。'); return; }
         if (!window.confirm('この作品を「' + lbl + '」で投稿済みにします。\n(実際に投稿したのに✔が付かない時の手動救済です。誤って押した場合は、付いた✔をタップ→🚫で取り消せます)\nよろしいですか？')) return;
         setPostedOn_(c, a, true);
