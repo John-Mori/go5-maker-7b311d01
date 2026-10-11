@@ -37,7 +37,7 @@
   const ROW_MIN = -0.05, ROW_MAX = 0.05;        // 段別(文字・帯とも)上下双方向(＋下／−上)。±3%→±5%(Chami依頼2026-10-11)
   const BANDPAD_MAX = 0.02;                      // 黒帯の余白(厚み)を追加できる上限(基準フレーム高さ比)
   const ROWGAP_MAX = 0.04;                       // 段と段の追加スペース上限(基準フレーム高さ比)
-  const TSCALE_MIN = 0.7, TSCALE_MAX = 1.5;      // 大タイトルの拡大率(1.0＝従来。影・帯は文字サイズ比なので連動)
+  const TSCALE_MIN = 0.7, TSCALE_MAX = Infinity;  // 上限なし(Chami 2026-10-11 msg1558806456298643478「ひとまず%の制限なしに」)。      // 大タイトルの拡大率(1.0＝従来。影・帯は文字サイズ比なので連動)
   const IMG_MIN = -0.15, IMG_MAX = 0.15;         // 前景画像だけの上下オフセット(基準フレーム高さ比・文字とは独立)
   const ISCALE_MIN = 0.5, ISCALE_MAX = 2.0;      // 前景画像の拡大率(1.0=従来のフィット)。二本指ピンチと±で操作(Chami依頼2026-07-17)
 
@@ -508,12 +508,13 @@
       if (isTwoLineMode()) {
         // 2行モード：最大2行・中央揃え。帯は両行を1枚で囲い、帯と文字は同じオフセット(textTitle)で一緒に動く。
         var f2 = fitTwoLines(top, fT, maxw, U(14), titleFamily);
-        var tpx2 = capTitlePx(f2.lines, Math.max(1, Math.round(f2.px * tScale)), U(16) + padExtra, titleFamily);
+        // 安全域(82%)への縮小は外した＝長い題名でも拡大がそのまま効く(Chami 2026-10-11 msg1558806456298643478)。capTitlePxは残置。
+        var tpx2 = Math.max(1, Math.round(f2.px * tScale));
         y = drawTitleBlockUnified(f2.lines, y, tpx2, U(16) + padExtra, U(6), tScale, OFF.textTitle, undefined, "title", titleFamily);
         var titleY1 = y; y += U(4);
       } else {
         var f = fitOneLine(top, fT, maxw, U(14), titleFamily);
-        var tpx = capTitlePx([f.text], Math.max(1, Math.round(f.px * tScale)), U(16) + padExtra, titleFamily);
+        var tpx = Math.max(1, Math.round(f.px * tScale));
         y = drawBlock([f.text], y, tpx, U(16) + padExtra, U(6), 195, OFF.textTitle, tScale, "title", titleFamily);
         var titleY1 = y; y += U(4);
       }
