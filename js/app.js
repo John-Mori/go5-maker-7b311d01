@@ -110,10 +110,12 @@
       stroke: "rgba(0,0,0,1)",
       bandRGB: "20,34,64",                     // 既定(誘導行など)＝仮の紺
       bandRGBAuthor: "20,34,64",               // 出典帯＝紺〜青(仮)
-      bandRGBTitle: "151,225,228",             // 題名帯＝水色(仮)
+      bandRGBTitle: "244,143,177",             // 題名帯＝ピンク #F48FB1(Chami依頼2026-10-11 msg1558634724728119369・旧=水色151,225,228)
       bandAlpha255: 255,                       // 見本は半透明ではない＝不透明
       plainText: true,                         // 出典・誘導行は縁なし白文字(soft/glowは使わない)
       dualOutline: true,                       // 題名行だけ：黒文字＋太い白フチ＋その外に細い黒フチ
+      authorFontFamily: '"M PLUS Rounded 1c"',  // 作者行も題名と同じ丸ゴシック(Noto細字だと白フチに黒が潰れて白文字に見えた)
+      authorOutline: true,                     // 作者行：黒文字＋白フチ(Chami依頼2026-10-11 msg1558634724728119369・旧=縁なし白文字)
       titleFill: "#000000",
       titleOutlineWhite: "#FFFFFF",
       titleOutlineBlack: "#000000",
@@ -138,6 +140,15 @@
       ctx.lineWidth = blackW; ctx.strokeStyle = t.titleOutlineBlack; ctx.strokeText(ln, x, y);
       ctx.lineWidth = whiteW; ctx.strokeStyle = t.titleOutlineWhite; ctx.strokeText(ln, x, y);
       ctx.fillStyle = t.titleFill; ctx.fillText(ln, x, y);
+      ctx.restore();
+      return;
+    }
+    if (t.authorOutline && role === "author") {
+      // acc3作者行：黒文字＋白フチ。
+      ctx.save();
+      ctx.lineJoin = "round"; ctx.lineWidth = Math.max(1, sw * 1.2);   // 細字なので縁は控えめ(太いと黒が潰れて白文字に見える)
+      ctx.strokeStyle = "#FFFFFF"; ctx.strokeText(ln, x, y);
+      ctx.fillStyle = "#000000"; ctx.fillText(ln, x, y);
       ctx.restore();
       return;
     }
@@ -235,8 +246,8 @@
   })();
 
   // ---- テキスト：折り返し(文字単位) ----
-  function wrap(text, px, maxw) {
-    setFont(px, 700);
+  function wrap(text, px, maxw, family) {
+    setFont(px, 700, family);
     const lines = [];
     for (const para of String(text).split("\n")) {
       let cur = "";
@@ -451,12 +462,13 @@
     if (author) {
       author = author.replace(/^(作者|引用)\s*[:：]\s*/, "");      // 既存プレフィックスを一旦除去
       author = theme().authorPrefix + author;                      // テーマのプレフィックスを常に表示(acc1=作者：/acc2=引用：/acc3=作者 : )
+      var authorFamily = theme().authorFontFamily;  // acc3のみ丸ゴシック。他テーマはundefined=従来どおり
       if (isAuthorTwoLineMode()) {
         // 作者も2行モード(コメントと同仕様)：ユーザーの改行(\n)で最大2行・中央揃え・帯は両行を1枚で囲う。
-        var fa2 = fitTwoLines(author, fA, maxw, U(11));
-        y = drawTitleBlockUnified(fa2.lines, y, fa2.px, U(11) + padExtra, U(3), 1, OFF.textAuthor, 175, "author") + U(2);
+        var fa2 = fitTwoLines(author, fA, maxw, U(11), authorFamily);
+        y = drawTitleBlockUnified(fa2.lines, y, fa2.px, U(11) + padExtra, U(3), 1, OFF.textAuthor, 175, "author", authorFamily) + U(2);
       } else {
-        y = drawBlock(wrap(author, fA, maxw), y, fA, U(11) + padExtra, U(3), 175, OFF.textAuthor, 1, "author") + U(2);
+        y = drawBlock(wrap(author, fA, maxw, authorFamily), y, fA, U(11) + padExtra, U(3), 175, OFF.textAuthor, 1, "author", authorFamily) + U(2);
       }
       y = drawDivider(y) + rowGap;  // acc3のみ：出典帯の直後に太い黒線
     }
