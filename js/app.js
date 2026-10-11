@@ -117,6 +117,7 @@
       // ★帯をやめて「上部をピンクで淡く染める」形へ(Chami依頼2026-10-11 msg1558640355929362495
       //   「水色部分をピンクに・帯という概念を消して・上下の黒い線は不要・文字はピンクに似合う色」)。
       //   段ごとの帯(角丸の箱)は描かず、ヘッダー全体の背後に上から下へ溶けるピンクを1枚敷く。黒線(dividerColor)は廃止。
+      detailFirst: true,                       // 並び=誘導文→作者→大タイトル(Chami依頼2026-10-11 msg1558640615133282376・旧=作者→誘導文)
       noBand: true,
       headerWash: { top: "252,228,236", mid: "248,187,208", fade: 0.06 },  // #FCE4EC→#F8BBD0、下端はfade(H比)で画像へ溶かす
       textFill: "#880E4F",                     // 誘導行：白だとピンクに埋もれる→深いローズ(プラム)
@@ -470,6 +471,8 @@
     const padExtra = H * OFF.bandPad;   // 黒帯の余白(厚み)を全段に加算
     const rowGap = H * OFF.rowGap;      // 段と段の間に足す縦スペース
     let y = Math.round(H * (0.020 + OFF.whole));  // 軸1：構成全体の縦オフセットを加算
+    // 上2段の並び。既定=作者→誘導文。テーマに detailFirst があれば誘導文→作者(大タイトルは常に最後)。
+    const drawAuthorRow = () => {
     if (author) {
       author = author.replace(/^(作者|引用)\s*[:：]\s*/, "");      // 既存プレフィックスを一旦除去
       author = theme().authorPrefix + author;                      // テーマのプレフィックスを常に表示(acc1=作者：/acc2=引用：/acc3=作者 : )
@@ -481,9 +484,11 @@
       } else {
         y = drawBlock(wrap(author, fA, maxw, authorFamily), y, fA, U(11) + padExtra, U(3), 175, OFF.textAuthor, 1, "author", authorFamily) + U(2);
       }
-      y = drawDivider(y) + rowGap;  // acc3のみ：出典帯の直後に太い黒線
+      y = drawDivider(y) + rowGap;  // dividerColorのあるテーマのみ：出典帯の直後に太い黒線
     }
-    if (detail) y = drawDetail(detail, y, fD, U(11) + padExtra, OFF.textDetail, "detail") + U(4) + rowGap;
+    };
+    const drawDetailRow = () => { if (detail) y = drawDetail(detail, y, fD, U(11) + padExtra, OFF.textDetail, "detail") + U(4) + rowGap; };
+    if (theme().detailFirst) { drawDetailRow(); drawAuthorRow(); } else { drawAuthorRow(); drawDetailRow(); }
     if (top) {
       // まず幅に収まる基準サイズを求め、その上に「大タイトル拡大」を掛ける＝拡大が幅上限で打ち消されない。
       // 影も同じ倍率(ss)で拡大。(drawBlock→paintGlyphへ伝播)
