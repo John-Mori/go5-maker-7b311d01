@@ -63,6 +63,43 @@ test.describe('動画生成用画像の耐久保存', () => {
     expect(restored.mark).toEqual({ cid: 'd_foreground_keep', hash: 'hash-keep' });
   });
 
+  // ★iPhone Safari(WebKit)はIDBへBlob/Fileを入れるとトランザクションごと失敗する(2026-10-11 Chami「リロードしたら画像が消えないように」=
+  //   7/28・8/15・8/17に続く言い直し)。CIはChromiumだけでこの失敗が出ない=Blob保存へ戻っても気づけなかった。
+  //   前景画像キーへのBlob入りputを失敗させ、localStorage副系も容量で落とした上で、reload後に画像が戻ることを見る。
+  test('iPhone Safari同様にIDBのBlob保存が失敗してもreload後に画像が残る', async ({ page }) => {
+    await page.addInitScript(() => {
+      const realSetItem = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (key, value) {
+        if (this === localStorage && key === 'movie_photo_cache') {
+          throw new DOMException('forced quota', 'QuotaExceededError');
+        }
+        return realSetItem.call(this, key, value);
+      };
+      const realPut = IDBObjectStore.prototype.put;
+      IDBObjectStore.prototype.put = function (value, key) {
+        const hasBlob = !!value && typeof value === 'object' && (value instanceof Blob || Object.keys(value).some((k) => value[k] instanceof Blob));
+        if (typeof key === 'string' && key.indexOf('movie:foreground:') === 0 && hasBlob) {
+          throw new DOMException('forced webkit blob failure', 'DataCloneError');
+        }
+        return realPut.call(this, value, key);
+      };
+    });
+    await page.goto('index.html', { waitUntil: 'domcontentloaded' });
+    const receipt = await makeForeground(page, 'iphone-keep.png', '#ff66aa');
+    expect(receipt.ok).toBe(true);
+    expect(receipt.primary).toBe(true);
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    const restored = await page.evaluate(async () => {
+      const ready = await Go5ForegroundReady();
+      const file = Go5ForegroundFile();
+      return { ready: !!ready.ok, name: file && file.name, label: document.getElementById('photoName').textContent };
+    });
+    expect(restored.ready).toBe(true);
+    expect(restored.name).toBe('iphone-keep.png');
+    expect(restored.label).not.toBe('未選択');
+  });
+
   test('新しい画像だけを復元し、明示消去後は古い画像を復活させない', async ({ page }) => {
     await page.goto('index.html', { waitUntil: 'domcontentloaded' });
     expect((await makeForeground(page, 'old-red.png', '#ff0000')).primary).toBe(true);
