@@ -61,7 +61,7 @@
   const ACCOUNTS = {
     acc1: { label: "月詠み色恋劇場", bg: "assets/bg_main.mp4" },
     acc2: { label: "宵桜艶帖～Yoizakura Tsuyacho～", bg: "assets/bg_account2.mp4?v=203" }, // S-1a: 5.0sシームレスループ版に差し替え。(継ぎ目21.2→27.0dB)?vはキャッシュ更新用
-    acc3: { label: "癒やし倉庫", bg: "assets/bg_account3_sea2.mp4" },  // 夕方の海と波打ち際(Chami支給2026-10-11 msg1558744323246522368・雲から差替え)。1.27倍に拡大し画面下端に波が来る位置で9:16切出し(msg1558793834790653972)・4.0sシームレスループ(頭1秒へ尾をクロスフェード)
+    acc3: { label: "癒やし倉庫", bg: "assets/bg_account3_sea3.mp4" },  // 夕方の海と波打ち際(Chami支給2026-10-11 msg1558744323246522368・雲から差替え)。1.27倍に拡大し画面下端に波が来る位置で9:16切出し(msg1558793834790653972)。★支給の5.03sを切らずに全尺(Chami msg1558824917770969152「5秒の動画送った」=旧sea2は4.0sへ縮めていた)
   };
   // ★DLサイト便一本化(Chami 2026-10-10 msg1558233171961708595「月詠みと宵桜艶帖の項目削除して」)。
   //   acc1/acc2 はボタンを隠して起動時も acc3 へ寄せるだけ。定義・保存データ・FANZA経路は温存(戻す時はここを null に)。
@@ -1251,6 +1251,8 @@
 
     try {
       bg.currentTime = 0;
+      // 録画中は背景をループさせない=5秒の背景が録画末尾(5.6s)で頭へ跳ね戻らず、最後のコマで止まる。プレビューのループは finally で戻す。
+      bg.loop = false;
       try { await bg.play(); } catch (e) {}
       const mime = pickMime();
       const stream = cv.captureStream(FPS);
@@ -1329,6 +1331,8 @@
       makeFailed_ = true;
       setStatus("作成に失敗しました：" + e.message);
     } finally {
+      bg.loop = true;
+      if (bgShouldPlay_() && bg.paused) { try { bg.play().catch(function () {}); } catch (e) {} }
       // ★_making(再入ロック)は最新runだけが解除する=stale奪回で始まった新runのロックを旧runが解かない。
       if (runId === _makeRunSeq) _making = false;
       // ★ボタン表示の復元は runId ではなく「そのボタンを今も自分が押さえているか(dataset.makeRun)」で判定する。
