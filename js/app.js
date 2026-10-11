@@ -61,7 +61,8 @@
   const ACCOUNTS = {
     acc1: { label: "月詠み色恋劇場", bg: "assets/bg_main.mp4" },
     acc2: { label: "宵桜艶帖～Yoizakura Tsuyacho～", bg: "assets/bg_account2.mp4?v=203" }, // S-1a: 5.0sシームレスループ版に差し替え。(継ぎ目21.2→27.0dB)?vはキャッシュ更新用
-    acc3: { label: "癒やし倉庫", bg: "assets/bg_account3_sea3.mp4" },  // 夕方の海と波打ち際(Chami支給2026-10-11 msg1558744323246522368・雲から差替え)。1.27倍に拡大し画面下端に波が来る位置で9:16切出し(msg1558793834790653972)。★支給の5.03sを切らずに全尺(Chami msg1558824917770969152「5秒の動画送った」=旧sea2は4.0sへ縮めていた)
+    acc3: { label: "癒やし倉庫", bg: "assets/bg_account3_sea3.mp4", revealStart: 0.2 },  // ★浮き上がり開始を他アカウント(0.5s)より0.3s早める=挙動が揃うのを避ける(Chami msg1558825120624148543)
+    // ↑acc3 bg: 夕方の海と波打ち際(Chami支給2026-10-11 msg1558744323246522368・雲から差替え)。1.27倍に拡大し画面下端に波が来る位置で9:16切出し(msg1558793834790653972)。★支給の5.03sを切らずに全尺(Chami msg1558824917770969152「5秒の動画送った」=旧sea2は4.0sへ縮めていた)
   };
   // ★DLサイト便一本化(Chami 2026-10-10 msg1558233171961708595「月詠みと宵桜艶帖の項目削除して」)。
   //   acc1/acc2 はボタンを隠して起動時も acc3 へ寄せるだけ。定義・保存データ・FANZA経路は温存(戻す時はここを null に)。
@@ -568,6 +569,8 @@
   }
 
   // ---- 1フレーム描画 ----
+  // 浮き上がり開始(秒)。アカウントごとに ACCOUNTS[].revealStart で上書きできる(無ければ REVEAL_START)。
+  function revealStart_() { const a = ACCOUNTS[curAccount]; return (a && typeof a.revealStart === "number") ? a.revealStart : REVEAL_START; }
   // 背景(9:16をそのまま)。★Androidは背景動画のループ継ぎ目(4秒の海=録画中の4.0s)で一瞬 readyState<2 になり、
   //   単色(#28424a)のコマが動画へ焼き込まれた(Chami 2026-10-11 msg 1558822056676818964・4.000sのIフレーム)。
   //   直前に描けた背景を控えておき、デコード待ちのコマはそれで埋める。単色は1枚も描けていない時だけ。
@@ -594,7 +597,7 @@
     drawBg_();
     // 前景(フェードイン＋微ズーム)
     if (fgImg) {
-      const a = t < REVEAL_START ? 0 : (REVEAL_DUR <= 0 ? 1 : easeReveal((t - REVEAL_START) / REVEAL_DUR));
+      const rs = revealStart_(), a = t < rs ? 0 : (REVEAL_DUR <= 0 ? 1 : easeReveal((t - rs) / REVEAL_DUR));
       if (a > 0) {
         // フィット倍率 × ユーザーの拡大率(OFF.imgScale)。プレビューも書き出しも同じ式=見た目と動画が一致する。
         // 幅は安全域(FG_SAFE_W_RATIO=82%)で、高さは FG_MAX_RATIO(92%)でフィット=左右の切れを自動で防ぐ。
@@ -613,7 +616,7 @@
     // フレーム基準(W×H)で描くので画像の外(黒帯・余白)にも自由に置ける。
     if (window.Go5PromoLabel && window.Go5PromoLabel.drawOverlay) {
       // 画像と同じ"浮き出てくる"演出のため、前景画像と同じreveal進捗(0..1)を渡す(Chami依頼2026-07-18)。
-      var promoReveal = t < REVEAL_START ? 0 : (REVEAL_DUR <= 0 ? 1 : easeReveal((t - REVEAL_START) / REVEAL_DUR)); // 漫画と同一進捗・同一イージング(§6)
+      var rs2 = revealStart_(), promoReveal = t < rs2 ? 0 : (REVEAL_DUR <= 0 ? 1 : easeReveal((t - rs2) / REVEAL_DUR)); // 漫画と同一進捗・同一イージング(§6)
       try { window.Go5PromoLabel.drawOverlay(ctx, W, H, promoReveal); } catch (e) {}
     }
   }
