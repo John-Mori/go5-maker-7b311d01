@@ -323,6 +323,7 @@
         roundRect(x - pad - mB, ie.top - vpad, tw + (pad + mB) * 2, (ie.bot - ie.top) + vpad * 2, pad + mB * 0.5);
         ctx.fill();
       }
+      if (role === "title") titleInk_ = { top: Math.min(titleInk_ ? titleInk_.top : Infinity, ie.top - vpad), bot: Math.max(titleInk_ ? titleInk_.bot : -Infinity, ie.bot + vpad) };  // headerWash用=見えている題名インク＋対称余白
       paintGlyph(ln, x, drawY, px, sw, shadowScale, role);
       y += th + pad + gap;  // 送りは基準位置のまま(オフセットの影響を受けない＝他段に波及しない)
     }
@@ -427,6 +428,7 @@
     const line1Y = y + offY, lineNY = y + offY + (lines.length - 1) * (th + gap);
     const ie1 = inkExtent(lines[0], line1Y, px), ieN = inkExtent(lines[lines.length - 1], lineNY, px);
     const inkTop = ie1.top, inkBot = ieN.bot, vpad = pad * 0.45 + mB;
+    if (role === "title") titleInk_ = { top: inkTop - vpad, bot: inkBot + vpad };  // headerWash用=見えている題名インク＋対称余白
     const ba = theme().bandAlpha255 != null ? theme().bandAlpha255 : (bandAlpha || 195);
     // 段ごとの帯色上書き(acc3のみ)。未設定テーマは常に theme().bandRGB のまま(見た目不変)。
     const bandRGB = role === "title" ? (theme().bandRGBTitle || theme().bandRGB)
@@ -496,7 +498,7 @@
     };
     const drawDetailRow = () => { if (detail) y = drawDetail(detail, y, fD, U(11) + padExtra, OFF.textDetail, "detail") + U(4) + rowGap; };
     if (theme().detailFirst) { drawDetailRow(); drawAuthorRow(); } else { drawAuthorRow(); drawDetailRow(); }
-    titleSpan_ = null;
+    titleSpan_ = null; titleInk_ = null;
     if (top) {
       var titleY0 = y;
       // まず幅に収まる基準サイズを求め、その上に「大タイトル拡大」を掛ける＝拡大が幅上限で打ち消されない。
@@ -515,7 +517,17 @@
         y = drawBlock([f.text], y, tpx, U(16) + padExtra, U(6), 195, OFF.textTitle, tScale, "title", titleFamily);
         var titleY1 = y; y += U(4);
       }
-      titleSpan_ = { top: titleY0 + H * (OFF.textTitle || 0), bot: titleY1 + H * (OFF.textTitle || 0) };  // headerWash(titleOnly)用=段オフセット込みの題名の上下
+      // headerWash(titleOnly)用=段オフセット込みの題名の上下。行ボックス(上詰め＋下の送り余白)だとピンクが文字より下へ寄るため、
+      //   実際の字形インクに上下対称の余白を付けた範囲を使う＝ピンクの中央に文字が来る(Chami依頼2026-10-11 msg1558805339867189249)。
+      //   ③タイトルの縦オフセット・全体オフセット・拡大・2行モードはインク位置に入っているので自動で連動。
+      //   ピンクの厚みは従来(行ボックス)と同じにして、中心だけインク中心へ合わせる。
+      var boxTop = titleY0 + H * (OFF.textTitle || 0), boxBot = titleY1 + H * (OFF.textTitle || 0);
+      if (titleInk_) {
+        var cy = (titleInk_.top + titleInk_.bot) / 2, hh = Math.max((boxBot - boxTop) / 2, (titleInk_.bot - titleInk_.top) / 2);
+        titleSpan_ = { top: cy - hh, bot: cy + hh };
+      } else {
+        titleSpan_ = { top: boxTop, bot: boxBot };
+      }
       y = drawDivider(y);  // dividerColorのあるテーマのみ：題名帯の直後(画像の直前)に太い黒線
     }
     return y;
@@ -523,7 +535,7 @@
   // headerWash(acc3)：ヘッダー文字の背後に、上端から文字の下端までピンクを敷き、その下を画像へ溶かす。
   //   帯(箱)の輪郭を作らない＝角も境界線も無い。文字より先に描く必要があるため、
   //   同じ drawText を透明(globalAlpha=0)で1回走らせて下端yだけ測る＝段オフセット・拡大・2行モードに自動追従。
-  var titleSpan_ = null;
+  var titleSpan_ = null, titleInk_ = null;
   function drawHeaderWash(author, detail, top) {
     var hw = theme().headerWash;
     if (!hw) return;
