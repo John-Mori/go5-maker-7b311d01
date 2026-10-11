@@ -564,6 +564,32 @@
     try { return Promise.resolve(idb.set("meta:candlist:" + key, arr)).then(function () { return true; }, function () { return false; }); }
     catch (e) { return Promise.resolve(false); }
   }
+  // 候補メモ(cand_text)もLS満杯時はIDBミラー(meta:cand_text)にだけ載る。同期入力はLSしか見ないため、
+  // ミラーをolder・LSをnewerとして合流しないと、その端末で書いたメモが雲へ一度も上がらない。
+  function mergeCandTextMirrorIntoLs_(curLs, idbMap) {
+    curLs = curLs || {};
+    if (!idbMap || typeof idbMap !== "object" || Array.isArray(idbMap) || !Object.keys(idbMap).length) return curLs;
+    var merged = mergeCandText_(JSON.stringify(idbMap), curLs.cand_text || "{}");
+    if (merged != null && merged !== "{}") curLs.cand_text = merged;
+    return curLs;
+  }
+  function readCandTextMirror_(idb) {
+    if (!idb || !idb.available()) return Promise.resolve(null);
+    try {
+      var p = (typeof idb.getResult === "function")
+        ? idb.getResult("meta:cand_text")
+        : idb.get("meta:cand_text").then(function (v) { return { ok: true, value: v }; }, function () { return { ok: false, value: null }; });
+      return Promise.resolve(p).then(function (r) { return (r && r.ok) ? r.value : null; }, function () { return null; });
+    } catch (e) { return Promise.resolve(null); }
+  }
+  // 受信したcand_textをLSへ書けない端末では、IDBミラーへ着地させて候補ページへ通知する。
+  function writeCandTextFallback_(idb, value) {
+    if (!idb || !idb.available() || typeof idb.set !== "function") return Promise.resolve(false);
+    var map; try { map = JSON.parse(value || "{}"); } catch (e) { return Promise.resolve(false); }
+    if (!map || typeof map !== "object" || Array.isArray(map)) return Promise.resolve(false);
+    try { return Promise.resolve(idb.set("meta:cand_text", map)).then(function () { return true; }, function () { return false; }); }
+    catch (e) { return Promise.resolve(false); }
+  }
   function fireCandidateListApplied_(key, storage) {
     try { if (root.document) root.document.dispatchEvent(new root.CustomEvent("go5-candidate-list-applied", { detail: { key: key, storage: storage } })); } catch (e) {}
   }
@@ -817,7 +843,10 @@
       Object.keys(info.entries).forEach(function (pk) { curLs[pk] = info.entries[pk]; });
     });
     // LS満杯でIDBにだけ残った新規候補を、画像全走査とは独立した直接getで同期入力へ合流する。
-    var candMirrorStep = readKnownCandListMirrors_(Idb, curLs).then(function (mirrors) { mergeCandListMirrorsIntoLs_(curLs, mirrors); });
+    var candMirrorStep = Promise.all([
+      readKnownCandListMirrors_(Idb, curLs).then(function (mirrors) { mergeCandListMirrorsIntoLs_(curLs, mirrors); }),
+      readCandTextMirror_(Idb).then(function (m) { mergeCandTextMirrorIntoLs_(curLs, m); })
+    ]);
 
     // IDB を hash化(画像アップロード)
     // ★旧実装は uploadImagesIn をキー毎に呼び、その中で /api/img/has を1本ずつ投げていた。
@@ -1131,6 +1160,14 @@
                     else delete newSnapLs[kk];
                   }));
                 }(k, finalV));
+                else if (isCandTextKey(k)) (function (vv) {
+                  applies.push(writeCandTextFallback_(Idb, vv).then(function (ok) {
+                    if (ok) {
+                      pulledCandReal++;
+                      try { if (root.document) root.document.dispatchEvent(new root.CustomEvent("go5-cand-text-applied", { detail: { storage: "idb" } })); } catch (e) {}
+                    } else delete newSnapLs.cand_text;
+                  }));
+                }(finalV));
               }
             }
           } catch (x) {}
@@ -1459,7 +1496,7 @@
     // 作成履歴(go5_stock_archive)の thumbDataUrl detox 純関数を公開。(stock.js の保存側=S2 が呼ぶ。副作用なし・fail-open)
     slimStockArchive: function (arrStr, keepN) { return slimStockArchive(arrStr, keepN); },
     // Nodeテスト/デバッグ用に純関数を公開。(副作用なし)
-    _test: { unionCand: unionCand, isTreeLinksKey: isTreeLinksKey, mergeTreeLinks_: mergeTreeLinks_, chooseTreeLinksRec_: chooseTreeLinksRec_, unionByField: unionByField, mergeDelMap: mergeDelMap, applyTombstone: applyTombstone, parseDelMap: parseDelMap, candDelKeyOf: candDelKeyOf, isCandArrayKey: isCandArrayKey, isCandDelKey: isCandDelKey, isStockArrayKey: isStockArrayKey, isStockArchiveKey: isStockArchiveKey, isStockDelKey: isStockDelKey, isArchDelKey: isArchDelKey, isTplBookKey: isTplBookKey, isTplDelKey: isTplDelKey, tplDelKeyOf: tplDelKeyOf, isDiscUrlsKey: isDiscUrlsKey, isDiscDelKey: isDiscDelKey, discDelKeyOf: discDelKeyOf, isSyncLsKey: isSyncLsKey, isScheduleStateKey: isScheduleStateKey, mergeScheduleState: mergeScheduleState, arrIdField_: arrIdField_, isSyncIdbKey: isSyncIdbKey, isPostedMapKey: isPostedMapKey, mergePostedMap: mergePostedMap, isCandTextKey: isCandTextKey, mergeCandText_: mergeCandText_, mergeCandTextRec_: mergeCandTextRec_, isCandTodayKey: isCandTodayKey, mergeCandToday_: mergeCandToday_, isImageManifestKey: isImageManifestKey, imageManifestRec_: imageManifestRec_, chooseImageManifestRec_: chooseImageManifestRec_, mergeImageManifest_: mergeImageManifest_, hasEmptyImgSlot: hasEmptyImgSlot, preferImgRecord_: preferImgRecord_ }
+    _test: { unionCand: unionCand, isTreeLinksKey: isTreeLinksKey, mergeTreeLinks_: mergeTreeLinks_, chooseTreeLinksRec_: chooseTreeLinksRec_, unionByField: unionByField, mergeDelMap: mergeDelMap, applyTombstone: applyTombstone, parseDelMap: parseDelMap, candDelKeyOf: candDelKeyOf, isCandArrayKey: isCandArrayKey, isCandDelKey: isCandDelKey, isStockArrayKey: isStockArrayKey, isStockArchiveKey: isStockArchiveKey, isStockDelKey: isStockDelKey, isArchDelKey: isArchDelKey, isTplBookKey: isTplBookKey, isTplDelKey: isTplDelKey, tplDelKeyOf: tplDelKeyOf, isDiscUrlsKey: isDiscUrlsKey, isDiscDelKey: isDiscDelKey, discDelKeyOf: discDelKeyOf, isSyncLsKey: isSyncLsKey, isScheduleStateKey: isScheduleStateKey, mergeScheduleState: mergeScheduleState, arrIdField_: arrIdField_, isSyncIdbKey: isSyncIdbKey, isPostedMapKey: isPostedMapKey, mergePostedMap: mergePostedMap, isCandTextKey: isCandTextKey, mergeCandText_: mergeCandText_, mergeCandTextRec_: mergeCandTextRec_, mergeCandTextMirrorIntoLs_: mergeCandTextMirrorIntoLs_, writeCandTextFallback_: writeCandTextFallback_, isCandTodayKey: isCandTodayKey, mergeCandToday_: mergeCandToday_, isImageManifestKey: isImageManifestKey, imageManifestRec_: imageManifestRec_, chooseImageManifestRec_: chooseImageManifestRec_, mergeImageManifest_: mergeImageManifest_, hasEmptyImgSlot: hasEmptyImgSlot, preferImgRecord_: preferImgRecord_ }
   };
   root.Go5Sync._test.readSyncIdbEntries_ = readSyncIdbEntries_; root.Go5Sync._test.protectUnreadIdb_ = protectUnreadIdb_;
   root.Go5Sync._test.mergeLiveArray_ = mergeLiveArray_; root.Go5Sync._test.fastCandidateMergeState_ = fastCandidateMergeState_;

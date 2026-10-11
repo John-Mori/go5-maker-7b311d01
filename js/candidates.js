@@ -1289,7 +1289,7 @@
       _candTextCache = { raw: null, map: {} };
       try { klog_('cand_text_ls_quota_idb_fallback', 'work', cid, { cause: (e && e.name) || 'quota' }); } catch (_) {}
       var idbP = persistCandTextIdb_(map);
-      if (idbP && typeof idbP.then === 'function') { idbP.then(function (ok) { try { klog_('cand_text_idb_fallback_result', 'work', cid, { ok: !!ok }); } catch (_) {} }, function () {}); }
+      if (idbP && typeof idbP.then === 'function') { idbP.then(function (ok) { try { klog_('cand_text_idb_fallback_result', 'work', cid, { ok: !!ok }); } catch (_) {} if (ok) reqSync_(); }, function () {}); }
       // With no IDB, memory-only text is not a durable success. Image saves retry this after the CDN ledger frees space.
       return !!_idbOk;
     }
@@ -2530,6 +2530,10 @@
     var d = e && e.detail || {};
     if (d.pulledCand) bgRender_();
     if (d.pulledImg) reHydrateFromSync_(d.pulledImgKeys || []);
+  }); } catch (e) {}
+  // 同期受信のcand_text(メモ等)がLS満杯でIDBミラーへ着地した時は、ミラーから読み直して描画する。
+  try { document.addEventListener('go5-cand-text-applied', function () {
+    _candTextRestored = false; restoreCandTextFromIdb_();
   }); } catch (e) {}
   // 同期受信でcand_itemsのlocalStorage書込が容量不足になっても、IDBミラー着地直後に現在ページへ反映する。
   // 全同期完了(go5-synced)や再読込を待たない。LS成功時も同じイベントで即描画する。
