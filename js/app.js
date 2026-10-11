@@ -119,8 +119,11 @@
       //   段ごとの帯(角丸の箱)は描かず、ヘッダー全体の背後に上から下へ溶けるピンクを1枚敷く。黒線(dividerColor)は廃止。
       detailFirst: true,                       // 並び=誘導文→作者→大タイトル(Chami依頼2026-10-11 msg1558640615133282376・旧=作者→誘導文)
       noBand: true,
-      headerWash: { top: "252,228,236", mid: "248,187,208", fade: 0.06 },  // #FCE4EC→#F8BBD0、下端はfade(H比)で画像へ溶かす
-      textFill: "#880E4F",                     // 誘導行：白だとピンクに埋もれる→深いローズ(プラム)
+      // ★ピンクは大タイトルの背後だけ(Chami依頼2026-10-11 msg1558693622189138002「ピンクのところはタイトルだけでok・
+      //   誘導文と作者部分は透明で背景の動画を使う」)。上下ともfade(H比)でぼかし、箱の輪郭は作らない。
+      headerWash: { top: "252,228,236", mid: "248,187,208", fade: 0.03, titleOnly: true },
+      textFill: "#880E4F",                     // 誘導行：深いローズ(プラム)＋白フチ(detailHalo)で背景動画の上でも読める
+      detailHalo: "#FFFFFF",
       titleFill: "#FFFFFF",                    // 題名：白文字＋濃ローズのフチ＋外に細い白フチ(ピンク地で浮く)
       titleOutlineWhite: "#C2185B",            // (内側の太いフチ＝濃ローズ。名前は旧仕様の名残)
       titleOutlineBlack: "#FFFFFF",            // (外側の細いフチ＝白)
@@ -159,7 +162,8 @@
       return;
     }
     if (t.plainText) {
-      // acc3の出典・誘導行：縁なしの白文字そのまま。(見本の小さい出典表記に合わせる)
+      // acc3の出典・誘導行：単色文字。detailHaloがあれば白フチを足す(ピンク地を外し背景動画へ直に乗るため・2026-10-11)。
+      if (t.detailHalo) { ctx.save(); ctx.lineJoin = "round"; ctx.lineWidth = Math.max(1, sw * 1.6); ctx.strokeStyle = t.detailHalo; ctx.strokeText(ln, x, y); ctx.restore(); }
       ctx.fillStyle = t.textFill; ctx.fillText(ln, x, y);
       return;
     }
@@ -489,7 +493,9 @@
     };
     const drawDetailRow = () => { if (detail) y = drawDetail(detail, y, fD, U(11) + padExtra, OFF.textDetail, "detail") + U(4) + rowGap; };
     if (theme().detailFirst) { drawDetailRow(); drawAuthorRow(); } else { drawAuthorRow(); drawDetailRow(); }
+    titleSpan_ = null;
     if (top) {
+      var titleY0 = y;
       // まず幅に収まる基準サイズを求め、その上に「大タイトル拡大」を掛ける＝拡大が幅上限で打ち消されない。
       // 影も同じ倍率(ss)で拡大。(drawBlock→paintGlyphへ伝播)
       var tScale = OFF.titleScale || 1;
@@ -504,6 +510,7 @@
         var tpx = capTitlePx([f.text], Math.max(1, Math.round(f.px * tScale)), U(16) + padExtra, titleFamily);
         y = drawBlock([f.text], y, tpx, U(16) + padExtra, U(6), 195, OFF.textTitle, tScale, "title", titleFamily) + U(4);
       }
+      titleSpan_ = { top: titleY0 + H * (OFF.textTitle || 0), bot: y + H * (OFF.textTitle || 0) };  // headerWash(titleOnly)用=段オフセット込みの題名の上下
       y = drawDivider(y);  // dividerColorのあるテーマのみ：題名帯の直後(画像の直前)に太い黒線
     }
     return y;
@@ -511,12 +518,26 @@
   // headerWash(acc3)：ヘッダー文字の背後に、上端から文字の下端までピンクを敷き、その下を画像へ溶かす。
   //   帯(箱)の輪郭を作らない＝角も境界線も無い。文字より先に描く必要があるため、
   //   同じ drawText を透明(globalAlpha=0)で1回走らせて下端yだけ測る＝段オフセット・拡大・2行モードに自動追従。
+  var titleSpan_ = null;
   function drawHeaderWash(author, detail, top) {
     var hw = theme().headerWash;
     if (!hw) return;
     ctx.save(); ctx.globalAlpha = 0;
     var yb = drawText(author, detail, top);
     ctx.restore();
+    if (hw.titleOnly) {
+      // 題名の背後だけ：上下をfadeで透明へ溶かす(誘導文・作者の段は背景動画がそのまま見える)。
+      if (!titleSpan_) return;
+      var f = H * hw.fade, y0 = Math.max(0, titleSpan_.top - f * 0.4), y1 = titleSpan_.bot + f;
+      var gt = ctx.createLinearGradient(0, y0, 0, y1), span = y1 - y0;
+      gt.addColorStop(0, `rgba(${hw.top},0)`);
+      gt.addColorStop(Math.min(0.49, (titleSpan_.top - y0) / span), `rgba(${hw.top},1)`);
+      gt.addColorStop(Math.max(0.51, (titleSpan_.bot - y0) / span), `rgba(${hw.mid},1)`);
+      gt.addColorStop(1, `rgba(${hw.mid},0)`);
+      ctx.fillStyle = gt;
+      ctx.fillRect(0, y0, W, span);
+      return;
+    }
     var fade = H * hw.fade, g = ctx.createLinearGradient(0, 0, 0, yb + fade);
     var solid = yb / (yb + fade);
     g.addColorStop(0, `rgba(${hw.top},1)`);

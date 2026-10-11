@@ -54,6 +54,8 @@ html[data-tab="analyzeBtn"] body,
 html[data-tab="tabCand"] body{background:var(--app-bg,#f5edd7);}
 /* プレビュー列はアカウント色に染めない（制作物の色判断を狂わせない）。 */
 html[data-account] .preview-col{background:var(--canvas-bg,#141419) !important;}
+/* 癒やし倉庫(acc3)はプレビュー列の黒をやめてカード地に(Chami依頼2026-10-11 msg1558693622189138002「右のところ黒やめて」)。 */
+html[data-account="acc3"] .preview-col{background:var(--card,#fffdf6) !important;}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
 html,body{margin:0;padding:0;background:transparent;color:var(--ink);
   font-family:"Noto Sans JP",system-ui,sans-serif;
