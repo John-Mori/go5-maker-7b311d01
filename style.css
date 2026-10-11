@@ -114,6 +114,11 @@ input[type=datetime-local]:focus{border-color:var(--accent);}
 /* プレビュー右横の操作列(ラベル位置・大きさ・画像調整)。上寄せ=「少し上に配置」(Chami依頼2026-07-30) */
 .preview-side{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;gap:10px;align-self:flex-start;}
 .img-adjust{display:flex;flex-direction:column;align-items:center;gap:3px;}
+.img-adjust.side-sep{border-top:1px solid var(--line);padding-top:4px;}
+.side-group-title{font-size:10.5px;font-weight:700;color:var(--sub);text-align:center;line-height:1.3;}
+.img-adjust .promo-size .ctl-btn{width:28px;height:28px;font-size:15px;}
+.img-adjust .promo-size-val{min-width:44px;}
+.img-adjust .promo-dpad-cap{margin-top:3px;}
 .promo-size-tag{font-size:10px;color:var(--sub);min-width:20px;text-align:right;}
 /* 幅・高さとも auto にして固有比(9:16)のまま max-width/max-height 内に収める。
    どちらか片方だけを固定しないことで、縦長・狭幅端末でも 9:16 が崩れず横潰れしない。 */

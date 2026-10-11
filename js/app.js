@@ -34,7 +34,7 @@
   // 基準フレーム高さに対する比率。(0〜VOFF_MAX)テキスト開始Yと前景中心Yに同じだけ加算するため、
   // 両者の相対関係(中央揃え・行間)は崩れない。スライダーで微調整する。
   const VOFF_DEFAULT = 0.02, VOFF_MAX = 0.05;   // 全体(文字＋帯＋漫画)を下へ
-  const ROW_MIN = -0.03, ROW_MAX = 0.03;        // 段別(文字・帯とも)上下双方向(＋下／−上)
+  const ROW_MIN = -0.05, ROW_MAX = 0.05;        // 段別(文字・帯とも)上下双方向(＋下／−上)。±3%→±5%(Chami依頼2026-10-11)
   const BANDPAD_MAX = 0.02;                      // 黒帯の余白(厚み)を追加できる上限(基準フレーム高さ比)
   const ROWGAP_MAX = 0.04;                       // 段と段の追加スペース上限(基準フレーム高さ比)
   const TSCALE_MIN = 0.7, TSCALE_MAX = 1.5;      // 大タイトルの拡大率(1.0＝従来。影・帯は文字サイズ比なので連動)
@@ -103,7 +103,7 @@
     // 色は全て仮(Chamiが後で決める)。bandRGBAuthor/bandRGBTitleで帯色を段ごとに分け、dividerColorで
     // 見本どおり帯の上下に太い黒線を入れる。帯色・線色はここだけ差し替えれば済む(他の描画ロジックは不変)。
     acc3: {
-      authorPrefix: "引用：",                 // 見本「引用：AOI-COMICS」と同じ作り。仮でサークル名を入れる(5S部門提案)
+      authorPrefix: "作者 : ",                // 「作者 : 作者名」の形(Chami依頼2026-10-11 msg1558634517151875163・旧=引用：)
       defaultDetail: DEFAULT_DETAIL,
       detailMenu: true,
       textFill: "#FFFFFF",                    // 出典・誘導行は白文字そのまま(縁なし)
@@ -450,7 +450,7 @@
     let y = Math.round(H * (0.020 + OFF.whole));  // 軸1：構成全体の縦オフセットを加算
     if (author) {
       author = author.replace(/^(作者|引用)\s*[:：]\s*/, "");      // 既存プレフィックスを一旦除去
-      author = theme().authorPrefix + author;                      // テーマのプレフィックスを常に表示(acc1=作者：/acc2=引用：)
+      author = theme().authorPrefix + author;                      // テーマのプレフィックスを常に表示(acc1=作者：/acc2=引用：/acc3=作者 : )
       if (isAuthorTwoLineMode()) {
         // 作者も2行モード(コメントと同仕様)：ユーザーの改行(\n)で最大2行・中央揃え・帯は両行を1枚で囲う。
         var fa2 = fitTwoLines(author, fA, maxw, U(11));
