@@ -568,15 +568,30 @@
   }
 
   // ---- 1フレーム描画 ----
-  function drawFrame(t) {
-    ctx.clearRect(0, 0, W, H);
-    // 背景(9:16をそのまま)
+  // 背景(9:16をそのまま)。★Androidは背景動画のループ継ぎ目(4秒の海=録画中の4.0s)で一瞬 readyState<2 になり、
+  //   単色(#28424a)のコマが動画へ焼き込まれた(Chami 2026-10-11 msg 1558822056676818964・4.000sのIフレーム)。
+  //   直前に描けた背景を控えておき、デコード待ちのコマはそれで埋める。単色は1枚も描けていない時だけ。
+  let _bgHold = null, _bgHoldSrc = "";
+  function drawBg_() {
+    const src = bg.getAttribute("src") || "";
     if (bg.readyState >= 2) {
       const vw = bg.videoWidth, vh = bg.videoHeight, tar = W / H, cur = vw / vh;
       let sx = 0, sy = 0, sw = vw, sh = vh;
       if (cur > tar) { sw = vh * tar; sx = (vw - sw) / 2; } else { sh = vw / tar; sy = (vh - sh) / 2; }
       ctx.drawImage(bg, sx, sy, sw, sh, 0, 0, W, H);
+      try {
+        if (!_bgHold) { _bgHold = document.createElement("canvas"); _bgHold.width = W; _bgHold.height = H; }
+        _bgHold.getContext("2d").drawImage(cv, 0, 0);
+        _bgHoldSrc = src;
+      } catch (e) {}
+    } else if (_bgHold && src && _bgHoldSrc === src) {
+      ctx.drawImage(_bgHold, 0, 0, W, H);   // 別アカウントの背景は使わない(src一致の時だけ)
     } else { ctx.fillStyle = "#28424a"; ctx.fillRect(0, 0, W, H); }
+  }
+
+  function drawFrame(t) {
+    ctx.clearRect(0, 0, W, H);
+    drawBg_();
     // 前景(フェードイン＋微ズーム)
     if (fgImg) {
       const a = t < REVEAL_START ? 0 : (REVEAL_DUR <= 0 ? 1 : easeReveal((t - REVEAL_START) / REVEAL_DUR));
