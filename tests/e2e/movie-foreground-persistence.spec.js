@@ -36,7 +36,7 @@ test.describe('動画生成用画像の耐久保存', () => {
       const data = head.ok && head.value && head.value.key ? await Go5Idb.getResult(head.value.key) : null;
       return {
         headOk: !!(head.ok && head.value && !head.value.empty),
-        blobOk: !!(data && data.ok && data.value && data.value.blob && data.value.blob.size),
+        blobOk: !!(data && data.ok && data.value && ((data.value.blob && data.value.blob.size) || (data.value.bytes && data.value.bytes.byteLength))),
         tokenMatch: !!(data && data.value && head.value && data.value.token === head.value.token)
       };
     });

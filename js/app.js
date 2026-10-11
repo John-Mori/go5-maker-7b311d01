@@ -622,8 +622,30 @@
     if (!store || !key) return;
     try { Promise.resolve(store.del(key)).catch(function () {}); } catch (e) {}
   }
+  // ★iPhone Safari(WebKit)はIDBへBlob/Fileを入れるとトランザクションごと失敗する(idb-tx-error)ことがある=
+  //   正本が一度も書けず、960px圧縮のlocalStorage副系も容量で落ちると「リロードで画像が消える」(Chami 2026-10-11)。
+  //   IDBへは中身のバイト列(ArrayBuffer)で入れ、読む時にFileへ戻す。旧形式(blob)の記録も読める。
+  function photoRecordBlob_(rec) {
+    if (!rec) return null;
+    if (rec.blob && typeof rec.blob.size === 'number') return rec.blob;
+    if (rec.bytes && rec.bytes.byteLength > 0) {
+      try { return new File([rec.bytes], String(rec.name || 'foreground.jpg'), { type: String(rec.type || 'image/jpeg'), lastModified: Number(rec.lastModified || Date.now()) }); }
+      catch (e) { try { return new Blob([rec.bytes], { type: String(rec.type || 'image/jpeg') }); } catch (e2) { return null; } }
+    }
+    return null;
+  }
+  function blobBytes_(blob) {
+    if (blob && blob.arrayBuffer) return blob.arrayBuffer();
+    return new Promise(function (resolve, reject) {
+      var fr = new FileReader();
+      fr.onload = function () { resolve(fr.result); };
+      fr.onerror = function () { reject(fr.error); };
+      fr.readAsArrayBuffer(blob);
+    });
+  }
   function validPhotoRecord_(rec, token) {
-    return !!(rec && (!token || rec.token === token) && rec.blob && typeof rec.blob.size === 'number' && rec.blob.size > 0);
+    var b = rec && (!token || rec.token === token) ? photoRecordBlob_(rec) : null;
+    return !!(b && b.size > 0);
   }
 
   // ★iPhoneのタブ破棄/クラッシュ対策(2026-08-28):
@@ -636,13 +658,16 @@
     var dataKey = K_PHOTO_IDB_PREFIX + token;
     var at = Date.now();
     var rec = {
-      v: 1, token: token, blob: file, name: String(file.name || 'foreground.jpg'),
+      v: 2, token: token, bytes: null, name: String(file.name || 'foreground.jpg'),
       type: String(file.type || 'image/jpeg'), lastModified: Number(file.lastModified || at),
       srcMark: copyPhotoMark_(srcMark), at: at
     };
     var dataWrite;
     try {
-      dataWrite = Promise.resolve(store.set(dataKey, rec)).then(function () {
+      dataWrite = Promise.resolve(blobBytes_(file)).then(function (buf) {
+        rec.bytes = buf;
+        return store.set(dataKey, rec);
+      }).then(function () {
         return photoGetResult_(store, dataKey);
       }).then(function (r) {
         return r && r.ok && validPhotoRecord_(r.value, token)
@@ -916,7 +941,7 @@
         return { ok: false, durable: true, primary: true, reason: 'empty', seq: restoreSeq };
       }
       if (r && r.ok && r.record && ((!local || (r.head && r.head.token === local.token)) || Number(r.at || 0) >= localAt)) {
-        return applyRestoredPhoto_(r.record.blob, Object.assign({}, r.record, r.head || {}), restoreSeq, true);
+        return applyRestoredPhoto_(photoRecordBlob_(r.record), Object.assign({}, r.record, r.head || {}), restoreSeq, true);
       }
       if (r && r.ok) return applyLocalAndMigrate_();
       return applyLocal_();
@@ -1508,13 +1533,15 @@
     if (!box || !cv) return;
     // まず前回の適用分を必ず解除してから素の表示サイズを測る(解除→測定→適用=回転/リサイズでも安定)。
     cv.style.position = ''; cv.style.left = ''; cv.style.top = ''; cv.style.transform = '';
-    cv.style.width = ''; cv.style.height = ''; cv.style.maxWidth = ''; cv.style.maxHeight = '';
-    box.style.position = ''; box.style.overflow = ''; box.style.width = ''; box.style.height = '';
+    cv.style.width = ''; cv.style.height = ''; cv.style.maxWidth = ''; cv.style.maxHeight = ''; cv.style.border = '';
+    box.style.position = ''; box.style.overflow = ''; box.style.width = ''; box.style.height = ''; box.style.borderRadius = '';
     if (!on) return;
     var r = cv.getBoundingClientRect();
     var w = r.width, h = r.height;
     if (!w || !h) return; // 動画作成タブが非表示など未レイアウト時は何もしない(戻った時に再適用)。
     // キャンバスの表示サイズを固定して絶対配置し、外側(左右各9%)を枠でクリップ=中央82%幅・全高が見える。
+    // キャンバスの1px枠(--line)は左右だけ切れて上下に残り「プレビューの上下に細い線」に見えた(Chami 2026-10-11)=枠を外し、角丸は外枠で付ける。
+    cv.style.border = 'none'; box.style.borderRadius = '10px';
     cv.style.width = w + 'px'; cv.style.height = h + 'px'; cv.style.maxWidth = 'none'; cv.style.maxHeight = 'none';
     cv.style.position = 'absolute'; cv.style.left = '50%'; cv.style.top = '0'; cv.style.transform = 'translateX(-50%)';
     box.style.position = 'relative'; box.style.overflow = 'hidden';
