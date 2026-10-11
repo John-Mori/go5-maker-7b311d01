@@ -100,28 +100,33 @@
       iconFill: "#FFF0F5", iconHalo: "rgba(140,30,70,0.95)",  // アイコンも温白の芯＋同系濃色の輪郭で艶トーン統一
     },
     // acc3＝DLサイト便(5S部門テロップ見本・2026-10-09 msg1558120965131599913)の仮実装。
-    // 色は全て仮(Chamiが後で決める)。bandRGBAuthor/bandRGBTitleで帯色を段ごとに分け、dividerColorで
-    // 見本どおり帯の上下に太い黒線を入れる。帯色・線色はここだけ差し替えれば済む(他の描画ロジックは不変)。
+    // 2026-10-11 v979で帯と黒線をやめ、上部をピンクで染める形(headerWash)へ。bandRGB*は noBand で未使用(戻す時用に温存)。
     acc3: {
       authorPrefix: "作者 : ",                // 「作者 : 作者名」の形(Chami依頼2026-10-11 msg1558634517151875163・旧=引用：)
       defaultDetail: DEFAULT_DETAIL,
       detailMenu: true,
-      textFill: "#FFFFFF",                    // 出典・誘導行は白文字そのまま(縁なし)
       stroke: "rgba(0,0,0,1)",
       bandRGB: "20,34,64",                     // 既定(誘導行など)＝仮の紺
       bandRGBAuthor: "20,34,64",               // 出典帯＝紺〜青(仮)
       bandRGBTitle: "244,143,177",             // 題名帯＝ピンク #F48FB1(Chami依頼2026-10-11 msg1558634724728119369・旧=水色151,225,228)
       bandAlpha255: 255,                       // 見本は半透明ではない＝不透明
-      plainText: true,                         // 出典・誘導行は縁なし白文字(soft/glowは使わない)
-      dualOutline: true,                       // 題名行だけ：黒文字＋太い白フチ＋その外に細い黒フチ
+      plainText: true,                         // 誘導行は縁なしの単色文字(色=textFill。soft/glowは使わない)
+      dualOutline: true,                       // 題名行だけ：文字＋太い内フチ＋その外に細い外フチ(色はtitle*)
       authorFontFamily: '"M PLUS Rounded 1c"',  // 作者行も題名と同じ丸ゴシック(Noto細字だと白フチに黒が潰れて白文字に見えた)
       authorOutline: true,                     // 作者行：黒文字＋白フチ(Chami依頼2026-10-11 msg1558634724728119369・旧=縁なし白文字)
-      titleFill: "#000000",
-      titleOutlineWhite: "#FFFFFF",
-      titleOutlineBlack: "#000000",
+      // ★帯をやめて「上部をピンクで淡く染める」形へ(Chami依頼2026-10-11 msg1558640355929362495
+      //   「水色部分をピンクに・帯という概念を消して・上下の黒い線は不要・文字はピンクに似合う色」)。
+      //   段ごとの帯(角丸の箱)は描かず、ヘッダー全体の背後に上から下へ溶けるピンクを1枚敷く。黒線(dividerColor)は廃止。
+      noBand: true,
+      headerWash: { top: "252,228,236", mid: "248,187,208", fade: 0.06 },  // #FCE4EC→#F8BBD0、下端はfade(H比)で画像へ溶かす
+      textFill: "#880E4F",                     // 誘導行：白だとピンクに埋もれる→深いローズ(プラム)
+      titleFill: "#FFFFFF",                    // 題名：白文字＋濃ローズのフチ＋外に細い白フチ(ピンク地で浮く)
+      titleOutlineWhite: "#C2185B",            // (内側の太いフチ＝濃ローズ。名前は旧仕様の名残)
+      titleOutlineBlack: "#FFFFFF",            // (外側の細いフチ＝白)
+      titleOutlineK: 1.4,                      // 内フチを細め(既定2.2だと白文字がローズに潰れた)
+      detailFontFamily: '"M PLUS Rounded 1c"',  // 誘導行も丸ゴシック(Noto細字だとピンク地で薄く見えた)
       titleFontFamily: '"M PLUS Rounded 1c"',  // 見本の「極太の丸みがあるゴシック体」に近い丸ゴシック(仮採用・要報告)
-      dividerColor: "#000000",                 // 帯の上下に入れる太い黒線(仮)
-      iconFill: "#FFFFFF", iconHalo: "rgba(20,34,64,0.95)",
+      iconFill: "#880E4F", iconHalo: "rgba(255,255,255,0.9)",
     },
   };
   const theme = () => THEME[curAccount] || THEME.acc1;
@@ -135,7 +140,7 @@
       // strokeTextは中心線基準なので、外側の黒を先に太く描き、内側に白を重ねて細い黒の輪だけ外側に残す。
       ctx.save();
       ctx.lineJoin = "round";
-      var whiteW = Math.max(1, sw * 2.2);
+      var whiteW = Math.max(1, sw * (t.titleOutlineK || 2.2));  // 内フチの太さ(テーマで上書き可)
       var blackW = whiteW + Math.max(1, sw * 0.9) * 2;
       ctx.lineWidth = blackW; ctx.strokeStyle = t.titleOutlineBlack; ctx.strokeText(ln, x, y);
       ctx.lineWidth = whiteW; ctx.strokeStyle = t.titleOutlineWhite; ctx.strokeText(ln, x, y);
@@ -306,9 +311,11 @@
       const vpad = pad * 0.45 + mB;                 // 文字インクの上下に付ける対称な余白
       const ie = inkExtent(ln, drawY, px);
       const ba = theme().bandAlpha255 != null ? theme().bandAlpha255 : bandAlpha;  // テーマで固定不透明度があれば優先
-      ctx.fillStyle = `rgba(${bandRGB},${ba / 255})`;
-      roundRect(x - pad - mB, ie.top - vpad, tw + (pad + mB) * 2, (ie.bot - ie.top) + vpad * 2, pad + mB * 0.5);
-      ctx.fill();
+      if (!theme().noBand) {
+        ctx.fillStyle = `rgba(${bandRGB},${ba / 255})`;
+        roundRect(x - pad - mB, ie.top - vpad, tw + (pad + mB) * 2, (ie.bot - ie.top) + vpad * 2, pad + mB * 0.5);
+        ctx.fill();
+      }
       paintGlyph(ln, x, drawY, px, sw, shadowScale, role);
       y += th + pad + gap;  // 送りは基準位置のまま(オフセットの影響を受けない＝他段に波及しない)
     }
@@ -340,7 +347,7 @@
   // 2段目(誘導文)：「：」→⋮、「説明」→≡説明 をインライン描画。
   // off＝この段の縦オフセット比。帯と文字(アイコン含む)を一体で動かす。
   function drawDetail(text, y, px, pad, off, role) {
-    setFont(px, 700);
+    setFont(px, 700, theme().detailFontFamily);
     ctx.textBaseline = "middle";
     const sw = Math.max(U(2), px / 12), th = px * 1.04, ym = y + th / 2 + H * (off || 0);
     const iconPad = px * 0.16, kebabW = px * 0.42, hamW = px * 0.80;
@@ -359,8 +366,10 @@
     const vpad = pad * 0.45 + mB;                 // 文字インクの上下に付ける対称な余白
     const ie = inkExtent(s, ym, px);              // baseline "middle" のまま実インクを計測(ymはオフセット込み)
     const ba = theme().bandAlpha255 != null ? theme().bandAlpha255 : 175;  // テーマで固定不透明度があれば優先
-    ctx.fillStyle = `rgba(${theme().bandRGB},${ba / 255})`;
-    roundRect(x - pad - mB, ie.top - vpad, total + (pad + mB) * 2, (ie.bot - ie.top) + vpad * 2, pad + mB * 0.5); ctx.fill();
+    if (!theme().noBand) {
+      ctx.fillStyle = `rgba(${theme().bandRGB},${ba / 255})`;
+      roundRect(x - pad - mB, ie.top - vpad, total + (pad + mB) * 2, (ie.bot - ie.top) + vpad * 2, pad + mB * 0.5); ctx.fill();
+    }
     for (let k = 0; k < segs.length; k++) {
       const [kind, val] = segs[k], w = widths[k];
       if (kind === "text") {
@@ -416,9 +425,11 @@
     const bandRGB = role === "title" ? (theme().bandRGBTitle || theme().bandRGB)
                   : role === "author" ? (theme().bandRGBAuthor || theme().bandRGB)
                   : theme().bandRGB;
-    ctx.fillStyle = `rgba(${bandRGB},${ba / 255})`;
-    roundRect((W - maxTw) / 2 - pad - mB, inkTop - vpad, maxTw + (pad + mB) * 2, (inkBot - inkTop) + vpad * 2, pad + mB * 0.5);
-    ctx.fill();
+    if (!theme().noBand) {
+      ctx.fillStyle = `rgba(${bandRGB},${ba / 255})`;
+      roundRect((W - maxTw) / 2 - pad - mB, inkTop - vpad, maxTw + (pad + mB) * 2, (inkBot - inkTop) + vpad * 2, pad + mB * 0.5);
+      ctx.fill();
+    }
     let ly = y + offY;
     for (let j = 0; j < lines.length; j++) {
       const tw = ctx.measureText(lines[j]).width, x = (W - tw) / 2;
@@ -488,8 +499,26 @@
         var tpx = capTitlePx([f.text], Math.max(1, Math.round(f.px * tScale)), U(16) + padExtra, titleFamily);
         y = drawBlock([f.text], y, tpx, U(16) + padExtra, U(6), 195, OFF.textTitle, tScale, "title", titleFamily) + U(4);
       }
-      y = drawDivider(y);  // acc3のみ：題名帯の直後(画像の直前)に太い黒線
+      y = drawDivider(y);  // dividerColorのあるテーマのみ：題名帯の直後(画像の直前)に太い黒線
     }
+    return y;
+  }
+  // headerWash(acc3)：ヘッダー文字の背後に、上端から文字の下端までピンクを敷き、その下を画像へ溶かす。
+  //   帯(箱)の輪郭を作らない＝角も境界線も無い。文字より先に描く必要があるため、
+  //   同じ drawText を透明(globalAlpha=0)で1回走らせて下端yだけ測る＝段オフセット・拡大・2行モードに自動追従。
+  function drawHeaderWash(author, detail, top) {
+    var hw = theme().headerWash;
+    if (!hw) return;
+    ctx.save(); ctx.globalAlpha = 0;
+    var yb = drawText(author, detail, top);
+    ctx.restore();
+    var fade = H * hw.fade, g = ctx.createLinearGradient(0, 0, 0, yb + fade);
+    var solid = yb / (yb + fade);
+    g.addColorStop(0, `rgba(${hw.top},1)`);
+    g.addColorStop(solid, `rgba(${hw.mid},1)`);
+    g.addColorStop(1, `rgba(${hw.mid},0)`);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, yb + fade);
   }
 
   // ---- 1フレーム描画 ----
@@ -517,6 +546,7 @@
       }
     }
     // テキスト
+    drawHeaderWash(els.author.value.trim(), els.detail.value.trim() || theme().defaultDetail, titleForDraw(els.top.value));
     drawText(els.author.value.trim(), els.detail.value.trim() || theme().defaultDetail, titleForDraw(els.top.value));
     // 販促ラベル(今なら◯%OFF)=動画フレームへ重ね描き(写真に焼き込まない=Bluesky添付に入らない・Chami2026-07-15)。
     // フレーム基準(W×H)で描くので画像の外(黒帯・余白)にも自由に置ける。
