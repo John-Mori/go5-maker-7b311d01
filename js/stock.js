@@ -30,7 +30,7 @@
   // 自前短縮ドメイン(5mgl/yoz2)なら true。(link-workerが払い出す計測リンクだけ ?nc=1 を足す判定用)
   function isOurShort_(u) {
     try { var og = window.Go5Short; if (og && og.ourBase) return !!og.ourBase(u); } catch (e) {}
-    return /\/\/(?:5mgl\.com|yoz2\.com)\//.test(String(u || ''));
+    return /\/\/(?:5mgl\.com|yoz2\.com|xdgh3\.com)\//.test(String(u || ''));
   }
   // 説明欄アクション行(説明欄をコピー／動画DL／生成短縮URL)を必ず1行に収める(Chami依頼2026-08-03)。
   //   端末が狭い(iPhone16 等)と短縮URLが下段へ改行落ちしていた。ボタンは固定幅のまま、
@@ -3175,7 +3175,7 @@
     //   自前ワーカードメインの短縮はそのまま(二重短縮しない)。判定は Go5Short.ourBase。
     try {
       var og = window.Go5Short;
-      var isOurs = (og && og.ourBase) ? !!og.ourBase(slotUrl) : /\/\/(?:5mgl\.com|yoz2\.com)\//.test(slotUrl);
+      var isOurs = (og && og.ourBase) ? !!og.ourBase(slotUrl) : /\/\/(?:5mgl\.com|yoz2\.com|xdgh3\.com)\//.test(slotUrl);
       if (slotUrl && !isOurs) {
         if (saved.xPostUrl) applyXPostUrl_(saved.xPostUrl, null);   // 生のX投稿URLがある＝それから自前ドメインで再短縮
         else healExternalXShort_(slotUrl);                          // 無い＝da.gd等を解決して自前ドメインへ格上げ

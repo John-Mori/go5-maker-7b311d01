@@ -67,7 +67,7 @@
     //   r2.workers.devのコードも生存。E2E検証済(POST→<domain>/xxxxx・GET→302転送)。
     //   ★2026-10-10: 癒やし倉庫(acc3)の枠。新ドメインはChami取得待ち=空のまま。取れたらここへ 'https://<新ドメイン>' を入れるだけで
     //   acc3の短縮(作品リンク計測・投稿URL短縮・一括投稿のリプURL)が月詠みと同じに動く。空の間は5mgl/yoz2へ落とさず生URLのまま。
-    URL_BY_ACCT: { acc1: 'https://5mgl.com', acc2: 'https://yoz2.com', acc3: '' },
+    URL_BY_ACCT: { acc1: 'https://5mgl.com', acc2: 'https://yoz2.com', acc3: 'https://xdgh3.com' },   // ★2026-10-11 癒やし倉庫の新ドメイン(Chami msg 1558820080454869044)
     WORKER_URL: 'https://5mgl.com',   // 既定(acct不明時fallback。stats/listは同一KVなのでどのドメインでも可)
     // 「これは自前の計測リンクか」判定に使う全ドメイン(旧r2も含める=既存リンク互換)
     WORKER_HOSTS: ['https://5mgl.com', 'https://yoz2.com', 'https://r2.trustsignalbot.workers.dev'],

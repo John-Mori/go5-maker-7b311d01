@@ -83,7 +83,7 @@ function normalizeWorkUrl(rawUrl) {
  * SHORT.WORKER_HOSTS / SHARE_SHORTENERS が実際に使う宛先と同じ＝二重処理防止の判定に使う)
  * サブドメイン(例: www.tinyurl.com)も許容。
  */
-const SHORT_URL_HOSTS = ['5mgl.com', 'yoz2.com', 'r2.trustsignalbot.workers.dev', 'da.gd', 'tinyurl.com'];
+const SHORT_URL_HOSTS = ['5mgl.com', 'yoz2.com', 'xdgh3.com', 'r2.trustsignalbot.workers.dev', 'da.gd', 'tinyurl.com'];
 
 /**
  * URLのホスト名が「既に短縮済み」とみなせるホストか。

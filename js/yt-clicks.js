@@ -323,6 +323,7 @@
     var s = String((it && it.shortUrl) || '') + ' ' + String((it && it.workShortUrl) || '') + ' ' + String((it && it.shareUrl) || '');
     if (s.indexOf('5mgl.com') >= 0) return 'acc1';
     if (s.indexOf('yoz2.com') >= 0) return 'acc2';
+    if (s.indexOf('xdgh3.com') >= 0) return 'acc3';
     return '';
   }
   // 表示専用のチャンネルガード。所属が「別チャンネルだと確定できた」行だけを今のタブから隠す。
@@ -1364,7 +1365,7 @@
       // どちらか一方だけでも仮保存できる。ただし、値が入っている欄の形式は妥協しない。
       if (postUrl && !treeSocialUrlOk_(postUrl)) return { ok: false, error: 'ツリー' + (i + 1) + 'の返信ポストURLを確認してください(XまたはBlueskyの投稿URL)。' };
       // 短縮前のDMM/FANZA作品URLも仮保存可。後から同じ行の「短縮」で発行済みURLへ置換できる。
-      if (shortUrl && !codeOf(shortUrl) && !treeWorkUrlOk_(shortUrl)) return { ok: false, error: 'ツリー' + (i + 1) + 'の作品URLは、DMM/FANZAの作品URLまたは5mgl.com・yoz2.comの発行済みURLを入れてください。' };
+      if (shortUrl && !codeOf(shortUrl) && !treeWorkUrlOk_(shortUrl)) return { ok: false, error: 'ツリー' + (i + 1) + 'の作品URLは、DMM/FANZAの作品URLまたは5mgl.com・yoz2.com・xdgh3.comの発行済みURLを入れてください。' };
       out.push({ id: row.getAttribute('data-tree-id'), name: name.slice(0, 40), postUrl: postUrl, shortUrl: shortUrl });
     }
     return { ok: true, trees: out };
