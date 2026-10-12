@@ -542,8 +542,13 @@
       else if (isEmptyVal_(out[k])) out[k] = newer[k];             // 両方空なら形だけnewerに合わせる
       // newerが空でolderに値がある→olderを保持(=作品URL等を消さない)
     }
+    // ★取得中プレースホルダの題名は、取得済みの本物の題名を上書きしない。本物が揃ったら取得中フラグも外す。
+    //   (1回取得できた候補が、古いプレースホルダとのunionで「取得中です…」へ戻る事故・Chami 2026-10-13)
+    if (isPhTitle_(out.title) && !isEmptyVal_(older.title) && !isPhTitle_(older.title)) out.title = older.title;
+    if (out._fetching && !isEmptyVal_(out.title) && !isPhTitle_(out.title)) delete out._fetching;
     return out;
   }
+  function isPhTitle_(t) { return t === "(タイトル未取得)"; }
   // id フィールドで配列を union。(候補=cid / ドラフト=id)重複はフィールド単位で統合(newer優先・空で消さない)。
   function unionByField(olderStr, newerStr, idField) {
     idField = idField || "cid";
@@ -1326,11 +1331,14 @@
   // 通常syncOnceは後から全設定/画像を整合する。このレールはremoteの非候補LSとIDBをそのまま保存するため、
   // 先に走っても他データを削除せず、競合はbaseVersionで検知して1回再pullする。
   var _candFastBusy = false, _candFastQueued = false;
-  function applyFastCandidateMerged_(mergedLs) {
+  function applyFastCandidateMerged_(mergedLs, startLs) {
     var jobs = [], pulled = 0; mergedLs = mergedLs || {};
     Object.keys(mergedLs).forEach(function (k) {
       var v = mergedLs[k];
       if (isCandArrayKey(k)) {
+        // ★pull待ちの間に取得完了(put)等でLSが変わっていたら、その最新を重ねてから書く。
+        //   開始時の古い配列で上書きすると、取得済みの候補が「取得中です…」へ巻き戻る(Chami 2026-10-13)。
+        if (startLs) { try { var liveV = LS.getItem(k); if (liveV != null) v = mergeLiveArray_(v, liveV, startLs[k], "cid"); } catch (e) {} }
         var changed = true, lsOk = false;
         try { changed = LS.getItem(k) !== v; if (changed) sysSet(k, v); lsOk = true; } catch (e) {}
         if (lsOk) {
@@ -1377,6 +1385,7 @@
     if (_candFastBusy) { _candFastQueued = true; return Promise.resolve({ ok: false, busy: true }); }
     _candFastBusy = true;
     var localLs = gatherLs(), localTs = loadTs(), now = Date.now(), pullRes = null, merged = null, pulled = 0;
+    var startLs = Object.assign({}, localLs); // IDBミラー合流前の素のLS(=後でliveとの差分判定に使う)
     return readKnownCandListMirrors_(Idb, localLs).then(function (mirrors) {
       mergeCandListMirrorsIntoLs_(localLs, mirrors);
       return pullState();
@@ -1385,7 +1394,7 @@
       var remote = {};
       if (pullRes.ok && !pullRes.empty && pullRes.blob) { try { remote = JSON.parse(pullRes.blob) || {}; } catch (e) { remote = {}; } }
       merged = fastCandidateMergeState_(localLs, remote, localTs, now);
-      return applyFastCandidateMerged_(merged.mergedLs);
+      return applyFastCandidateMerged_(merged.mergedLs, startLs);
     }).then(function (n) {
       pulled = n || 0;
       if (!merged.changed) {
@@ -1593,7 +1602,7 @@
   root.Go5Sync._test.readSyncIdbEntries_ = readSyncIdbEntries_; root.Go5Sync._test.protectUnreadIdb_ = protectUnreadIdb_;
   root.Go5Sync._test.mergeLiveArray_ = mergeLiveArray_; root.Go5Sync._test.fastCandidateMergeState_ = fastCandidateMergeState_;
   root.Go5Sync._test.mergeCandListMirrorsIntoLs_ = mergeCandListMirrorsIntoLs_; root.Go5Sync._test.readKnownCandListMirrors_ = readKnownCandListMirrors_; root.Go5Sync._test.writeCandListFallback_ = writeCandListFallback_;
-  root.Go5Sync._test.slimStockArchive = slimStockArchive;
+  root.Go5Sync._test.slimStockArchive = slimStockArchive; root.Go5Sync._test.applyFastCandidateMerged_ = applyFastCandidateMerged_;
   root.Go5Sync._test.syncIdbPrefixes = SYNC_IDB_PREFIXES.slice();
   if (typeof module !== "undefined" && module.exports) module.exports = root.Go5Sync;
 

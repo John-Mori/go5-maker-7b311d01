@@ -1066,6 +1066,7 @@
         Object.keys(u).forEach(function (f) {
           if (u[f] !== undefined && JSON.stringify(it[f]) !== JSON.stringify(u[f])) { it[f] = u[f]; changed = true; }
         });
+        if (it._fetching) { delete it._fetching; changed = true; } // 題名が埋まった＝取得中フラグも外す
       });
       if (changed) candItemsWrite_(key, cur);
       cb(changed);
@@ -5481,6 +5482,9 @@
         var it;
         if (idx >= 0) { it = items[idx]; } // プレースホルダをその場更新(addedAt保持=並び順不変)
         else { it = { cid: r.cid, addedAt: new Date().getTime() }; items.unshift(it); }
+        // ★取得失敗でも、既に本物の題名がある候補(同期で先に埋まった等)は中身を消さない(Chami 2026-10-13)。
+        var keepInfo = !info && it.title && it.title !== '(タイトル未取得)';
+        if (!keepInfo) {
         it.url = url;
         it.title = (info && info.title) || '(タイトル未取得)';
         it.author = (info && info.author) || '';
@@ -5493,6 +5497,7 @@
         it.reviewCount = info ? info.reviewCount : null;
         it.reviewAvg = info ? info.reviewAvg : null;
         if (info && info.samples && info.samples.length) it.samples = info.samples; // 詳細モーダル用
+        }
         if (twForWork.ok) it.twitterUrl = twForWork.url; // X / Bluesky の投稿URLも一緒に保存
         delete it._fetching; // 取得完了(または失敗確定)＝プレースホルダ状態を解除
         var lsOk = candItemsWrite_(key, items); // ★戻り値=LS書込成否(false=満杯でメモリ/IDBへ退避)
