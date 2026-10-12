@@ -112,9 +112,9 @@ function fanzaGenre_(url) {
 //     派生数式は分子が空のため常に0を並べるだけで、分析を汚していた。**復活させないこと。**
 //   ※特別期間(手動)/サムネ・フック種別/CTA・リンク提示方法/Blueskyラベル は CLEANUP_COLUMNS で削除済み。
 //   ※Bluesky投稿URL/Bitly_ID は宵桜艶帖にのみ在った余分列。月詠みへ揃えるため削除(同日)。
-var CH_SHEETS = ['月詠み','宵桜艶帖'];
+var CH_SHEETS = ['月詠み','宵桜艶帖','癒やし倉庫']; // 癒やし倉庫(acc3)は2026-10-12追加。未作成なら初回の読み書きで自動作成(各ループは無ければ飛ばす)
 // 再デプロイ確認用バージョン。(中身を変えたら上げる)<exec URL>?ping=1 で確認できる。
-var GAS_VERSION = '2026-08-29A(競合日次フリーズ(2026-08-18で11日停止)の真因を実測で確定+回帰ガード[C-038/AD研究室モドリッチ依頼]。真因=GASプロジェクト全体のUrlFetchApp日次枠の枯渇(yt_probe実測 err="1日にサービスurlfetchを実行した回数が多すぎます")=runCompetitorDailyが04:41に走ってもytVideosStats_の全fetchが例外で落ちsnapped=0→11日凍結。従来ytVideosStats_のcatch(e){}が枠枯渇の実例外を握り潰しnoteは「urlfetch/APIキー/quota要確認」の3択どまりで確定不能だった。回帰ガード=ytVideosStats_に診断diagを追加しfetchErr/lastHttp/quotaCapped/attemptedを持ち帰り、runCompetitorDailyのnoteへ確定カテゴリ(URLFETCH_QUOTA_EXHAUSTED/NO_API_KEY/COMP_QUOTA_CAP到達/YT_HTTP_xxx)で載せる=競合_日次ステータスシート(urlfetch非依存で必ず着地)に取得段の不発が"配送成功(08:00 push緑)とは別の面"で確定表示される=silent green貫通。データ安全=空時は既存スナップを消さずappendのみ(if(drows.length))で不変。★恒久回復(=新スナップが実際に載る)には本体snapshotStats(5分毎に全履歴投稿のクリックをworkerClicks_で取得=数万fetch/日)+refreshClicks(毎時200行×2ch=9600/日)の消費過多を削らねばならず、これはChamiのクリック更新頻度に触れる=別途承認要でChamiへ提案中(競合ジョブ単独では回復不可)。コード.gsは触っていない(=live 8-27Aをそのまま維持しGAS_VERSIONのみバンプ)、変更はgas/競合.gsのみ。以下は前版=2026-08-27A(①再生成Drive名から末尾ハッシュタグ群を除外し従来ルールで生成。②通常編集では導線2の既存値と意図的な空欄を保持し勝手に最新ドメインへ変更しない。③platform(x/bsky)を中継・同期後も保持し再読込でXへ戻さない。以下は前版=2026-08-24A(runCompetitorDaily の ok 判定を修正=snapped==0を一括でYT API失敗扱いしていたのを、windowVids.length===0(追跡窓に動画がまだ無い=新規登録直後等の正常系)と、windowVids>0なのにsnapped==0(quota切れ等の実際の失敗)を分離。前者はok:trueへ戻し、充実処理(チャンネル統計更新・新着discovery)のゲートも同じ判定へ揃えた=前版の誤検知でチャンネル統計更新(非公開登録者数クリア含む)まで巻き込んで打ち切られていた実害を解消(研究室HQ実測=tests/test_competitor_analysis.js赤・2026-08-24)。既存の「YT API実際に空」時の失敗検知(C-041)は維持。以下は前版=2026-08-23I(競合_日次ステータスの本日行を外から読む口 action=comp_status を新設[読み取り専用・書き込み/列追加ゼロ・三笘/モドリッチ依頼2026-08-23]。competitor_daily.pyのPC側集計が本日行の found=false[本日行が無い]/ok!=true[部分失敗]を赤にできる=silent green封じの"読み手"。compStatusToday_がシート「競合_日次ステータス」を末尾から走査し本日(JST)の最新行の{ok,found,at,snapped,windowVids,channels,newVideos,elapsedMs,note,webhook}を返す・未作成/空/本日行無しはfound:falseでfail-open[監視側が構造で赤にできる]。既存の読み取りaction同様ゲート無しGET・SpreadsheetApp読み取りのみ=urlfetch枠非依存。以下は前版=2026-08-23H(競合_日次の自動経路のsilent green封じ=04:00トリガーが runCompetitorDaily() の戻りok:false[snapped==0/例外]を捨てていた穴を塞ぐ[C-038/C-041・AD研究室モドリッチ依頼2026-08-23/B]。トリガーの入口を runCompetitorDailyWatched へ差し替え[setupTrigger]、①実行結果を毎回シート「競合_日次ステータス」へ1行append[SpreadsheetApp書き込み=urlfetch枠に依存しない=枠枯渇=今回の凍結原因でも必ず着地。PC側日次集計はこの行のok=false/本日行欠で赤にできる]、②ok:false時のみ prop COMP_ALERT_WEBHOOK へbest-effort通知[urlfetch使用=枠枯渇時は送れない=fail-open。その時は①が正]。手動口 comp_daily_now は従来どおり runCompetitorDaily() を直接呼びJSON返し=挙動不変。追記のみ・既存タブ/列/挙動は不変=破壊面ゼロ。★反映後 admin_setup でトリガー再設定要[入口関数名の変更をGASへ効かせるため]。以下は前版=2026-08-23G(action=teian_decisions の日時整形を修正=Sheetsが日時文字列をDate値へ格上げするとgetDisplayValuesでもlocale長形式(Sun Aug 23 2026…)になり前版Fの「yyyy-MM-dd」化が効いていなかった。読み取り側でDate値だけ Utilities.formatDate(Asia/Tokyo,yyyy-MM-dd HH:mm:ss)へ整形=既存行/新規行とも軍議エコーが綺麗(冪等/列/fail-openは不変)。以下は前版=2026-08-23F(action=teian_decisions の値取得を getValues→getDisplayValues へ変更したが日時セルはlocale長形式のままで無効だった版。以下は前版=2026-08-23E(提案決定ページのエコー経路B用に、決定シート「提案決定」を外から読む口 action=teian_decisions を新設(読み取り専用・書き込み/列追加ゼロ・イージス研究室GL発注)。?since_row=<N>で行番号>Nの行だけ返し(冪等はシート行番号1本)、省略時1・1回50行上限・ヘッダは実物のシート1行目から読む(将来列増でも監視側が壊れない)。シート未作成時は ok:true,lastRow:0,rows:[] のfail-open(決定0件で監視が警報しない)。既存の読み取りaction(stats_tail等)同様ゲート無しGET。以下は前版=2026-08-23D(提案決定ページ(改修α・C-018最小スライス)の決定を受ける口 op=teian_decide をdoPostに新設。「この作品・この④コメント・chで投稿決定」をシート「提案決定」へ1行追記(冪等ヘッダ・追記のみ=破壊面ゼロ)し、prop_GUNJI_WEBHOOK が設定されていればDiscord webhookで軍議へエコー(fail-open=送信失敗でも記録は成功で返す/未設定なら discord:skipped_no_webhook)。SHARED_SECRET のゲート下・writeRecord_経路とは独立・既存シート/列/挙動は不変。以下は前版=2026-08-23C(データ整合修正の口 action=fix_records_0823 を新設(軍議REQ-gunji-5213170ea8 #3・読み取り既定/&apply=1でだけ書込み)。task=untest=記録シートのpost_idに漏れた"test-"接頭辞を剥がす(剥がした先が既存と衝突する行は触らずcollisionで報告・post_id以外は不変)。task=merge_dup=同一ytid&同一cidで2行に割れた記録を「統合」(keep=題名有る方へdropの非空セルだけを埋め=keepの既存値は上書きせず、そのうえでdrop行を1本だけ削除。ytid不一致 or cid不一致ならapplyを弾くfail-safe)。列/ヘッダ/既存挙動は不変・破壊面はmerge_dropのdrop行1本のみ。以下は前版=2026-08-23B(時点記録(30分〜72h初速)の欠測を恒久是正=captureTimepoints_の記録窓が固定9分([min,min+9])でしか埋まらず、その9分にsnapshotStats(5分毎)が回らない/6分上限で殺される/YouTube URL結線が遅れると当該バケットが永久欠測していた(実測=Chami手動投稿の水木金4本がb720だけ残りb30〜b360全欠)。対策=窓を「次バケット境界の直前まで」へ拡張し、そのバケット区間に1回でもデータの揃ったスナップが走れば記録=取りこぼしに強くする。実経過分は列5に保存済でage正規化は下流で保たれる。列/ヘッダ/既存挙動不変。以下は前版=2026-08-23A(競合日次の凍結を根治=runCompetitorDailyがGASの6分実行上限を超え毎回タイムアウト[実測comp_daily_now=361sでGoogleのタイムアウトHTML]→日次append[競合_日次シート]へ到達できず2026-08-18で凍結していた[PC側集計は同じ8/18を再集計しつつ緑を返すsilent green]。対策=最優先の"既存窓動画の統計スナップ→日次append"を関数先頭へ移し必ず先に済ませ、チャンネル統計更新・新着discoveryは時間予算[4分]内のbest-effortへ後置。snapped==0[YT統計が空=urlfetch日次上限/APIキー/quota]は握り潰さずok:falseで返す[C-041/AD研究室モドリッチ依頼2026-08-23]。以下は前版=2026-08-18C(wcode_probe に実click着地テスト live[] を追加=同じworkerClicks_で導線1(code)/導線2(wcode)を両方叩き、col7埋まる/col8空の非対称がworker応答差かwriter差かを切り分け。以下は前版=2026-08-18B(action=wcode_probe を新設(読み取り専用・書き込み無し)=視聴履歴.作品クリック数が0/1204で未着地の枝判定。snapshotStatsのwrite-set(recs=vid必須＋vidで先頭dedup)を厳密再現し、導線2(作品短縮URL=wcode)がvid有り行で起きるか(枝A=writer取りこぼし)/vid無し行中心か(枝B=構造的に載らない)を実データで返す。決め手=recs_dedup_with_wcode(dedup生存行のうちwcode保持数)/vids_wcode_dropped_by_dedup(同一vidの他行にwcode有りだが先頭行が空=dedupが落とした数)/wcodes_only_novid。列追加無し・既存挙動不変。以下は前版=2026-08-18A(action=backfill_probe を新設=「後埋まり列」(ピーク値/クリック数/いいね/リポスト等、改修後N時間で毎時トリガーが実データで初めて埋める列)の実データ着地プローブ(読み取り専用)。各列の非空行数と最終更新時刻を返し、改善提案部門の Z2運用ツール(b面)が「直したと言った後、実データが本当に埋まったか」を外から突き合わせられる口=型《実物着地》の読取口。書き込み無し・列追加無し・既存挙動不変。作成時プリフライトは scripts/check_backfill_assert.mjs(CI門)が登録簿 backfill_columns.json と照合。以下は前版=2026-08-16D(ピーク記録が埋まらない核心の一因を根治=ytViews_のバッチに不正ID(SALE擬似vid"SALE"/"SALE:code"のコロン混入・壊れURL由来)が1つ混ざるとvideos.listがバッチ全体を400で弾き、同バッチの実在vidの再生数まで丸ごと欠落していた(実測DIAG viewsKeys=0=views全滅→ピーク算出の材料ゼロ)。対策=各バッチをYouTube動画IDの形/^[A-Za-z0-9_-]{11}$/に一致する物だけへ絞ってから叩く(不正IDは1つも渡さない)。注:診断中に当プロジェクトのUrlFetchApp日次クォータを消費したため反映直後は一時的にfetchが例外になり得る(回復後にトリガーが自動で埋める)。C2〜C5の一時診断(DIAG/yt_probe)は確認後に除去予定。以下は前版=2026-08-16C5(一時診断=yt_probeがytViews_のバッチ経路を実物で通す[実vid+SALE:コロンid]。以下は前版=2026-08-16C4(一時診断=ytViews_の各バッチのHTTP応答をDIAG.ytに記録(viewsが全nullの真因=どのバッチが400かの特定)。以下は前版=2026-08-16C3(一時診断=yt_probe追加。YT_API_KEYの有無とYouTube Data APIの実HTTP応答を返す(viewsが全nullの切り分け)。以下は前版=2026-08-16C2(一時診断=snapshot_nowがpeakUpdatesの内訳counts[recs/views非null/prev/hrs範囲内/consider呼数]を返す。ピークが0のままの切り分け用・確認後に除去。以下は前版=2026-08-16C(ピーク永続化が実行終端に間に合っていなかった=16Bの時間予算(日時2分+クリック4分)だと本体upsertループの後にあるピーク書き込みへ6分内に到達できず、スナップ行は書けてもピークは0のままだった(実測23:25の便)。配分を前詰め(日時90秒+クリック通算3分)+本体upsert/ピーク算出ループ自体も通算5分で頭打ち=打ち切っても溜めたピークは必ず永続化へ抜ける。以下は前版=2026-08-16B(ピーク記録が埋まらない"現"真因=snapshotStatsがGASの6分実行制限を超えて毎回時間切れ→Googleがトリガーを自動停止し2026-08-15 19:51Zを最後にスナップ完全停止していた[実測]。膨張源は①投稿日時のYouTube公開時刻バックフィル(dateFix・08-15Aで追加=全履歴行をsetValue)②全コードのクリック取得(1コードずつ+80ms待機)。恒久対策=重い2ループを時間予算で頭打ち[dateFix2分/クリック通算4分]にし必ず書込み・ピーク算出へ到達=機構で6分を超えさせない。打ち切り分は冪等で次回続行・数回で定常。反映後 admin_setup でトリガー再設定要。以下は前版=2026-08-16A(ピーク記録の全滅を根治[Chami再発指摘=ランキングのピーク窓が常に空]。真因=snapshotStatsのprevByVid構築が記録日時セルを生文字列前提でDate.parse[String(Date)は"Sat Aug 16 2026…"形式のため先頭空白のT置換で常にNaN]→tms=0→considerPeak_が一度も呼ばれずピーク記録シートが0行のまま[deltasはymd_正規化済みで生存=ピークだけ全滅]。2026-08-06/08-11の下限調整では直らなかった理由もこれ[rateの手前で死んでいた]。対策①=記録日時をDate/文字列両対応で正規化[instanceof Date→getTime/formatDate]。対策②恒久=増加ゼロ区間でも未記録の作品へ0(件/時)を種まき[SALE擬似行除く]=低速動画も必ず行が付き、シート0行=即異常と構造で判別可能に。列順/PEAK_HEADERS/冪等移行/v・c・w3系統は不変。以下は前版=2026-08-15B(外部短縮の新規発番を完全撤去。フロントで独自link-worker URLが無い時はpostUrlを共有URLへ保存し、da.gd APIを呼ばない。再発防止テストで外部短縮API文字列の復活を禁止。以下は前版=2026-08-15A(投稿日時をYouTube公開時刻へ自動収束[Chami依頼REQ-2f4520e4d7=投稿日は投稿完了ボタンを押した時刻でなくYouTubeの実公開時刻を参照する]。真因=投稿完了と同時のupsert(pushItemToGas_)がpostedAtを送らずwriteRecord_の新規行フォールバックが投稿日時列にnow[押下時刻]を確定していた。対策=5分毎snapshotStatsに相乗り。ytViews_に第2引数pubOutを追加しpart=statistics,snippetでpublishedAtも回収[追加クォータ0=既存videos.list呼び出しのpart拡張のみ]、snapshotStatsが各CH行の投稿日時列を走査しpublishedAtと±60秒超ズレ or 空欄の行だけsetValue[new Date]で修正、修正シートをsortByDate_で1回整列[冪等=一致行は無操作]。新規投稿は公開後最大5分で自動修正・既存の誤記録もYouTube URL持ち全行を自動バックフィル・列追加なし・フロント無改修。以下は前版=2026-08-11B(全部のピークが要る[Chami2026-08-11]=導線2(作品クリック=ピンク矢印 w)の最大瞬間風速ピークをGASが記録するよう追加。従来ピーク記録シートは再生(v)と導線1(c)の2種だけで作品クリックのピークは未対応=ランキングのピーク窓でピンクを選ぶと「GAS側の対応待ち」の注記で空だった。PEAK_HEADERSへ「作品クリックピーク(件/時)」「作品クリックピーク時間帯」を末尾追加(既存のv/c/更新日時の列位置は不変=timepointSheet_と同じ冪等ヘッダ移行で旧シートも無停止で拡張・旧行のw列は空欄)、snapshotStatsのconsiderPeak_をw対応(prevByVidに作品クリック累計wclicksを持たせ区間伸び率を採用・下限0.06h上限6hはv/cと共通)、computePeaks_がwRate/wWinを返す→フロントyt-clicks.jsがr.peakW/peakWWinで描画・c2PeakUnsupportedの分岐と注記を撤去。過去分は遡及不可(サーバーに作品クリックの区間履歴が無いため)・以後のsnapshotから積む。以下は前版=2026-08-11A(ピークを早く記録=snapshotStatsを10分毎→5分毎に短縮し、最大瞬間風速の採用下限も0.12h[7.2分]→0.06h[3.6分]を対で更新[間隔だけ縮めて下限を残すと5分区間が常に下限割れでピークが1件も記録されない=2026-08-06と同型の事故になるため必ず対で変える]。公開直後からピークが早く埋まる・時点記録も5分毎で「バケット+0〜5分」に確定=旧10分毎より早い[Chami「ピークを早く記録できるように」2026-08-11]。★反映後は ?action=admin_setup でトリガー再設定が要る[間隔変更をGASへ効かせるため]。以下は前版=2026-08-08A(⑤時点記録シートに導線2[作品クリック=ピンク矢印 w]を追加。従来は再生数[v]と導線1[c]だけをスナップし導線2はGAS未記録=端末を公開1時間などの時点に開いていない投稿はピンク矢印バケットが永久に空だった[Chami「ピンクのクリックがちゃんと集計されてない」2026-08-08]。captureTimepoints_がwcodeの開封数をw列[TIMEPOINT_HEADERS末尾に追加・timepointSheet_で冪等移行=旧行は空欄]へ記録、computeTimepoints_がwを返す→ランキングの各時間窓でピンクもサーバー記録から埋まる[端末未起動でも]。過去分は遡及不可[サーバーに履歴が無いため]・以後の投稿から有効。以下は前版=2026-08-06A: ランキング全窓の記録漏れを修理。①ピーク=snapshotStatsを10分毎(0.167h)に変えた際、最大瞬間風速の採用下限が旧0.2h(12分)のまま=区間が常に下限割れで1件も記録されず「ピークが何も表示されない」だった→下限を0.12h(7.2分)へ。②時点記録の窓に12時間/48時間を追加(TIME_BUCKETS/LAB)=旧実装はこの2窓をGAS未記録にして端末スナップ頼み=常態的に空だった。8窓(30分/1h/2h/6h/12h/24h/48h/72h)すべてサーバー記録に統一。Chami依頼2026-08-06。以下は前版=2026-08-02A: action=deltas の応答に timepoints を追加＝時点記録シート[公開起点の30分/1h/2h/6h/24h/72h・再生数と導線1クリック]をvideoId単位で返す。ランキングの窓表示が過去動画のサーバー記録も出せるようにする[端末未起動でも記録済みの分]。Chami依頼2026-08-02。以下は前版=2026-07-31F: ②action=fix_date_from_yt[指定post_idのYouTube動画URL→Data APIのpublishedAtを投稿日時へ・dry-run既定/&apply=1/&pids=,区切り]。／①action=restore_from_bk[バックアップシートに在って本シートに無いpost_id行を列名マッピングで復元・dry-run既定/&apply=1・&pid=で1行限定・post_id重複スキップ・投稿日時で整列]。／③F列ジャンルを投稿時に作品URLから自動記載[同人/Books/データ・fanzaGenre_]＋既存行の一括補完 action=genre_fill[dry-run既定/&apply=1/&force=1]。⑦Q列返信と⑤R列フォロー増を廃止=HEADERS40から除去・refreshEngagementの返信書き込み停止・新規行の返信0初期化停止・CLEANUP_COLUMNSへ追加[?action=cleanup_columnsで既存シートから削除]。Chami依頼2026-07-31①〜⑦のうち③⑤⑦。／B=action=click_agg/rebuild_click_agg を新設＝作品別クリック合算。X凍結→Bluesky退避で同一作品でも投稿ごとに導線1短縮URLが変わりクリックが複数行に割れる問題を、作品cid[=作品URL正規化]でまとめ直し1作品=1行の合計クリックにする。専用タブ「作品別クリック合算」へ非破壊出力・毎時refreshClicks末尾で積み直し[手番ゼロ]。分析部門依頼2026-07-31。／A=action=posted_cids を新設＝候補タブ✔pillの権威索引。記録_ch1/ch2の全行を{c:作品cid,w:作品URL,v:post_id,t:投稿日}へ4列射影し、c/w両空行は除外、post_idのacc-prefixがそのシートのchと矛盾する行は除外[fail-open]。読み取り専用。フロントがローカル短縮URL履歴でなくシートで投稿済み判定→端末分断の偽陰性/誤バケットの偽陽性を構造的に解消。J(computeDeltas_のクリック実数積み直し)を継続。設計書_投稿済み判定の権威ソース化_2026-07-31 S1・Chami依頼2026-07-31)))))))))))';
+var GAS_VERSION = '2026-10-12A(癒やし倉庫(acc3)を独立シート「癒やし倉庫」へ分離。従来はch名が「acc2なら宵桜艶帖・それ以外は月詠み」の二択で、history&channel=acc3 が月詠みの107件をそのまま返し、acc3の書き込みも月詠みへ混ざる穴だった[アーモンドアイ依頼 msg 1559010542415249419]。sheetName_/sheetCh_、CH_SHEETS、post_id接頭辞ガード(acc[123])、posted_cids、click_agg、chKey、SALEコード、Bluesky資格(_ACC3)を3ch化。acc1/acc2の挙動は不変。以下は前版=2026-09-05A(72h窓でsnapshotStatsのworkerClicks_対象を絞る=UrlFetchApp日次枠対策[HQ Go・AD研究室モドリッチ発注・comp_urlfetch_measure.md §削り案L25-28をそのまま実装]。真因=snapshotStats[5分毎288回/日]が全投稿[新旧問わず]のcode/wcodeクリックを毎回workerClicks_で取り直しており需要が日次枠2万を構造的に超過(静的トレース実測=床22,000〜高48,000/日・comp_urlfetch_measure_RESULT_20260905.md)。対策=recs/tpRecs各行にpostedAtMs[投稿日時ms]を持たせ(recsは従来欠けていたため追加)、clickByCode取得ループの手前で公開72h超の行は当該回のfetchをskip(postedAtMs無しのSALE擬似行[JrziR等の定額少数コード]は投稿でないため窓の対象外=常に取得)。窓外行のcodeは既存の毎時refreshClicksがそのまま引き継ぐ(未変更)。5分間隔[初速KPIの芯]・refreshClicks・refreshEngagement・upsert/ピーク算出ロジックは無改修。★既知の残課題(未対応・要HQ判断)=refreshClicksはcode[導線1/短縮URL]しか毎時更新しておらず、wcode[導線2/作品短縮URL=作品クリック]の毎時フォールバックが無い。よって本対策で72h超行のwcode取得もskipすると、72h超投稿の視聴履歴.作品クリック数はその時点値で凍結し以後伸びない(codeは毎時refreshClicksで更新継続するのに対しwcodeだけ非対称に恒久停止)。初速KPIの前提(古い投稿のクリック増分は僅少)から実害は小さいと判断し今回は据え置くが、正確性優先ならrefreshClicksへwcode毎時更新を追加する別対応が要る(今回未実装・スコープ外・要判断)。以下は前版=2026-09-04B(画像表示不良の診断をサーバへ自動着地=doPostに op=imgdiag を新設[モドリッチ依頼REQ-research-room-f67a6c602b・Step1]。?imgdiag=1の計測層[core/img-diag.js]が溜めた判定を、実際に詰まり[stalled]/未出があった時またはimgdiag=1の時に sendBeacon で GAS へ自動送信し、シート「画像診断ログ」へ1行append[受信時刻/セッション/契機/UA/URL/要約/判定/詰まりcid/ダンプ]。Chamiのクリップボード貼付を要件から外す=「人が貼らないと読めない診断は診断じゃない」への恒久対策。SpreadsheetApp書き込みのみ=urlfetch枠非依存[枠枯渇でも必ず着地]・追記のみ=破壊面ゼロ・画像実体は扱わない[CID/状態/タイミングのみ]。以下は前版=2026-09-04A(競合_日次の17日凍結[2026-08-18〜]を総量設計で根治=取得をGAS urlfetch枠から外しPC側yt-dlp収集へ移設[方向2・モドリッチ依頼REQ-research-room-de08ad55fc]。真因は本体snapshotStats[5分毎]+refreshClicks[毎時]がGASプロジェクト全体のUrlFetchApp日次枠2万を夜通し食い尽くし04:00の競合ジョブ[自身は約30fetchと軽い]が枯渇例外でsnapped=0=競合側ロジックでは回復不可(前版の診断/回帰ガードはこの真因を確定しただけで凍結は解けなかった)。対策=読み口 action=comp_daily_pending[追跡窓内windowVids{videoId,channelId}とwatch{channelId,uploads}を返す・SpreadsheetApp読み取りのみ=urlfetch非依存]と書き口 op=comp_daily_write[PCがyt-dlpで取ったdaily{views/likes/comments}を競合_日次へappend+新着videosを台帳upsert+競合_日次ステータスへpc_writeback行=SpreadsheetApp書き込みのみ=枠枯渇でも必ず着地]を新設。GAS 04:00トリガーは残置[枠が空いた日のフォールバック。comp_statusは末尾行採用=PC成功が最新で緑]。既存タブ/列/挙動は不変・追記のみ=破壊面ゼロ・過去の日次は消さない[欠測8/19〜9/03は欠けたまま]。PC側=scripts/comp_daily.py[YouTube APIキー不要]。以下は前版=2026-08-29A(競合日次フリーズ(2026-08-18で11日停止)の真因を実測で確定+回帰ガード[C-038/AD研究室モドリッチ依頼]。真因=GASプロジェクト全体のUrlFetchApp日次枠の枯渇(yt_probe実測 err="1日にサービスurlfetchを実行した回数が多すぎます")=runCompetitorDailyが04:41に走ってもytVideosStats_の全fetchが例外で落ちsnapped=0→11日凍結。従来ytVideosStats_のcatch(e){}が枠枯渇の実例外を握り潰しnoteは「urlfetch/APIキー/quota要確認」の3択どまりで確定不能だった。回帰ガード=ytVideosStats_に診断diagを追加しfetchErr/lastHttp/quotaCapped/attemptedを持ち帰り、runCompetitorDailyのnoteへ確定カテゴリ(URLFETCH_QUOTA_EXHAUSTED/NO_API_KEY/COMP_QUOTA_CAP到達/YT_HTTP_xxx)で載せる=競合_日次ステータスシート(urlfetch非依存で必ず着地)に取得段の不発が"配送成功(08:00 push緑)とは別の面"で確定表示される=silent green貫通。データ安全=空時は既存スナップを消さずappendのみ(if(drows.length))で不変。★恒久回復(=新スナップが実際に載る)には本体snapshotStats(5分毎に全履歴投稿のクリックをworkerClicks_で取得=数万fetch/日)+refreshClicks(毎時200行×2ch=9600/日)の消費過多を削らねばならず、これはChamiのクリック更新頻度に触れる=別途承認要でChamiへ提案中(競合ジョブ単独では回復不可)。コード.gsは触っていない(=live 8-27Aをそのまま維持しGAS_VERSIONのみバンプ)、変更はgas/競合.gsのみ。以下は前版=2026-08-27A(①再生成Drive名から末尾ハッシュタグ群を除外し従来ルールで生成。②通常編集では導線2の既存値と意図的な空欄を保持し勝手に最新ドメインへ変更しない。③platform(x/bsky)を中継・同期後も保持し再読込でXへ戻さない。以下は前版=2026-08-24A(runCompetitorDaily の ok 判定を修正=snapped==0を一括でYT API失敗扱いしていたのを、windowVids.length===0(追跡窓に動画がまだ無い=新規登録直後等の正常系)と、windowVids>0なのにsnapped==0(quota切れ等の実際の失敗)を分離。前者はok:trueへ戻し、充実処理(チャンネル統計更新・新着discovery)のゲートも同じ判定へ揃えた=前版の誤検知でチャンネル統計更新(非公開登録者数クリア含む)まで巻き込んで打ち切られていた実害を解消(研究室HQ実測=tests/test_competitor_analysis.js赤・2026-08-24)。既存の「YT API実際に空」時の失敗検知(C-041)は維持。以下は前版=2026-08-23I(競合_日次ステータスの本日行を外から読む口 action=comp_status を新設[読み取り専用・書き込み/列追加ゼロ・三笘/モドリッチ依頼2026-08-23]。competitor_daily.pyのPC側集計が本日行の found=false[本日行が無い]/ok!=true[部分失敗]を赤にできる=silent green封じの"読み手"。compStatusToday_がシート「競合_日次ステータス」を末尾から走査し本日(JST)の最新行の{ok,found,at,snapped,windowVids,channels,newVideos,elapsedMs,note,webhook}を返す・未作成/空/本日行無しはfound:falseでfail-open[監視側が構造で赤にできる]。既存の読み取りaction同様ゲート無しGET・SpreadsheetApp読み取りのみ=urlfetch枠非依存。以下は前版=2026-08-23H(競合_日次の自動経路のsilent green封じ=04:00トリガーが runCompetitorDaily() の戻りok:false[snapped==0/例外]を捨てていた穴を塞ぐ[C-038/C-041・AD研究室モドリッチ依頼2026-08-23/B]。トリガーの入口を runCompetitorDailyWatched へ差し替え[setupTrigger]、①実行結果を毎回シート「競合_日次ステータス」へ1行append[SpreadsheetApp書き込み=urlfetch枠に依存しない=枠枯渇=今回の凍結原因でも必ず着地。PC側日次集計はこの行のok=false/本日行欠で赤にできる]、②ok:false時のみ prop COMP_ALERT_WEBHOOK へbest-effort通知[urlfetch使用=枠枯渇時は送れない=fail-open。その時は①が正]。手動口 comp_daily_now は従来どおり runCompetitorDaily() を直接呼びJSON返し=挙動不変。追記のみ・既存タブ/列/挙動は不変=破壊面ゼロ。★反映後 admin_setup でトリガー再設定要[入口関数名の変更をGASへ効かせるため]。以下は前版=2026-08-23G(action=teian_decisions の日時整形を修正=Sheetsが日時文字列をDate値へ格上げするとgetDisplayValuesでもlocale長形式(Sun Aug 23 2026…)になり前版Fの「yyyy-MM-dd」化が効いていなかった。読み取り側でDate値だけ Utilities.formatDate(Asia/Tokyo,yyyy-MM-dd HH:mm:ss)へ整形=既存行/新規行とも軍議エコーが綺麗(冪等/列/fail-openは不変)。以下は前版=2026-08-23F(action=teian_decisions の値取得を getValues→getDisplayValues へ変更したが日時セルはlocale長形式のままで無効だった版。以下は前版=2026-08-23E(提案決定ページのエコー経路B用に、決定シート「提案決定」を外から読む口 action=teian_decisions を新設(読み取り専用・書き込み/列追加ゼロ・イージス研究室GL発注)。?since_row=<N>で行番号>Nの行だけ返し(冪等はシート行番号1本)、省略時1・1回50行上限・ヘッダは実物のシート1行目から読む(将来列増でも監視側が壊れない)。シート未作成時は ok:true,lastRow:0,rows:[] のfail-open(決定0件で監視が警報しない)。既存の読み取りaction(stats_tail等)同様ゲート無しGET。以下は前版=2026-08-23D(提案決定ページ(改修α・C-018最小スライス)の決定を受ける口 op=teian_decide をdoPostに新設。「この作品・この④コメント・chで投稿決定」をシート「提案決定」へ1行追記(冪等ヘッダ・追記のみ=破壊面ゼロ)し、prop_GUNJI_WEBHOOK が設定されていればDiscord webhookで軍議へエコー(fail-open=送信失敗でも記録は成功で返す/未設定なら discord:skipped_no_webhook)。SHARED_SECRET のゲート下・writeRecord_経路とは独立・既存シート/列/挙動は不変。以下は前版=2026-08-23C(データ整合修正の口 action=fix_records_0823 を新設(軍議REQ-gunji-5213170ea8 #3・読み取り既定/&apply=1でだけ書込み)。task=untest=記録シートのpost_idに漏れた"test-"接頭辞を剥がす(剥がした先が既存と衝突する行は触らずcollisionで報告・post_id以外は不変)。task=merge_dup=同一ytid&同一cidで2行に割れた記録を「統合」(keep=題名有る方へdropの非空セルだけを埋め=keepの既存値は上書きせず、そのうえでdrop行を1本だけ削除。ytid不一致 or cid不一致ならapplyを弾くfail-safe)。列/ヘッダ/既存挙動は不変・破壊面はmerge_dropのdrop行1本のみ。以下は前版=2026-08-23B(時点記録(30分〜72h初速)の欠測を恒久是正=captureTimepoints_の記録窓が固定9分([min,min+9])でしか埋まらず、その9分にsnapshotStats(5分毎)が回らない/6分上限で殺される/YouTube URL結線が遅れると当該バケットが永久欠測していた(実測=Chami手動投稿の水木金4本がb720だけ残りb30〜b360全欠)。対策=窓を「次バケット境界の直前まで」へ拡張し、そのバケット区間に1回でもデータの揃ったスナップが走れば記録=取りこぼしに強くする。実経過分は列5に保存済でage正規化は下流で保たれる。列/ヘッダ/既存挙動不変。以下は前版=2026-08-23A(競合日次の凍結を根治=runCompetitorDailyがGASの6分実行上限を超え毎回タイムアウト[実測comp_daily_now=361sでGoogleのタイムアウトHTML]→日次append[競合_日次シート]へ到達できず2026-08-18で凍結していた[PC側集計は同じ8/18を再集計しつつ緑を返すsilent green]。対策=最優先の"既存窓動画の統計スナップ→日次append"を関数先頭へ移し必ず先に済ませ、チャンネル統計更新・新着discoveryは時間予算[4分]内のbest-effortへ後置。snapped==0[YT統計が空=urlfetch日次上限/APIキー/quota]は握り潰さずok:falseで返す[C-041/AD研究室モドリッチ依頼2026-08-23]。以下は前版=2026-08-18C(wcode_probe に実click着地テスト live[] を追加=同じworkerClicks_で導線1(code)/導線2(wcode)を両方叩き、col7埋まる/col8空の非対称がworker応答差かwriter差かを切り分け。以下は前版=2026-08-18B(action=wcode_probe を新設(読み取り専用・書き込み無し)=視聴履歴.作品クリック数が0/1204で未着地の枝判定。snapshotStatsのwrite-set(recs=vid必須＋vidで先頭dedup)を厳密再現し、導線2(作品短縮URL=wcode)がvid有り行で起きるか(枝A=writer取りこぼし)/vid無し行中心か(枝B=構造的に載らない)を実データで返す。決め手=recs_dedup_with_wcode(dedup生存行のうちwcode保持数)/vids_wcode_dropped_by_dedup(同一vidの他行にwcode有りだが先頭行が空=dedupが落とした数)/wcodes_only_novid。列追加無し・既存挙動不変。以下は前版=2026-08-18A(action=backfill_probe を新設=「後埋まり列」(ピーク値/クリック数/いいね/リポスト等、改修後N時間で毎時トリガーが実データで初めて埋める列)の実データ着地プローブ(読み取り専用)。各列の非空行数と最終更新時刻を返し、改善提案部門の Z2運用ツール(b面)が「直したと言った後、実データが本当に埋まったか」を外から突き合わせられる口=型《実物着地》の読取口。書き込み無し・列追加無し・既存挙動不変。作成時プリフライトは scripts/check_backfill_assert.mjs(CI門)が登録簿 backfill_columns.json と照合。以下は前版=2026-08-16D(ピーク記録が埋まらない核心の一因を根治=ytViews_のバッチに不正ID(SALE擬似vid"SALE"/"SALE:code"のコロン混入・壊れURL由来)が1つ混ざるとvideos.listがバッチ全体を400で弾き、同バッチの実在vidの再生数まで丸ごと欠落していた(実測DIAG viewsKeys=0=views全滅→ピーク算出の材料ゼロ)。対策=各バッチをYouTube動画IDの形/^[A-Za-z0-9_-]{11}$/に一致する物だけへ絞ってから叩く(不正IDは1つも渡さない)。注:診断中に当プロジェクトのUrlFetchApp日次クォータを消費したため反映直後は一時的にfetchが例外になり得る(回復後にトリガーが自動で埋める)。C2〜C5の一時診断(DIAG/yt_probe)は確認後に除去予定。以下は前版=2026-08-16C5(一時診断=yt_probeがytViews_のバッチ経路を実物で通す[実vid+SALE:コロンid]。以下は前版=2026-08-16C4(一時診断=ytViews_の各バッチのHTTP応答をDIAG.ytに記録(viewsが全nullの真因=どのバッチが400かの特定)。以下は前版=2026-08-16C3(一時診断=yt_probe追加。YT_API_KEYの有無とYouTube Data APIの実HTTP応答を返す(viewsが全nullの切り分け)。以下は前版=2026-08-16C2(一時診断=snapshot_nowがpeakUpdatesの内訳counts[recs/views非null/prev/hrs範囲内/consider呼数]を返す。ピークが0のままの切り分け用・確認後に除去。以下は前版=2026-08-16C(ピーク永続化が実行終端に間に合っていなかった=16Bの時間予算(日時2分+クリック4分)だと本体upsertループの後にあるピーク書き込みへ6分内に到達できず、スナップ行は書けてもピークは0のままだった(実測23:25の便)。配分を前詰め(日時90秒+クリック通算3分)+本体upsert/ピーク算出ループ自体も通算5分で頭打ち=打ち切っても溜めたピークは必ず永続化へ抜ける。以下は前版=2026-08-16B(ピーク記録が埋まらない"現"真因=snapshotStatsがGASの6分実行制限を超えて毎回時間切れ→Googleがトリガーを自動停止し2026-08-15 19:51Zを最後にスナップ完全停止していた[実測]。膨張源は①投稿日時のYouTube公開時刻バックフィル(dateFix・08-15Aで追加=全履歴行をsetValue)②全コードのクリック取得(1コードずつ+80ms待機)。恒久対策=重い2ループを時間予算で頭打ち[dateFix2分/クリック通算4分]にし必ず書込み・ピーク算出へ到達=機構で6分を超えさせない。打ち切り分は冪等で次回続行・数回で定常。反映後 admin_setup でトリガー再設定要。以下は前版=2026-08-16A(ピーク記録の全滅を根治[Chami再発指摘=ランキングのピーク窓が常に空]。真因=snapshotStatsのprevByVid構築が記録日時セルを生文字列前提でDate.parse[String(Date)は"Sat Aug 16 2026…"形式のため先頭空白のT置換で常にNaN]→tms=0→considerPeak_が一度も呼ばれずピーク記録シートが0行のまま[deltasはymd_正規化済みで生存=ピークだけ全滅]。2026-08-06/08-11の下限調整では直らなかった理由もこれ[rateの手前で死んでいた]。対策①=記録日時をDate/文字列両対応で正規化[instanceof Date→getTime/formatDate]。対策②恒久=増加ゼロ区間でも未記録の作品へ0(件/時)を種まき[SALE擬似行除く]=低速動画も必ず行が付き、シート0行=即異常と構造で判別可能に。列順/PEAK_HEADERS/冪等移行/v・c・w3系統は不変。以下は前版=2026-08-15B(外部短縮の新規発番を完全撤去。フロントで独自link-worker URLが無い時はpostUrlを共有URLへ保存し、da.gd APIを呼ばない。再発防止テストで外部短縮API文字列の復活を禁止。以下は前版=2026-08-15A(投稿日時をYouTube公開時刻へ自動収束[Chami依頼REQ-2f4520e4d7=投稿日は投稿完了ボタンを押した時刻でなくYouTubeの実公開時刻を参照する]。真因=投稿完了と同時のupsert(pushItemToGas_)がpostedAtを送らずwriteRecord_の新規行フォールバックが投稿日時列にnow[押下時刻]を確定していた。対策=5分毎snapshotStatsに相乗り。ytViews_に第2引数pubOutを追加しpart=statistics,snippetでpublishedAtも回収[追加クォータ0=既存videos.list呼び出しのpart拡張のみ]、snapshotStatsが各CH行の投稿日時列を走査しpublishedAtと±60秒超ズレ or 空欄の行だけsetValue[new Date]で修正、修正シートをsortByDate_で1回整列[冪等=一致行は無操作]。新規投稿は公開後最大5分で自動修正・既存の誤記録もYouTube URL持ち全行を自動バックフィル・列追加なし・フロント無改修。以下は前版=2026-08-11B(全部のピークが要る[Chami2026-08-11]=導線2(作品クリック=ピンク矢印 w)の最大瞬間風速ピークをGASが記録するよう追加。従来ピーク記録シートは再生(v)と導線1(c)の2種だけで作品クリックのピークは未対応=ランキングのピーク窓でピンクを選ぶと「GAS側の対応待ち」の注記で空だった。PEAK_HEADERSへ「作品クリックピーク(件/時)」「作品クリックピーク時間帯」を末尾追加(既存のv/c/更新日時の列位置は不変=timepointSheet_と同じ冪等ヘッダ移行で旧シートも無停止で拡張・旧行のw列は空欄)、snapshotStatsのconsiderPeak_をw対応(prevByVidに作品クリック累計wclicksを持たせ区間伸び率を採用・下限0.06h上限6hはv/cと共通)、computePeaks_がwRate/wWinを返す→フロントyt-clicks.jsがr.peakW/peakWWinで描画・c2PeakUnsupportedの分岐と注記を撤去。過去分は遡及不可(サーバーに作品クリックの区間履歴が無いため)・以後のsnapshotから積む。以下は前版=2026-08-11A(ピークを早く記録=snapshotStatsを10分毎→5分毎に短縮し、最大瞬間風速の採用下限も0.12h[7.2分]→0.06h[3.6分]を対で更新[間隔だけ縮めて下限を残すと5分区間が常に下限割れでピークが1件も記録されない=2026-08-06と同型の事故になるため必ず対で変える]。公開直後からピークが早く埋まる・時点記録も5分毎で「バケット+0〜5分」に確定=旧10分毎より早い[Chami「ピークを早く記録できるように」2026-08-11]。★反映後は ?action=admin_setup でトリガー再設定が要る[間隔変更をGASへ効かせるため]。以下は前版=2026-08-08A(⑤時点記録シートに導線2[作品クリック=ピンク矢印 w]を追加。従来は再生数[v]と導線1[c]だけをスナップし導線2はGAS未記録=端末を公開1時間などの時点に開いていない投稿はピンク矢印バケットが永久に空だった[Chami「ピンクのクリックがちゃんと集計されてない」2026-08-08]。captureTimepoints_がwcodeの開封数をw列[TIMEPOINT_HEADERS末尾に追加・timepointSheet_で冪等移行=旧行は空欄]へ記録、computeTimepoints_がwを返す→ランキングの各時間窓でピンクもサーバー記録から埋まる[端末未起動でも]。過去分は遡及不可[サーバーに履歴が無いため]・以後の投稿から有効。以下は前版=2026-08-06A: ランキング全窓の記録漏れを修理。①ピーク=snapshotStatsを10分毎(0.167h)に変えた際、最大瞬間風速の採用下限が旧0.2h(12分)のまま=区間が常に下限割れで1件も記録されず「ピークが何も表示されない」だった→下限を0.12h(7.2分)へ。②時点記録の窓に12時間/48時間を追加(TIME_BUCKETS/LAB)=旧実装はこの2窓をGAS未記録にして端末スナップ頼み=常態的に空だった。8窓(30分/1h/2h/6h/12h/24h/48h/72h)すべてサーバー記録に統一。Chami依頼2026-08-06。以下は前版=2026-08-02A: action=deltas の応答に timepoints を追加＝時点記録シート[公開起点の30分/1h/2h/6h/24h/72h・再生数と導線1クリック]をvideoId単位で返す。ランキングの窓表示が過去動画のサーバー記録も出せるようにする[端末未起動でも記録済みの分]。Chami依頼2026-08-02。以下は前版=2026-07-31F: ②action=fix_date_from_yt[指定post_idのYouTube動画URL→Data APIのpublishedAtを投稿日時へ・dry-run既定/&apply=1/&pids=,区切り]。／①action=restore_from_bk[バックアップシートに在って本シートに無いpost_id行を列名マッピングで復元・dry-run既定/&apply=1・&pid=で1行限定・post_id重複スキップ・投稿日時で整列]。／③F列ジャンルを投稿時に作品URLから自動記載[同人/Books/データ・fanzaGenre_]＋既存行の一括補完 action=genre_fill[dry-run既定/&apply=1/&force=1]。⑦Q列返信と⑤R列フォロー増を廃止=HEADERS40から除去・refreshEngagementの返信書き込み停止・新規行の返信0初期化停止・CLEANUP_COLUMNSへ追加[?action=cleanup_columnsで既存シートから削除]。Chami依頼2026-07-31①〜⑦のうち③⑤⑦。／B=action=click_agg/rebuild_click_agg を新設＝作品別クリック合算。X凍結→Bluesky退避で同一作品でも投稿ごとに導線1短縮URLが変わりクリックが複数行に割れる問題を、作品cid[=作品URL正規化]でまとめ直し1作品=1行の合計クリックにする。専用タブ「作品別クリック合算」へ非破壊出力・毎時refreshClicks末尾で積み直し[手番ゼロ]。分析部門依頼2026-07-31。／A=action=posted_cids を新設＝候補タブ✔pillの権威索引。記録_ch1/ch2の全行を{c:作品cid,w:作品URL,v:post_id,t:投稿日}へ4列射影し、c/w両空行は除外、post_idのacc-prefixがそのシートのchと矛盾する行は除外[fail-open]。読み取り専用。フロントがローカル短縮URL履歴でなくシートで投稿済み判定→端末分断の偽陰性/誤バケットの偽陽性を構造的に解消。J(computeDeltas_のクリック実数積み直し)を継続。設計書_投稿済み判定の権威ソース化_2026-07-31 S1・Chami依頼2026-07-31))))))))))))))';
 
 // 統一列順の正。(2026-07-12・⑥)両chシートの列の左右順をこの並びに固定する。(?action=reorder_headers / admin_setupが適用)
 //   ここに無い列(手動追加など)は自然に末尾へ寄る。GASは列名で書くため機能は列順に依存しないが、
@@ -129,7 +129,9 @@ function openSS_() {
   if (!ss) throw new Error('スプレッドシートが見つかりません(SHEET_ID を設定してください)');
   return ss;
 }
-function sheetName_(channel) { return (channel === 'acc2') ? '宵桜艶帖' : '月詠み'; }
+function sheetName_(channel) { return (channel === 'acc2') ? '宵桜艶帖' : (channel === 'acc3') ? '癒やし倉庫' : '月詠み'; }
+// シート名→ch。(sheetName_ の逆。未知名は従来どおり acc1)
+function sheetCh_(name) { return (name === '宵桜艶帖') ? 'acc2' : (name === '癒やし倉庫') ? 'acc3' : 'acc1'; }
 function getChannelSheet_(channel) {
   var ss = openSS_(); var name = sheetName_(channel);
   var sh = ss.getSheetByName(name);
@@ -724,6 +726,7 @@ function doGet(e) {
   if (p.action === 'comp_ensure_tabs') { try { return jsonOut_(compEnsureTabs_()); } catch (err) { return jsonOut_({ ok: false, error: String(err) }); } }  // 全タブ確保(手動記録タブ含む)
   if (p.action === 'comp_frame_pending') { try { return jsonOut_(compFramePending_(p.limit)); } catch (err) { return jsonOut_({ ok: false, error: String(err) }); } }  // 代表フレーム未取得のShort一覧(PC側スクレイパが引く)
   if (p.action === 'comp_status') { try { return jsonOut_(compStatusToday_()); } catch (err) { return jsonOut_({ ok: false, found: false, error: String(err) }); } }  // 競合_日次ステータスの本日行(silent green封じの読み手・PC側日次赤判定用・読み取り専用)
+  if (p.action === 'comp_daily_pending') { try { return jsonOut_(compDailyPending_()); } catch (err) { return jsonOut_({ ok: false, error: String(err) }); } }  // 【方向2】PC側yt-dlp日次収集の対象(追跡窓内windowVids＋watchチャンネル)。読み取り専用=urlfetch非依存
   // ★一時診断(2026-08-16): snapshotStatsのviewsが全null(DIAG viewsKeys=0)の切り分け=キー有無とYT APIの実HTTP応答を返す。読み取りのみ。確認後に除去。
   if (p.action === 'yt_probe') {
     var _yk = ytApiKey_(); var _pi = { keyLen: _yk.length, vid: p.vid || '1uag-mo-kGQ' };
@@ -849,7 +852,7 @@ function postedCidsOne_(channel) {
     if (!c && !w) continue; // c/w両空=投稿済み判定に使えない行は出さない
     var pid = pidCol ? String(row[pidCol - 1] || '') : '';
     // サーバー側prefixガード：背骨ID(post_id)の acc-prefix がこのシートのchと矛盾する行は除外(fail-open：prefix無し行は通す)。
-    var pm = pid.match(/^(?:test-)?(acc[12])-/);
+    var pm = pid.match(/^(?:test-)?(acc[123])-/);
     if (pm && pm[1] !== channel) continue;
     var t = '';
     if (dCol) { try { var d = row[dCol - 1]; if (d) t = Utilities.formatDate(new Date(d), tz, 'yyyy-MM-dd'); } catch (e) {} }
@@ -857,12 +860,13 @@ function postedCidsOne_(channel) {
   }
   return out;
 }
-// channel='acc1'|'acc2'|'both'(既定 both)。指定ch以外は空配列で返す。
+// channel='acc1'|'acc2'|'acc3'|'both'(既定 both=3ch全部)。指定ch以外は空配列で返す。
 function postedCids_(channel) {
   var ch = channel || 'both';
-  var res = { ok: true, version: GAS_VERSION, at: new Date().toISOString(), acc1: [], acc2: [] };
+  var res = { ok: true, version: GAS_VERSION, at: new Date().toISOString(), acc1: [], acc2: [], acc3: [] };
   if (ch === 'acc1' || ch === 'both') res.acc1 = postedCidsOne_('acc1');
   if (ch === 'acc2' || ch === 'both') res.acc2 = postedCidsOne_('acc2');
+  if (ch === 'acc3' || ch === 'both') res.acc3 = postedCidsOne_('acc3');
   return res;
 }
 // 1件削除。(行の内容をクリア＝再利用可。行は詰めない＝集計の整合を保つ)
@@ -1245,6 +1249,8 @@ function doPost(e) {
     if (need && body.secret !== need) return jsonOut_({ ok: false, error: 'bad_secret' });
     // 提案決定ページ(改修α): 「この作品・この④コメントで決定」を記録し、軍議へエコー(webhook設定時)。
     if (body.op === 'teian_decide') return teianDecide_(body);
+    // 画像表示不良の診断ログをサーバへ自動着地(モドリッチ依頼REQ-research-room-f67a6c602b・Step1)。SpreadsheetApp書き込みのみ=urlfetch枠非依存・追記のみ=破壊面ゼロ。
+    if (body.op === 'imgdiag') return jsonOut_(imgDiagWrite_(body));
     if (body.type === 'reserve') return handleReserve_(body);
     // 投稿履歴の一括同期。(フロントの投稿履歴を正とし、ID・投稿日時・キャラ等をまとめて upsert)
     if (body.op === 'sync_history') return syncHistory_(body.channel || 'acc1', body.items || []);
@@ -1256,6 +1262,8 @@ function doPost(e) {
     if (body.op === 'settings_push') return settingsPush_(body.blob || '', body.updatedAt || '', body.device || '');
     // 競合の代表フレーム結果を書き戻す(PC側スクレイパから。焼き込み文字/コマ要約を既存行へ追記のみ)
     if (body.op === 'comp_frame_write') return jsonOut_(compFrameWriteback_(body.items || []));
+    // 【方向2】PC側yt-dlpが取った競合日次スナップを書き戻す(競合_日次へappend＋新着を台帳upsert・SpreadsheetApp書き込みのみ=urlfetch枠非依存)
+    if (body.op === 'comp_daily_write') return jsonOut_(compDailyWriteback_(body));
     // テストモード：シートには一切書かない。(Bluesky実投稿はフロント側で実施)
     if (body.testMode === true || body.testMode === 'true') return jsonOut_({ ok: true, testMode: true });
     // ウィザード経路はyoutube_url必須。他経路(無人予約/リビルド/矯正等)は素通り。(★writeRecord_中に置くな=裁定C)
@@ -1288,6 +1296,43 @@ function doPost(e) {
     return jsonOut_({ ok: false, error: String(err) });
   } finally {
     try { lock.releaseLock(); } catch (e) {}
+  }
+}
+
+// 画像表示不良の診断をサーバへ残す(モドリッチ依頼REQ-research-room-f67a6c602b・Step1)。
+//   ?imgdiag=1 の計測層(core/img-diag.js)がリロード越しに溜めた判定を、Chamiのクリップボード貼付に頼らず
+//   サーバ側へ自動着地させる=「人が貼らないと読めない診断は診断じゃない」(共通規律§3)への恒久対策。
+//   SpreadsheetApp書き込みのみ=UrlFetchApp枠に依存しない(枠枯渇でも必ず着地)。追記のみ=破壊面ゼロ。
+//   画像実体は一切扱わない(CID・状態・タイミングのみ=機微情報なし・C-041とも無関係)。
+function imgDiagWrite_(body) {
+  try {
+    var ss = openSS_();
+    var name = '画像診断ログ';
+    var sh = ss.getSheetByName(name);
+    if (!sh) {
+      sh = ss.insertSheet(name);
+      sh.appendRow(['受信時刻', 'セッション', '契機', '端末(UA)', 'URL', '要約', '判定', '詰まりcid', 'ダンプ']);
+    }
+    var v = body.verdict || {};
+    var stall = Array.isArray(v.stall) ? v.stall.join(', ') : String(v.stall || '');
+    var pendLen = (v.pend && v.pend.length) || 0, stallLen = (v.stall && v.stall.length) || 0;
+    var judge = '表示OK=' + (v.ok || 0) + ' 未出=' + (pendLen + stallLen) +
+                '(読込中=' + pendLen + ' 詰まり=' + stallLen + ') 確認済0枚=' + (v.miss || 0) +
+                ' なし=' + (v.none || 0) + ' 総数=' + (v.total || 0);
+    sh.appendRow([
+      new Date(),
+      String(body.sid || '').slice(0, 40),
+      String(body.reason || '').slice(0, 30),
+      String(body.ua || '').slice(0, 300),
+      String(body.url || '').slice(0, 300),
+      String(body.summary || '').slice(0, 500),
+      judge,
+      stall.slice(0, 1000),
+      String(body.dump || '').slice(0, 45000)   // セル上限5万字に余裕を持たせる
+    ]);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
   }
 }
 
@@ -1393,7 +1438,7 @@ function writeRecord_(channel, f) {
   // T10: 背骨ID(videoId)接頭辞が channel と矛盾するなら、正しいチャンネルへリダイレクト。(拒否でなく＝データ喪失なし)
   //   クライアント側にバグ/旧キャッシュがあっても、宵桜タブに acc1-… の誤行を作らせない最終防壁。
   //   move_row は writeRecord_ を通らないため影響なし。test- 接頭辞も考慮。
-  var _pm = String(f.videoId || '').match(/^(?:test-)?(acc[12])-/);
+  var _pm = String(f.videoId || '').match(/^(?:test-)?(acc[123])-/);
   if (_pm && _pm[1] !== channel) channel = _pm[1];
   // 短縮URLはフロントの独自link-workerが生成した計測キーだけを採る。
   // 生成できない時は外部短縮へ逃がさず、共有URL列に生の投稿URLを残す(リンクは生存・計測不能を隠さない)。
@@ -1624,6 +1669,7 @@ var SHORT_WORKER_URL = 'https://r2.trustsignalbot.workers.dev';
 var SHORT_WORKER_HOSTS = [
   'https://5mgl.com',                                 // acc1(月詠み)・現行
   'https://yoz2.com',                                 // acc2(宵桜艶帖)・現行
+  'https://xdgh3.com',                                // acc3(癒やし倉庫)・2026-10-11〜(フロント URL_BY_ACCT.acc3 と揃える)
   'https://r2.trustsignalbot.workers.dev',            // 旧(現在も生存)
   'https://go5-short.trustsignalbot.workers.dev'      // 最旧
 ];
@@ -1687,14 +1733,15 @@ function refreshClicks() {
 // (STATS/videoId層に依存しない＝YouTube動画を伴わないBluesky単独投稿でも拾える)。
 function clicksByWork_(channel) {
   var pick = (channel === 'acc1' || channel === '月詠み') ? ['月詠み']
-           : (channel === 'acc2' || channel === '宵桜艶帖') ? ['宵桜艶帖'] : CH_SHEETS.slice();
+           : (channel === 'acc2' || channel === '宵桜艶帖') ? ['宵桜艶帖']
+           : (channel === 'acc3' || channel === '癒やし倉庫') ? ['癒やし倉庫'] : CH_SHEETS.slice();
   var agg = {};
   pick.forEach(function (name) {
     var ss = openSS_(); var sh = ss.getSheetByName(name); if (!sh) return;
     var map = headerMap_(sh); var last = sh.getLastRow(); if (last < 2) return;
     var clickCol = map[clickColName_(map)];
     var wuCol = map['作品URL'], cidCol = map['作品cid'], tCol = map['題名(コメント)'], sCol = map['短縮URL'];
-    var ch = (name === '宵桜艶帖') ? 'acc2' : 'acc1';
+    var ch = sheetCh_(name);
     var rows = sh.getRange(2, 1, last - 1, sh.getLastColumn()).getValues();
     rows.forEach(function (row) {
       var wu  = wuCol  ? String(row[wuCol - 1]  || '') : '';
@@ -1723,7 +1770,7 @@ function rebuildClickAggSheet_() {
   var now = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'Asia/Tokyo', 'yyyy-MM-dd HH:mm');
   var list = clicksByWork_('both'), rows = [header];
   list.forEach(function (r) {
-    rows.push([r.channel === 'acc2' ? '宵桜艶帖' : '月詠み', r.title, r.key, r.workUrl, r.clicks, r.links, r.posts, now]);
+    rows.push([sheetName_(r.channel), r.title, r.key, r.workUrl, r.clicks, r.links, r.posts, now]);
   });
   sh.getRange(1, 1, rows.length, header.length).setValues(rows);
   return list.length;
@@ -1836,7 +1883,7 @@ function ytViews_(ids, pubOut, diag) {
 // 名前付きセールURLの短縮コードをアカウント別に保存する。(フロント action=sale_reg から)
 //   コードは [0-9A-Za-z] のみ許可(短縮コードの形)。最大30件。snapshotStats がこれを読んで各コードを日次スナップ。
 function saleReg_(acc, saleJson) {
-  acc = (acc === 'acc2') ? 'acc2' : 'acc1';
+  acc = (acc === 'acc2' || acc === 'acc3') ? acc : 'acc1';
   var arr = [];
   try { arr = JSON.parse(saleJson || '[]'); } catch (e) { return { ok: false, error: 'bad_json' }; }
   if (!Array.isArray(arr)) return { ok: false, error: 'not_array' };
@@ -1870,7 +1917,7 @@ function snapshotStats() {
     var ss = openSS_(); var sh = ss.getSheetByName(name); if (!sh) return;
     var map = headerMap_(sh); var last = sh.getLastRow(); if (last < 2) return;
     var pidc = map['post_id'], ytc = map['YouTube動画URL'], sc = map['短縮URL'], dc = map['投稿日時'], wsc = map['作品短縮URL'];
-    var chKey = (name === '宵桜艶帖') ? 'acc2' : 'acc1';
+    var chKey = sheetCh_(name);
     var vals = sh.getRange(2, 1, last - 1, sh.getLastColumn()).getValues();
     vals.forEach(function (row, ri) {
       var vid = ytc ? ytIdFromUrl_(row[ytc - 1]) : '';
@@ -1883,7 +1930,7 @@ function snapshotStats() {
       // 投稿日時をYouTube公開時刻へ直す対象(vidとdc列がある行のみ・pmsは空欄でも0で保持し埋め対象にする)。
       if (vid && dc) dateFix.push({ sh: sh, dc: dc, row: ri + 2, vid: vid, pms: pms });
       if (!vid) return;
-      recs.push({ channel: chKey, post_id: pidc ? String(row[pidc - 1] || '') : '', vid: vid, code: code, wcode: wcode });
+      recs.push({ channel: chKey, post_id: pidc ? String(row[pidc - 1] || '') : '', vid: vid, code: code, wcode: wcode, postedAtMs: pms });
     });
   });
   if (!recs.length && !tpRecs.length) return;
@@ -1897,7 +1944,7 @@ function snapshotStats() {
   // 名前付きセールURL(夏セール等)も各コードを個別スナップ→フロントで名前別に今日/昨日/週を出す。(Chami依頼2026-07-29)
   //   コードはフロントが action=sale_reg で登録(アカウント別プロパティ)。vid='SALE:'+code で個別行にする。
   var saleSeen = { JrziR: 1 };
-  ['acc1', 'acc2'].forEach(function (a) {
+  ['acc1', 'acc2', 'acc3'].forEach(function (a) {
     var arr = []; try { arr = JSON.parse(prop_('SALE_CODES_' + a) || '[]'); } catch (e) { arr = []; }
     if (!Array.isArray(arr)) return;
     arr.forEach(function (c) {
@@ -1929,9 +1976,16 @@ function snapshotStats() {
     fixedSheets.forEach(function (f) { try { sortByDate_(f.sh, f.dc); } catch (e) {} });
   })();
   var clickByCode = {};
-  // 導線1(短縮URL)＋導線2(作品短縮URL)の両コードのクリックをまとめて取得。(同一コードは1回)
+  // ★UrlFetchApp日次枠対策(2026-09-05・HQ Go=comp_urlfetch_measure.md §削り案 L25-28)。
+  //   snapshotStatsは5分毎(288回/日)に全投稿のクリックを取り直しており、これが日次消費の支配項だった。
+  //   公開から72h以内の「新しい投稿」だけ5分毎に取り直し、それより古い投稿は毎時 refreshClicks に委ねる
+  //   (5分間隔そのものは変えない=初速KPIバケットの粒度は維持。窓外行は単にこの回のfetchをskipするだけで
+  //   冪等・データは失わない)。SALE擬似行(postedAtMsが無い)は投稿ではない定額の少数コードなので窓の対象外
+  //   =常に取得する。
+  var CLICK_WINDOW_MS = 72 * 3600 * 1000;
   recs.concat(tpRecs).forEach(function (r) {
     if (Date.now() - RUN_T0 > BUDGET_CLICKS_MS) return; // ★予算超過後はクリック取得を打ち切る(未取得コードは次回続行)。views/ピークは下で必ず書く=関数は必ず完走する
+    if (r.postedAtMs && (Date.now() - r.postedAtMs) > CLICK_WINDOW_MS) return; // ★72h超の投稿はこの回のクリック取得をskip(codeは毎時refreshClicksが引き継ぐ)
     if (r.code && clickByCode[r.code] === undefined) { clickByCode[r.code] = workerClicks_(r.code); Utilities.sleep(80); }
     if (r.wcode && clickByCode[r.wcode] === undefined) { clickByCode[r.wcode] = workerClicks_(r.wcode); Utilities.sleep(80); }
   });
@@ -2419,11 +2473,11 @@ function runReservations() {
 // ★channel別の資格情報(BSKY_HANDLE_ACC1/_ACC2 等)を優先。無ければ従来のBSKY_HANDLE/PWにフォールバック。
 //   これで無人予約が「予約したアカウントとは別のアカウントで実投稿される」取り違えを防ぐ。
 function bskyCreds_(channel) {
-  var suf = channel === 'acc2' ? '_ACC2' : '_ACC1';
+  var suf = channel === 'acc2' ? '_ACC2' : channel === 'acc3' ? '_ACC3' : '_ACC1';
   var h = prop_('BSKY_HANDLE' + suf), p = prop_('BSKY_APP_PW' + suf);
   if (h && p) return { handle: h, pw: p, scoped: true };
-  var otherSuf = channel === 'acc2' ? '_ACC1' : '_ACC2';
-  var otherScopedSet = !!(prop_('BSKY_HANDLE' + otherSuf) && prop_('BSKY_APP_PW' + otherSuf));
+  // 他chのどれか1つでも per-account 資格が在れば移行中扱い=要求chの資格が無ければ誤アカウント投稿を避けて中止。
+  var otherScopedSet = ['_ACC1', '_ACC2', '_ACC3'].some(function (o) { return o !== suf && !!(prop_('BSKY_HANDLE' + o) && prop_('BSKY_APP_PW' + o)); });
   return { handle: prop_('BSKY_HANDLE'), pw: prop_('BSKY_APP_PW'), scoped: false, otherScopedSet: otherScopedSet };
 }
 function bskyPost_(text, imageBlob, channel) {
@@ -2432,7 +2486,7 @@ function bskyPost_(text, imageBlob, channel) {
   var handle = cr.handle, pw = cr.pw;
   // 片方だけ per-account 資格が設定済み＝移行中。要求chの資格が無ければ誤アカウント投稿を避けて中止。
   //   (per-account 資格が全く無い純レガシーは従来通り共有BSKY_HANDLE/PWで投稿＝後方互換)
-  if (!cr.scoped && cr.otherScopedSet) throw new Error(channel + ' の資格情報(BSKY_HANDLE_' + (channel === 'acc2' ? 'ACC2' : 'ACC1') + ' / BSKY_APP_PW_' + (channel === 'acc2' ? 'ACC2' : 'ACC1') + ')が未設定のため中止(誤アカウント投稿防止)');
+  if (!cr.scoped && cr.otherScopedSet) throw new Error(channel + ' の資格情報(BSKY_HANDLE_' + String(channel).toUpperCase() + ' / BSKY_APP_PW_' + String(channel).toUpperCase() + ')が未設定のため中止(誤アカウント投稿防止)');
   if (!handle || !pw) throw new Error('BSKY_HANDLE / BSKY_APP_PW 未設定');
   var svc = 'https://bsky.social';
   var s = JSON.parse(UrlFetchApp.fetch(svc + '/xrpc/com.atproto.server.createSession', {
