@@ -869,6 +869,15 @@
     if (load('disc_urls_seeded__' + acc) === '1') return;
     save('disc_urls_seeded__' + acc, '1');
     if (discUrlsLoad_().length) return; // 既に何か登録済みなら何もしない
+    // ★恒久対策(2026-10-12 Chami報告・既定のセールページ削除後の再出現): disc_urls_seeded__<acc> は
+    //   sync対象外(core/storage-keys.js)＝端末ごとに1回しか立たない。だから新端末/再ログイン直後は
+    //   このフラグが無く、bsky_discount_urls__<acc>(sync対象)がまだ同期で届いていない間は [] に見える。
+    //   その隙に seed(id='seed-'+acc, at=Date.now())を作ると、core/sync.js の applyTombstone は
+    //   「at > 削除ts なら意図的な再追加とみなして残す」規則(テンプレ帳と同型)のため、過去に削除した
+    //   墓標(bsky_discount_del__<acc>)より新しい at で必ず墓標を乗り越えて全端末へ復活していた。
+    //   → 既にこのidへ削除墓標が立っているなら「意図的な削除」と確定しているので、再シードしない。
+    var delMap; try { delMap = JSON.parse(localStorage.getItem(discDelKey_()) || '{}') || {}; } catch (e) { delMap = {}; }
+    if (delMap && delMap['seed-' + acc] != null) return; // 過去に削除済み＝再シードしない(復活バグの恒久対策)
     var seed = { id: 'seed-' + acc, name: '既定のセールページ', url: DISCOUNT_LIST_URL, at: Date.now() };
     discUrlsSave_([seed]);
     if (!discSelectedId_()) discSetSelectedId_(seed.id);
