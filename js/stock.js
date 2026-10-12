@@ -3367,6 +3367,16 @@
         (saved.bskyWorkShortUrl ? '<br>Bluesky作品リンク：' + esc(saved.bskyWorkShortUrl) : '');
     } else st.textContent = '';
   }
+  // 子(返信)の取りこぼしを後から出し直せた時(bluesky.js の bsky_pending_reply 台帳)=ドラフトと投稿履歴へ書き戻す
+  //   (Chami 2026-10-13 msg 1559263050572369951「リプライができてない」)。
+  window.addEventListener('go5:bsky-reply-resumed', function (ev) {
+    var d = ev && ev.detail, job = d && d.job, reply = d && d.reply;
+    if (!job || job.kind !== 'draft' || !job.draftId || !reply) return;
+    mergeDraftPost_(job.draftId, { bskyParentUrl: job.parentUrl, bskyReplyUrl: reply.postUrl });
+    var meta = null; try { loadMeta().forEach(function (m) { if (m.id === job.draftId) meta = m; }); } catch (e) {}
+    if (meta) autoRecordBskyHistory_(meta);
+    if (_modalMeta && _modalMeta.id === job.draftId) renderBskyStatus_(loadDraftPost_(job.draftId));
+  });
   function postDraftBsky_(btn) {
     var meta = _modalMeta; if (!meta) return;
     var st = $('draftBskyStatus');
@@ -3381,7 +3391,7 @@
     btn.disabled = true; say('投稿中…(親→3〜10秒待機→返信)');
     var imgP = (_draftImg.id === meta.id && _draftImg.blob) ? Promise.resolve(_draftImg.blob) : resolveSrcImageBlob_(meta.id);
     imgP.catch(function () { return null; }).then(function (blob) {
-      return window.Go5DraftBskyThread({ account: meta.account || 'acc1', parentText: parentText, workLink: aff, imageBlob: blob || null });
+      return window.Go5DraftBskyThread({ account: meta.account || 'acc1', parentText: parentText, workLink: aff, imageBlob: blob || null, draftId: meta.id });
     }).then(function (r) {
       mergeDraftPost_(meta.id, { bskyParentUrl: r.parentUrl, bskyReplyUrl: r.replyUrl, bskyWorkShortUrl: r.bskyWorkShortUrl, bskyParentShortUrl: r.parentShortUrl });
       if (_modalMeta === meta) { setDescUrlSlot_(r.parentShortUrl || r.parentUrl); saveDraftPost_(); }
@@ -3394,7 +3404,8 @@
       var known = { 'no-creds': '⚙設定でこのchのBlueskyハンドルとアプリパスワードを入れてください。',
                     'parent-too-long': '親の本文(作品リンク行を除く)が300文字を超えています。短くしてください。',
                     'empty-parent': '親投稿の本文(画像の上の欄)が空です。', 'no-work-link': 'このドラフトに作品URLがありません。',
-                    'no-core': '投稿モジュール未読込。ページを再読み込みしてください。' };
+                    'no-core': '投稿モジュール未読込。ページを再読み込みしてください。',
+                    'reply-pending': '親は投稿できたけど、返信(作品リンク)が失敗しました。15秒後に自動で返信だけ出し直します。画面を閉じても、次にアプリを開いた時に出します。' };
       var msg = known[m] || esc(window.Go5FriendlyBskyError ? window.Go5FriendlyBskyError(m) : m);
       say('⚠️ 投稿できませんでした：<br>' + msg);
     }).then(function () { btn.disabled = false; });

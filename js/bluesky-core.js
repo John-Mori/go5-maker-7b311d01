@@ -263,10 +263,27 @@
       var rkey = String(res.uri || '').split('/').pop();
       var postUrl = (sess.handle && rkey) ? ('https://bsky.app/profile/' + sess.handle + '/post/' + rkey) : '';
       var parentOut = { uri: res.uri, cid: res.cid, handle: sess.handle, rkey: rkey, postUrl: postUrl };
+      // ★親が出た瞬間に呼び出し側へ知らせる=待ちの間にタブが落ちても(iOSはアプリ切替でタブを捨てる)、
+      //   呼び出し側が「子が未投稿の親」を台帳へ残し、次に開いた時に子だけ出し直せる(Chami 2026-10-13 msg 1559263050572369951)。
+      if (typeof o.onParentPosted === 'function') { try { o.onParentPosted(parentOut, delayMs); } catch (e) {} }
       return new Promise(function (resolve) { setTimeout(resolve, delayMs); }).then(function () { return parentOut; });
     }).then(function (parentOut) {
-      var replyRef = { root: { uri: parentOut.uri, cid: parentOut.cid }, parent: { uri: parentOut.uri, cid: parentOut.cid } };
-      var replyUploads = replyBlobs.length
+      return postReplyWithSession_(service, sess, parentOut, replyText, replyBlobs).then(function (reply) {
+        return { parent: parentOut, reply: reply, delayMs: delayMs };
+      }, function (err) {
+        // 子だけ失敗=親の在りかを付けて返す(呼び出し側が「親は出た・子は再送待ち」と言えるように)。
+        var e = (err instanceof Error) ? err : new Error(String(err));
+        e.parentOut = parentOut;
+        throw e;
+      });
+    });
+  }
+
+  // 既にある親へ子(リプライ)を1本付ける。1回だけ2秒あけて再試行する(一過性の通信失敗で子が消えないように)。
+  function postReplyWithSession_(service, sess, parentOut, replyText, replyBlobs) {
+    var replyRef = { root: { uri: parentOut.uri, cid: parentOut.cid }, parent: { uri: parentOut.uri, cid: parentOut.cid } };
+    function once() {
+      var replyUploads = (replyBlobs && replyBlobs.length)
         ? Promise.all(replyBlobs.slice(0, 4).map(function (b) { return uploadBlob(service, sess.accessJwt, b); }))
         : Promise.resolve([]);
       return replyUploads.then(function (ups) {
@@ -276,11 +293,29 @@
         //   ここで渡しても無視される=全投稿フロー共通の既存仕様に揃える(新規にalt表示機構を作らない)。
         if (replyImageRefs.length) replyPost.imageRefs = replyImageRefs;
         return createPost(service, sess, replyPost);
-      }).then(function (res2) {
-        var rkey2 = String(res2.uri || '').split('/').pop();
-        var postUrl2 = (sess.handle && rkey2) ? ('https://bsky.app/profile/' + sess.handle + '/post/' + rkey2) : '';
-        return { parent: parentOut, reply: { uri: res2.uri, cid: res2.cid, handle: sess.handle, rkey: rkey2, postUrl: postUrl2 }, delayMs: delayMs };
       });
+    }
+    return once().catch(function () {
+      return new Promise(function (resolve) { setTimeout(resolve, 2000); }).then(once);
+    }).then(function (res2) {
+      var rkey2 = String(res2.uri || '').split('/').pop();
+      var postUrl2 = (sess.handle && rkey2) ? ('https://bsky.app/profile/' + sess.handle + '/post/' + rkey2) : '';
+      return { uri: res2.uri, cid: res2.cid, handle: sess.handle, rkey: rkey2, postUrl: postUrl2 };
+    });
+  }
+
+  /**
+   * 子(リプライ)だけを既存の親へ出す。待ちの途中でタブが落ちた親の続きを出す口。
+   * o = { identifier, appPassword, parent:{uri,cid}, replyText, replyImageBlob }
+   * @returns Promise<{uri,cid,handle,rkey,postUrl}>
+   */
+  function blueskyPostReply(o) {
+    o = o || {};
+    var service = o.service || DEFAULT_SERVICE;
+    var ident = String(o.identifier || '').trim().replace(/^@/, '');
+    var replyBlobs = (o.replyImageBlobs || []).concat(o.replyImageBlob ? [o.replyImageBlob] : []).filter(Boolean);
+    return createSession(service, ident, o.appPassword).then(function (sess) {
+      return postReplyWithSession_(service, sess, o.parent || {}, String(o.replyText || ''), replyBlobs);
     });
   }
 
@@ -610,6 +645,7 @@
     detectFacets: detectFacets,
     blueskyPostRaw: blueskyPostRaw,
     blueskyPostThread: blueskyPostThread,
+    blueskyPostReply: blueskyPostReply,
     blueskyVerify: blueskyVerify,
     buildDiscountCacheKey: buildDiscountCacheKey,
     resolvePromoTemplate: resolvePromoTemplate

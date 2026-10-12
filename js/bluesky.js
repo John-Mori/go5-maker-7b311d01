@@ -2063,6 +2063,74 @@
     _replyImgBlobCache = fetch(BSKY_REPLY_IMG_SRC).then(function (r) { return r.blob(); }).catch(function () { return null; });
     return _replyImgBlobCache;
   }
+  // ★子(リプライ)の取りこぼし台帳(Chami 2026-10-13 msg 1559263050572369951「リプライができてない」)。
+  //   親を出した瞬間に「この親へ子を出す」を端末へ書き、子が出たら消す。待ちの間にアプリを切り替えて
+  //   iOSがタブを捨てても、次に開いた時/画面へ戻った時に子だけ出し直す。出す前に公開APIで親へ自分の返信が
+  //   既に付いていないかを見る=二重の子を作らない。資格情報は台帳へ書かない(ch名だけ・実行時に設定から読む)。
+  var BSKY_PENDING_KEY = 'bsky_pending_reply';
+  var BSKY_PENDING_MAX_AGE = 24 * 3600e3, BSKY_PENDING_MAX_TRIES = 5;
+  var _bskyReplyInflight = {};
+  function loadPendingReplies_() { try { var a = JSON.parse(localStorage.getItem(BSKY_PENDING_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
+  function savePendingReplies_(a) { try { localStorage.setItem(BSKY_PENDING_KEY, JSON.stringify(a)); } catch (e) {} }
+  function addPendingReply_(job) { var a = loadPendingReplies_().filter(function (j) { return j.parentUri !== job.parentUri; }); a.push(job); savePendingReplies_(a); }
+  function dropPendingReply_(parentUri) { savePendingReplies_(loadPendingReplies_().filter(function (j) { return j.parentUri !== parentUri; })); }
+  function pendingJobOf_(parentOut, acc, replyText, delayMs, extra) {
+    var j = { parentUri: parentOut.uri, parentCid: parentOut.cid, parentUrl: parentOut.postUrl || '', handle: parentOut.handle || '',
+              acc: acc, replyText: replyText, at: Date.now(), dueAt: Date.now() + (delayMs || 0), tries: 0 };
+    for (var k in (extra || {})) j[k] = extra[k];
+    return j;
+  }
+  // 親へ既に自分の返信が付いているか(公開API・ログイン不要)。分からない時は false=出す側へ倒す。
+  function replyAlreadyThere_(job) {
+    var u = 'https://public.api.bsky.app/xrpc/app.bsky.feed.getPostThread?depth=1&uri=' + encodeURIComponent(job.parentUri);
+    return fetch(u).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+      var reps = (d && d.thread && d.thread.replies) || [];
+      for (var i = 0; i < reps.length; i++) {
+        var p = reps[i] && reps[i].post;
+        if (p && p.author && job.handle && p.author.handle === job.handle) {
+          var rk = String(p.uri || '').split('/').pop();
+          return { uri: p.uri, cid: p.cid, handle: p.author.handle, rkey: rk, postUrl: 'https://bsky.app/profile/' + p.author.handle + '/post/' + rk };
+        }
+      }
+      return null;
+    }).catch(function () { return null; });
+  }
+  function resumePendingReplies_() {
+    if (!window.BlueskyCore || !window.BlueskyCore.blueskyPostReply) return Promise.resolve(0);
+    var now = Date.now(), done = 0;
+    var jobs = loadPendingReplies_().filter(function (j) { return j && j.parentUri && (now - (j.at || 0)) < BSKY_PENDING_MAX_AGE && (j.tries || 0) < BSKY_PENDING_MAX_TRIES; });
+    savePendingReplies_(jobs);
+    var due = jobs.filter(function (j) { return j.dueAt <= now && !_bskyReplyInflight[j.parentUri]; });
+    return due.reduce(function (p, job) {
+      return p.then(function () {
+        _bskyReplyInflight[job.parentUri] = 1;
+        return replyAlreadyThere_(job).then(function (found) {
+          if (found) return found;
+          var handle = '', appPw = '';
+          try { handle = handleOfAcct_(job.acc); appPw = (localStorage.getItem(pkOf_('bsky_app_pw', job.acc)) || '').trim(); } catch (e) {}
+          if (!handle || !appPw) throw new Error('no-creds');
+          return replyImageBlob_().then(function (replyBlob) {
+            return window.BlueskyCore.blueskyPostReply({ identifier: handle, appPassword: appPw, parent: { uri: job.parentUri, cid: job.parentCid }, replyText: job.replyText, replyImageBlob: replyBlob });
+          });
+        }).then(function (reply) {
+          dropPendingReply_(job.parentUri); done++;
+          try { window.dispatchEvent(new CustomEvent('go5:bsky-reply-resumed', { detail: { job: job, reply: reply } })); } catch (e) {}
+        }, function () {
+          var a = loadPendingReplies_();
+          a.forEach(function (j) { if (j.parentUri === job.parentUri) j.tries = (j.tries || 0) + 1; });
+          savePendingReplies_(a);
+        }).then(function () { delete _bskyReplyInflight[job.parentUri]; });
+      });
+    }, Promise.resolve()).then(function () { return done; });
+  }
+  try { window.Go5ResumeBskyReplies = resumePendingReplies_; } catch (e) {}
+  // 開いた時・画面へ戻った時に取りこぼしを拾う(待ちの途中でアプリを切り替えた時の本命)。
+  setTimeout(resumePendingReplies_, 1500);
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') setTimeout(resumePendingReplies_, 800); });
+  window.addEventListener('pageshow', function () { setTimeout(resumePendingReplies_, 800); });
+  // 同じ画面のまま子だけ失敗した時=少し置いて台帳から出し直す。
+  function retryPendingSoon_() { setTimeout(resumePendingReplies_, 15000); }
+
   // ドラフト投稿一続き(柱分け)：投稿モードから「Bluesky親(画像+本文)→ランダム秒待ち→返信(続きはこちら+画像+作品リンク)」を投げる口。
   //   資格情報はドラフトの所属ch(account)の保存値を読む(今のUIchではない)。値は画面・ログ・戻り値へ出さない。
   //   返信リンクはX側と別コードにする=宛先へ #go5=bsky を付けて短縮(link-workerはドメイン+URLで決定的にコードを作る)。
@@ -2096,14 +2164,20 @@
       return o.imageBlob ? compressFile(o.imageBlob) : null;
     }).then(function (blob) {
       return replyImageBlob_().then(function (replyBlob) {
-        return window.BlueskyCore.blueskyPostThread({ identifier: handle, appPassword: appPw, parentText: parentText, replyText: out.replyText, imageBlob: blob, replyImageBlob: replyBlob });
+        return window.BlueskyCore.blueskyPostThread({ identifier: handle, appPassword: appPw, parentText: parentText, replyText: out.replyText, imageBlob: blob, replyImageBlob: replyBlob,
+          onParentPosted: function (p, ms) { _bskyReplyInflight[p.uri] = 1; addPendingReply_(pendingJobOf_(p, acc, out.replyText, ms, { kind: 'draft', draftId: o.draftId || '' })); } });
       });
     }).then(function (res) {
+      dropPendingReply_(res.parent.uri); delete _bskyReplyInflight[res.parent.uri];
       out.parentUrl = res.parent.postUrl; out.replyUrl = res.reply.postUrl; out.delayMs = res.delayMs || 0;
       return makeShortAndShare(out.parentUrl, { account: acc }).then(function (r) {
         var sv = r && (r.shareUrl || r.shortUrl);
         out.parentShortUrl = sv || out.parentUrl;
       }, function () { out.parentShortUrl = out.parentUrl; });
+    }, function (e) {
+      // 子だけ失敗=親は出ている。台帳に残したまま少し置いて子を出し直す(呼び出し側には reply-pending で伝える)。
+      if (e && e.parentOut) { delete _bskyReplyInflight[e.parentOut.uri]; retryPendingSoon_(); var pe = new Error('reply-pending'); pe.parentUrl = e.parentOut.postUrl; throw pe; }
+      throw e;
     }).then(function () { return out; });
   }
   try { window.Go5DraftBskyThread = draftBskyThread_; } catch (e) {}
@@ -2879,10 +2953,13 @@
           // 手動ツールの返信にも draftBskyThread_ と同じ「続きはこちら」+固定画像を毎回添付する
           //   (Chami「毎回添付」msg 1559121504128471086を字義どおり適用・三笘指示msg 1559132079621672981)。
           return replyImageBlob_().then(function (replyBlob) {
-            return window.BlueskyCore.blueskyPostThread({ identifier: c.handle, appPassword: c.appPw, parentText: parentText, replyText: BSKY_REPLY_TEXT + '\n' + replyUrl, imageBlob: blob, replyImageBlob: replyBlob });
+            var acc0 = acctId();
+            return window.BlueskyCore.blueskyPostThread({ identifier: c.handle, appPassword: c.appPw, parentText: parentText, replyText: BSKY_REPLY_TEXT + '\n' + replyUrl, imageBlob: blob, replyImageBlob: replyBlob,
+              onParentPosted: function (p, ms) { _bskyReplyInflight[p.uri] = 1; addPendingReply_(pendingJobOf_(p, acc0, BSKY_REPLY_TEXT + '\n' + replyUrl, ms, { kind: 'manual' })); } });
           });
         })
         .then(function (res) {
+          dropPendingReply_(res.parent.uri); delete _bskyReplyInflight[res.parent.uri];
           setThreadStatus('✅ 親を投稿 → ' + Math.round(res.delayMs / 1000) + '秒後にリプライへURLを投稿しました。<br>親：<a href="' + res.parent.postUrl + '" target="_blank" rel="noopener">開く</a>／リプ：<a href="' + res.reply.postUrl + '" target="_blank" rel="noopener">開く</a>', true);
           // 子(リプ)の投稿URLを短縮してYouTube説明欄の「(ブルスカ短縮URL)」へ入れる(Chami 2026-10-13 msg 1559249835989925978)。
           //   同時に投稿履歴へ自動で載せる(Chami 2026-10-13 msg 1559255858628534303)=単独投稿と同じ notifyPosted→shortenAndShow
@@ -2890,7 +2967,10 @@
           var ws = ourShortBase(replyUrl) ? { shortUrl: replyUrl, shareUrl: replyUrl } : null;
           notifyPosted(res.reply, parentText + '\n' + replyUrl, String(parentText.split('\n')[0] || ''), acctId(), null, ws);
         })
-        .catch(function (e) { setThreadStatus('⚠️ 投稿に失敗：<br>' + friendlyLoginError(e && e.message ? e.message : e), true); })
+        .catch(function (e) {
+          if (e && e.parentOut) { delete _bskyReplyInflight[e.parentOut.uri]; retryPendingSoon_(); setThreadStatus('⚠️ 親は投稿できましたが、リプライが失敗しました。15秒後に自動でリプライだけ出し直します(画面を閉じても次に開いた時に出します)。', true); return; }
+          setThreadStatus('⚠️ 投稿に失敗：<br>' + friendlyLoginError(e && e.message ? e.message : e), true);
+        })
         .then(function () { els.threadPostBtn.disabled = false; });
     });
   }
