@@ -1409,7 +1409,10 @@
         metas.forEach(function (m) { if (m.id === meta.id) m.videoId = vid; });
         saveMeta(metas);
       }
-      var opts = histOptsOf_(meta, meta.youtubeUrl || '', '', loadDraftPost_(meta.id));
+      // ★説明欄へ入れたBluesky短縮(子>親)を導線1として最初から載せる。旧実装は '' を渡し、
+      //   投稿完了を押すまで白矢印の計測コードが無かった(Chami 2026-10-13 msg 1559338789447409784「概要欄クリックが計測ない」)。
+      var pd0 = loadDraftPost_(meta.id);
+      var opts = histOptsOf_(meta, meta.youtubeUrl || '', bskyDescShortOf_(pd0), pd0);
       opts.autoRecorded = true;
       return window.Go5History.addCompletedPost(opts) || { ok: false, reason: 'unknown' };
     } catch (e) { return { ok: false, reason: 'exception', message: (e && e.message) || String(e) }; }
@@ -3395,6 +3398,7 @@
       var su = (r && (r.shareUrl || r.shortUrl)) || reply.postUrl;
       mergeDraftPost_(job.draftId, { bskyReplyShortUrl: su });
       if (_modalMeta && _modalMeta.id === job.draftId) { setDescUrlSlot_(su); saveDraftPost_(); }
+      if (meta) autoRecordBskyHistory_(meta); // 説明欄の短縮(導線1)を投稿履歴の行へ
     });
   });
   function postDraftBsky_(btn) {

@@ -178,6 +178,15 @@
     var rec = treeStoreLoad_()[treeIdentity_(it, account)];
     return normalizeTreeLinks_(rec && rec.trees);
   }
+  // 表示・集計用: 手入力ツリー＋Bluesky子(返信内の作品リンク=bskyWorkShortUrl)。Bluesky子は自動で足す
+  //   (Chami 2026-10-13 msg 1559338789447409784。旧実装はBluesky側の作品クリックが投稿履歴のどこにも出なかった)。
+  function rowTreesOf_(it, account) {
+    var trees = treeLinksFor_(it, account), bs = String((it && it.bskyWorkShortUrl) || '').trim(), bc = codeOf(bs);
+    if (bc && !trees.some(function (t) { return codeOf(t.shortUrl) === bc; })) {
+      trees = trees.concat([{ id: 'bsky-child', name: 'Bluesky子', postUrl: String(it.bskyReplyUrl || ''), shortUrl: bs }]);
+    }
+    return trees;
+  }
   function saveTreeLinksFor_(it, account, trees) {
     var store = treeStoreLoad_(), key = treeIdentity_(it, account), normalized = normalizeTreeLinks_(trees);
     var before = store[key] && store[key].trees;
@@ -828,6 +837,7 @@
   function renderHealth_() { var el = document.getElementById('measHealth'); if (el) el.innerHTML = healthHtml_(); }
 
   var _clicksAt = 0, _clicksP = null, CLICKS_TTL_MS = 60000;
+  var _clicksTried = {}; // 未取得コードで強制取得した記録(同じコードで何度も叩かない)
   function fetchAllClicks_(force) {
     var w = window.Go5Short;
     if (!w || !w.WORKER_URL || !w.SHARED_SECRET) return Promise.resolve(false);
@@ -1078,7 +1088,7 @@
     return { c1: clicksTotal, c2: wclicks, code: code, wcode: wcode };
   }
   function treeRowsHtml_(it, account) {
-    var trees = treeLinksFor_(it, account);
+    var trees = rowTreesOf_(it, account);
     if (!trees.length) return '';
     var ico = '<img class="emico emico-cursor" src="assets/icons/ic-cursor-pink.png" alt="クリック">';
     return '<div class="vrow-tree-list">' + trees.map(function (t) {
@@ -3114,6 +3124,11 @@
       if (!matched.videoId && vidId) { matched.videoId = vidId; changed = true; }
       if (!matched.ytUrl && ytUrl) { matched.ytUrl = ytUrl; changed = true; }
       if (!matched.shortUrl && shortUrl) { matched.shortUrl = shortUrl; changed = true; }
+      else if (shortUrl && codeOf(shortUrl) && codeOf(shortUrl) !== codeOf(matched.shortUrl || '')) {
+        // 説明欄の短縮が後で差し替わった(親→子など)=どちらのクリックも導線1へ合算する。
+        var _cu = Array.isArray(matched.clickUrls) ? matched.clickUrls.slice() : [];
+        if (!_cu.some(function (u) { return codeOf(u) === codeOf(shortUrl); })) { _cu.push(shortUrl); matched.clickUrls = _cu; changed = true; }
+      }
       // ★復元→再完了/二度押しの完了(=dupe)でも導線2欄を埋める。従来はここでworkUrl/workShortUrlを
       //   一切埋めず・mintも呼ばず return していたため、再完了経路では欄が構造的に永久に空だった(空欄再発の一因)。
       //   空欄のみ非破壊で埋め、意図的クリア(workShortNone)は尊重。r2(計測キー)のみ採用。
@@ -3768,7 +3783,7 @@
     var mergeCodes = [], treeCodes = [];
     items.forEach(function (it) {
       if (Array.isArray(it.mergeUrls)) it.mergeUrls.forEach(function (u) { var c = codeOf(u || ''); if (c) mergeCodes.push(c); });
-      treeLinksFor_(it, chForItem_(it)).forEach(function (t) { var tc = codeOf(t.shortUrl || ''); if (tc) treeCodes.push(tc); });
+      rowTreesOf_(it, chForItem_(it)).forEach(function (t) { var tc = codeOf(t.shortUrl || ''); if (tc) treeCodes.push(tc); });
     });
     var codes = items.map(function (it) { return codeOf(it.shortUrl || ''); })
       .concat(items.map(function (it) { return codeOf(it.workShortUrl || ''); }))
@@ -3780,7 +3795,10 @@
     if (!codes.length && !uniqVids.length) return Promise.resolve(false);
     var jobs = [];
     // クリック数は全コードまとめて1リクエスト(/api/list)。旧: コード毎に /api/stats=N本(無料枠を焼く原因)
-    if (codes.length) jobs.push(fetchAllClicks_(!!force));
+    //   新しく載った短縮(投稿直後の行)がキャッシュに無い時だけ、TTL/30分周期を待たず1回取り直す(「…」張り付き対策)。
+    var fresh = codes.filter(function (c) { return !(c in clicksCache) && !_clicksTried[c]; });
+    fresh.forEach(function (c) { _clicksTried[c] = 1; });
+    if (codes.length) jobs.push(fetchAllClicks_(!!force || fresh.length > 0));
     // D1: YouTube照会は videos.list の上限(50件/回)に合わせて50件ずつ分割。件数が増えても全行を取得する
     //   。(旧実装は先頭50件で silent 打ち切り＝古い投稿/末尾の手動追加から更新が止まっていた)
     //   予約公開判定は「照会したのに応答に無い」を用いるため、queried は全バッチ合算してから一度だけ判定する。
