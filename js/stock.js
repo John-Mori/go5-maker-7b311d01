@@ -3411,7 +3411,7 @@
     btn.disabled = true; say('投稿中…(親→3〜10秒待機→返信)');
     var imgP = (_draftImg.id === meta.id && _draftImg.blob) ? Promise.resolve(_draftImg.blob) : resolveSrcImageBlob_(meta.id);
     imgP.catch(function () { return null; }).then(function (blob) {
-      return window.Go5DraftBskyThread({ account: meta.account || 'acc1', parentText: parentText, workLink: aff, imageBlob: blob || null, draftId: meta.id });
+      return window.Go5DraftBskyThread({ account: meta.account || 'acc1', parentText: parentText, workLink: aff, imageBlob: blob || null, draftId: meta.id, childText: String(($('draftXText') || {}).value || '') });
     }).then(function (r) {
       mergeDraftPost_(meta.id, { bskyParentUrl: r.parentUrl, bskyReplyUrl: r.replyUrl, bskyWorkShortUrl: r.bskyWorkShortUrl, bskyParentShortUrl: r.parentShortUrl, bskyReplyShortUrl: r.replyShortUrl });
       if (_modalMeta === meta) { setDescUrlSlot_(r.replyShortUrl || r.replyUrl || r.parentShortUrl || r.parentUrl); saveDraftPost_(); }

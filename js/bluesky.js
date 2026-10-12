@@ -2061,6 +2061,17 @@
   var BSKY_REPLY_IMG_SRC = 'assets/bsky-reply-continue.jpg';
   var BSKY_REPLY_TEXT = '続きはこちら';
   var _replyImgBlobCache = null; // 同一セッション内の二重fetchを避ける(静的アセットなので毎回fetchする必要がない)
+  // ★返信文=ドラフトの「子の文(返信)」をそのまま使う(空行も書いたとおり)。中のURLだけBluesky用の作品リンクへ差し替える
+  //   (X側の短縮をBlueskyで使うとクリックがXへ計上されるため)。URLが無ければ空行を挟んで末尾へ付ける。
+  //   子の文が空/300字超の時だけ従来の「続きはこちら」+リンク(Chami 2026-10-13 msg 1559290199324762212)。
+  function bskyReplyTextOf_(childText, link) {
+    var t = String(childText || '').replace(/\r\n?/g, '\n').replace(/^\s+|\s+$/g, '');
+    var fallback = BSKY_REPLY_TEXT + '\n' + link;
+    if (!t) return fallback;
+    var out = /https?:\/\/\S+/.test(t) ? t.replace(/https?:\/\/\S+/g, function () { return link; }) : t + '\n\n' + link;
+    return countGraphemes(out) > 300 ? fallback : out;
+  }
+  try { window.Go5BskyReplyTextOf = bskyReplyTextOf_; } catch (e) {}
   function replyImageBlob_() {
     if (_replyImgBlobCache) return _replyImgBlobCache;
     _replyImgBlobCache = fetch(BSKY_REPLY_IMG_SRC).then(function (r) { return r.blob(); }).catch(function () { return null; });
@@ -2160,9 +2171,8 @@
       var sv = r && (r.shareUrl || r.shortUrl);
       return (sv && ourShortBase(sv)) ? sv : aff; // 短縮失敗=生アフィリンク(印なし)で返信=リンクは生かす
     }, function () { return aff; }).then(function (link) {
-      // ★返信文=「続きはこちら」+作品リンク(リンクは既存どおり維持=クリック計測/導線を壊さない)。
-      //   テキスト行の追加であって作品リンクの代替ではない(Chami指示は「リプ欄と一緒に画像を添付」＝画像の義務付け)。
-      out.replyText = BSKY_REPLY_TEXT + '\n' + link;
+      // ★返信文=ドラフトの子の文(リンクだけBluesky用)。子の文が無い時は「続きはこちら」+作品リンク。
+      out.replyText = bskyReplyTextOf_(o.childText, link);
       if (ourShortBase(link)) out.bskyWorkShortUrl = link;
       return o.imageBlob ? compressFile(o.imageBlob) : null;
     }).then(function (blob) {
