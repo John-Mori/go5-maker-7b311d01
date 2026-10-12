@@ -2885,11 +2885,10 @@
         .then(function (res) {
           setThreadStatus('✅ 親を投稿 → ' + Math.round(res.delayMs / 1000) + '秒後にリプライへURLを投稿しました。<br>親：<a href="' + res.parent.postUrl + '" target="_blank" rel="noopener">開く</a>／リプ：<a href="' + res.reply.postUrl + '" target="_blank" rel="noopener">開く</a>', true);
           // 子(リプ)の投稿URLを短縮してYouTube説明欄の「(ブルスカ短縮URL)」へ入れる(Chami 2026-10-13 msg 1559249835989925978)。
-          //   投稿は済んでいるので、短縮の失敗は投稿失敗として出さない(生URLのまま入る)。
-          var replyPostUrl = res.reply.postUrl;
-          makeShortAndShare(replyPostUrl, { account: acctId() }).then(function (r) {
-            setShareOutputs((r && (r.shareUrl || r.shortUrl)) || '', replyPostUrl);
-          }, function () { setShareOutputs('', replyPostUrl); });
+          //   同時に投稿履歴へ自動で載せる(Chami 2026-10-13 msg 1559255858628534303)=単独投稿と同じ notifyPosted→shortenAndShow
+          //   (短縮→説明欄→histAdd)を子の投稿で通す。短縮に失敗しても投稿失敗として出さない(生URLのまま入る)。
+          var ws = ourShortBase(replyUrl) ? { shortUrl: replyUrl, shareUrl: replyUrl } : null;
+          notifyPosted(res.reply, parentText + '\n' + replyUrl, String(parentText.split('\n')[0] || ''), acctId(), null, ws);
         })
         .catch(function (e) { setThreadStatus('⚠️ 投稿に失敗：<br>' + friendlyLoginError(e && e.message ? e.message : e), true); })
         .then(function () { els.threadPostBtn.disabled = false; });

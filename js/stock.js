@@ -1349,6 +1349,58 @@
     setTimeout(function () { URL.revokeObjectURL(url); }, 3000);
   }
 
+  // 投稿履歴(Go5History.addCompletedPost)へ渡す引数。投稿完了とBluesky投稿時の自動記録で同じ材料を使う。
+  function histOptsOf_(meta, ytUrl, shortUrl, pd) {
+    pd = pd || {};
+    // ★投稿完了の時点で拾い直す：作成時スナップ(meta)が空でも、動画作成タブのライブ値から
+    //   ジャンル・作品URLを補う(Chami指摘2026-07-31 msg1532858293440090163)。meta優先・空の時だけライブ補完。
+    var liveAttrs = readMovieAttrs_();
+    var histAttrs = (meta.attrs && Object.keys(meta.attrs).length) ? meta.attrs
+      : (Object.keys(liveAttrs).length ? liveAttrs : null);
+    var liveWorkUrl = (($('movieWorkUrl') || {}).value || '').trim();
+    var liveAffi = (($('movieWorkAffi') || {}).value || '').trim();
+    var histWorkUrl = meta.workUrl || meta.affiliateUrl || liveWorkUrl || liveAffi || '';
+    var ps = pd.pubSlot;
+    // 予約投稿でカレンダー枠を選んでいたら、その枠の公開予定時刻を投稿履歴の「投稿予定」時刻として渡す(DEF#4)。
+    var plannedAt = (pd.pubMode === 'scheduled' && ps && ps.scheduled_at) ? String(ps.scheduled_at).replace(' ', 'T') : '';
+    return {
+      account: meta.account || 'acc1',
+      ytUrl: ytUrl || '',
+      shortUrl: shortUrl || '',
+      title: meta.title || '',
+      workUrl: histWorkUrl, // 導線2の自動短縮はこのworkUrlから発火する(addCompletedPost内)
+      // ★投稿モーダルで既に発行・保存済みの導線2短縮URL(X本文に実際に貼ったコード)を"値として"渡す。
+      //   これで完了時の非同期再発行(離脱で消える)に頼らず一発で欄が埋まる=空欄の恒久対策(REQ-65c7897f2f他)。
+      workShortUrl: (pd.workShortUrl || '').trim(),
+      workShareUrl: (pd.workShareUrl || '').trim(),
+      // 柱分け：X親/Bluesky親・返信の実URLとBluesky側の作品短縮URL、柱(x/bsky/both)をシートへ渡す。
+      xPostUrl: (pd.xPostUrl || '').trim(),
+      bskyParentUrl: pd.bskyParentUrl || '', bskyReplyUrl: pd.bskyReplyUrl || '', bskyWorkShortUrl: pd.bskyWorkShortUrl || '',
+      pillar: pillarOf_(pd),
+      videoId: meta.videoId || '',
+      scheduledAt: plannedAt, // カレンダー公開枠の予定時刻(予約投稿時のみ・任意)
+      attrs: histAttrs // ジャンルのチェックを引き継ぐ(Chami依頼2026-07-30・空なら投稿完了時のライブ値で補完)
+    };
+  }
+  // Bluesky親+返信を投げた時点で投稿履歴へ自動で1件載せる(Chami 2026-10-13 msg 1559255858628534303)。
+  //   ドラフトは残す(作成履歴への退避は従来どおり投稿完了で)。後の投稿完了は同じ背骨IDの行へYouTube URL等を追記する。
+  //   戻り値は addCompletedPost の結果(ok/dupe/…)。記録の失敗は投稿の失敗ではないので例外は投げない。
+  function autoRecordBskyHistory_(meta) {
+    try {
+      if (!(window.Go5History && typeof window.Go5History.addCompletedPost === 'function')) return { ok: false, reason: 'unavailable' };
+      if (!meta.videoId && window.IdGen && window.IdGen.makeVideoId) {
+        var metas = loadMeta();
+        var vid = window.IdGen.makeVideoId(meta.account || 'acc1', new Date(), {});
+        meta.videoId = vid;
+        metas.forEach(function (m) { if (m.id === meta.id) m.videoId = vid; });
+        saveMeta(metas);
+      }
+      var opts = histOptsOf_(meta, meta.youtubeUrl || '', '', loadDraftPost_(meta.id));
+      opts.autoRecorded = true;
+      return window.Go5History.addCompletedPost(opts) || { ok: false, reason: 'unknown' };
+    } catch (e) { return { ok: false, reason: 'exception', message: (e && e.message) || String(e) }; }
+  }
+
   // ── 投稿完了処理 ──
   function handleCompleteOk_(id, ytUrl, shortUrl) {
     var store = idb();
@@ -1397,19 +1449,9 @@
       metas.forEach(function (m) { if (m.id === id) m.youtubeUrl = ytUrl; });
       saveMeta(metas);
     }
-    // ★投稿完了の時点で拾い直す：作成時スナップ(meta)が空でも、動画作成タブのライブ値から
-    //   ジャンル・作品URLを補う(Chami指摘2026-07-31 msg1532858293440090163)。meta優先・空の時だけライブ補完。
-    var liveAttrs = readMovieAttrs_();
-    var histAttrs = (meta.attrs && Object.keys(meta.attrs).length) ? meta.attrs
-      : (Object.keys(liveAttrs).length ? liveAttrs : null);
-    var liveWorkUrl = (($('movieWorkUrl') || {}).value || '').trim();
-    var liveAffi = (($('movieWorkAffi') || {}).value || '').trim();
-    var histWorkUrl = meta.workUrl || meta.affiliateUrl || liveWorkUrl || liveAffi || '';
     // 公開設定(即時/予約)＋選んだカレンダー公開枠を1回読む(履歴へ渡す予定時刻＆枠書き戻しの両方で使う)。
     var pd = {}; try { pd = JSON.parse(localStorage.getItem('go5_draft_post_' + id) || '{}'); } catch (e2) {}
     var ps = pd.pubSlot;
-    // 予約投稿でカレンダー枠を選んでいたら、その枠の公開予定時刻を投稿履歴の「投稿予定」時刻として渡す(DEF#4)。
-    var plannedAt = (pd.pubMode === 'scheduled' && ps && ps.scheduled_at) ? String(ps.scheduled_at).replace(' ', 'T') : '';
     // ①投稿完了 → 投稿履歴へ1件記録(既存の投稿履歴機構=Go5History)。blobの有無に関わらず必ず実行。
     //   ★戻り値を"正"にする(2026-08-12)。以前は戻り値を捨て、verify_manual を videoId 完全一致で読み直して
     //     診断していたため、videoId無し既存行にYouTube/短縮URL一致で当たった重複を「記録が全て空で拒否」と
@@ -1418,24 +1460,7 @@
     var _res = null;
     // ★addCompletedPost へ渡す引数は1つの変数にまとめる=dupe時に forceNew を足して"同じ引数で"再挿入できるように
     //   する(下の確認ダイアログ経路)。
-    var _hpOpts = {
-      account: meta.account || 'acc1',
-      ytUrl: ytUrl || '',
-      shortUrl: shortUrl || '',
-      title: meta.title || '',
-      workUrl: histWorkUrl, // 導線2の自動短縮はこのworkUrlから発火する(addCompletedPost内)
-      // ★投稿モーダルで既に発行・保存済みの導線2短縮URL(X本文に実際に貼ったコード)を"値として"渡す。
-      //   これで完了時の非同期再発行(離脱で消える)に頼らず一発で欄が埋まる=空欄の恒久対策(REQ-65c7897f2f他)。
-      workShortUrl: (pd.workShortUrl || '').trim(),
-      workShareUrl: (pd.workShareUrl || '').trim(),
-      // 柱分け：X親/Bluesky親・返信の実URLとBluesky側の作品短縮URL、柱(x/bsky/both)をシートへ渡す。
-      xPostUrl: (pd.xPostUrl || '').trim(),
-      bskyParentUrl: pd.bskyParentUrl || '', bskyReplyUrl: pd.bskyReplyUrl || '', bskyWorkShortUrl: pd.bskyWorkShortUrl || '',
-      pillar: pillarOf_(pd),
-      videoId: meta.videoId || '',
-      scheduledAt: plannedAt, // カレンダー公開枠の予定時刻(予約投稿時のみ・任意)
-      attrs: histAttrs // ジャンルのチェックを引き継ぐ(Chami依頼2026-07-30・空なら投稿完了時のライブ値で補完)
-    };
+    var _hpOpts = histOptsOf_(meta, ytUrl, shortUrl, pd);
     try {
       if (window.Go5History && typeof window.Go5History.addCompletedPost === 'function') {
         _res = window.Go5History.addCompletedPost(_hpOpts);
@@ -1448,7 +1473,9 @@
     try {
       var _dacc2 = meta.account || 'acc1';
       if (_res && _res.ok === false) {
-        if (_res.reason === 'dupe') {
+        if (_res.reason === 'dupe' && _res.autoRecorded && _res.matchedBy === 'videoId') {
+          // Bluesky投稿時に自動で載せた同じドラフトの行=重複ではなく追記(YouTube URL等は addCompletedPost が空欄へ埋めた)。
+        } else if (_res.reason === 'dupe') {
           // ★黙って弾かない。「何と重複扱いされたか(既存の題名・背骨ID・そのYouTube URL)」を実物で見せ、
           //   別の新規作品なら forceNew で投稿履歴へ新規追加できる逃げ道を出す(明示操作を黙って捨てない
           //   =沈黙が最悪の事故。REQ 2026-08-15「新規なのにYouTube URL一致で弾かれ履歴に載らない」の恒久対策)。
@@ -3358,6 +3385,9 @@
       mergeDraftPost_(meta.id, { bskyParentUrl: r.parentUrl, bskyReplyUrl: r.replyUrl, bskyWorkShortUrl: r.bskyWorkShortUrl, bskyParentShortUrl: r.parentShortUrl });
       if (_modalMeta === meta) { setDescUrlSlot_(r.parentShortUrl || r.parentUrl); saveDraftPost_(); }
       renderBskyStatus_(loadDraftPost_(meta.id));
+      var hr = autoRecordBskyHistory_(meta);
+      if (st && hr && (hr.ok || hr.reason === 'dupe' || hr.reason === 'persist-pending')) st.innerHTML += '<br>📒 投稿履歴にも載せました(YouTube URLは投稿完了で追記されます)。';
+      else if (st) st.innerHTML += '<br>⚠️ 投稿履歴への自動記録はできませんでした(理由=' + esc((hr && hr.reason) || '不明') + ')。投稿完了を押せば載ります。';
     }).catch(function (e) {
       var m = String(e && e.message ? e.message : e);
       var known = { 'no-creds': '⚙設定でこのchのBlueskyハンドルとアプリパスワードを入れてください。',

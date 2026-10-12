@@ -3125,12 +3125,22 @@
         changed = true;
       }
       if (matched.workShortMintPending === true) { delete matched.workShortMintPending; changed = true; }
+      // Bluesky投稿時の自動記録行(autoRecorded)へ、後の投稿完了でX/柱/予定時刻を空欄だけ追記する。
+      ['xPostUrl', 'bskyParentUrl', 'bskyReplyUrl', 'bskyWorkShortUrl', 'pillar'].forEach(function (k) { if (!matched[k] && opts[k]) { matched[k] = String(opts[k]); changed = true; } });
+      if (!matched.plannedAt && opts.scheduledAt) { matched.plannedAt = opts.scheduledAt; changed = true; }
+      var wasAuto = !!matched.autoRecorded;
+      if (wasAuto && !opts.autoRecorded) { delete matched.autoRecorded; changed = true; } // 投稿完了で確定=以後は通常の行
       if (changed) { try { saveArrFor_(matchedStore, acc, matchedStore === 'verify_manual' ? manual : hist); } catch (e) {} }
+      // 背骨ID一致=シート上も同じ行(videoIdキーのupsert)なので、追記分をシートへも送る。他キー一致は従来どおりローカルのみ。
+      if (changed && matchedBy === 'videoId' && matched.videoId) {
+        if (ytUrl && matchedStore === 'verify_manual' && matched.id) { ymap[matched.id] = ytUrl; try { saveYtMapFor_(acc, ymap); } catch (e) {} }
+        try { pushItemToGas_(matched); } catch (e) {}
+      }
       // 既存(dupe)行は従来値を権威として扱う。空欄も含め、投稿完了の再実行では発番しない。
       if (acc === acct()) refresh();
       // ★衝突相手の"自身のYouTube URL/短縮URL"も返す＝Chamiに「何と重複扱いされたか」を実物で見せ、
       //   別作品なら forceNew で上書きできる材料にする(黙って弾かない・沈黙が最悪の事故)。
-      return { ok: false, reason: 'dupe', matchedBy: matchedBy, existing: { title: matched.title || '', videoId: matched.videoId || '', ts: matched.ts || 0, ytUrl: (itemYt_(ymap, matched) || matched.ytUrl || ''), shortUrl: matched.shortUrl || '' } };
+      return { ok: false, reason: 'dupe', matchedBy: matchedBy, autoRecorded: wasAuto, existing: { title: matched.title || '', videoId: matched.videoId || '', ts: matched.ts || 0, ytUrl: (itemYt_(ymap, matched) || matched.ytUrl || ''), shortUrl: matched.shortUrl || '' } };
     }
     var id = 'm:' + new Date().getTime();
     var entry = { manual: true, id: id, ts: opts.ts || new Date().getTime() };
@@ -3157,6 +3167,7 @@
     //   videoId が来ていればそれ(ドラフトの背骨ID)、無ければ idgen で正規IDを発番＝「今まで通り」の形式へ戻す。
     entry.videoId = vidId; // opts.videoId(背骨ID)優先・無ければ上で発番済み＝post_id列は常に idgen形式で埋まる
     entry.workState = opts.workState || '旧作';
+    if (opts.autoRecorded) entry.autoRecorded = true; // Bluesky投稿時の自動記録(投稿完了前)
     // ドラフト一続き(柱分け)の投稿先URL群。pushItemToGas_ が初回upsertで同じ行へ載せる。
     ['xPostUrl', 'bskyParentUrl', 'bskyReplyUrl', 'bskyWorkShortUrl', 'pillar'].forEach(function (k) { if (opts[k]) entry[k] = String(opts[k]); });
     // カレンダー公開枠の予定時刻(予約投稿)。YouTube APIのpublishAtが返る前でも「投稿予定 時刻」を出せる。

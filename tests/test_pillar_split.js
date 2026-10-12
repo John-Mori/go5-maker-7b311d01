@@ -95,8 +95,9 @@ eq(/replyImageBlob: replyBlob/.test(threadBtnBlock), true, '手動ツールのbl
 
 console.log('--- YouTube説明欄の(ブルスカ短縮URL)を子(リプ)投稿の短縮URLで置換(Chami msg 1559249835989925978) ---');
 eq(/var BSKY_SHORT_PH = '\(ブルスカ短縮URL\)';/.test(bs), true, '目印(ブルスカ短縮URL)の定義');
-eq(/makeShortAndShare\(replyPostUrl, \{ account: acctId\(\) \}\)/.test(threadBtnBlock), true, '手動ツール成功時に子(リプ)の投稿URLを短縮');
-eq(/setShareOutputs\(\(r && \(r\.shareUrl \|\| r\.shortUrl\)\) \|\| '', replyPostUrl\)/.test(threadBtnBlock), true, '短縮結果を説明欄へ流す(失敗時は生URL)');
+// 2026-10-13 投稿履歴の自動記録で、子の短縮→説明欄は notifyPosted→shortenAndShow(→setShareOutputs)経由になった。
+eq(/notifyPosted\(res\.reply,/.test(threadBtnBlock), true, '手動ツール成功時に子(リプ)の投稿を notifyPosted へ(短縮→説明欄→履歴)');
+eq(/if \(!account \|\| account === acctId\(\)\) setShareOutputs\(share, longUrl\);/.test(bs), true, 'shortenAndShow が短縮結果を説明欄へ流す(失敗時は生URL)');
 // putUrlTop を切り出して実際に置換させる
 const pS = bs.indexOf('  function putUrlTop(');
 const pE = bs.indexOf('  function setShareOutputs(');
