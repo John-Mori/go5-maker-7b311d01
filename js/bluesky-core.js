@@ -249,6 +249,9 @@
     var delayMs = Math.round(delayMin + Math.random() * Math.max(0, delayMax - delayMin));
     var sess;
     var blobs = (o.imageBlobs || []).concat(o.imageBlob ? [o.imageBlob] : []).filter(Boolean);
+    // ★リプライ側にも画像を添付できる(2026-10-12 Chami指定・msg 1559121504128471086
+    //   「Blueskyの場合は続きはこちらというリプ欄と一緒にこの画像を毎回添付すること」)。親画像とは別枠。
+    var replyBlobs = (o.replyImageBlobs || []).concat(o.replyImageBlob ? [o.replyImageBlob] : []).filter(Boolean);
     return createSession(service, ident, o.appPassword).then(function (s) {
       sess = s;
       if (!blobs.length) return [];
@@ -263,7 +266,17 @@
       return new Promise(function (resolve) { setTimeout(resolve, delayMs); }).then(function () { return parentOut; });
     }).then(function (parentOut) {
       var replyRef = { root: { uri: parentOut.uri, cid: parentOut.cid }, parent: { uri: parentOut.uri, cid: parentOut.cid } };
-      return createPost(service, sess, { text: replyText, facets: detectFacets(replyText), reply: replyRef }).then(function (res2) {
+      var replyUploads = replyBlobs.length
+        ? Promise.all(replyBlobs.slice(0, 4).map(function (b) { return uploadBlob(service, sess.accessJwt, b); }))
+        : Promise.resolve([]);
+      return replyUploads.then(function (ups) {
+        var replyImageRefs = Array.isArray(ups) ? ups.map(function (u) { return u && u.blob; }).filter(Boolean) : [];
+        var replyPost = { text: replyText, facets: detectFacets(replyText), reply: replyRef };
+        // ★alt は createPost 側が常に空にする(Chami依頼2026-07-18「画像の下に文字が入るのを何も表示しないように」)。
+        //   ここで渡しても無視される=全投稿フロー共通の既存仕様に揃える(新規にalt表示機構を作らない)。
+        if (replyImageRefs.length) replyPost.imageRefs = replyImageRefs;
+        return createPost(service, sess, replyPost);
+      }).then(function (res2) {
         var rkey2 = String(res2.uri || '').split('/').pop();
         var postUrl2 = (sess.handle && rkey2) ? ('https://bsky.app/profile/' + sess.handle + '/post/' + rkey2) : '';
         return { parent: parentOut, reply: { uri: res2.uri, cid: res2.cid, handle: sess.handle, rkey: rkey2, postUrl: postUrl2 }, delayMs: delayMs };
@@ -368,6 +381,22 @@
     var s = String(text == null ? '' : text);
     if (saleLink == null || saleLink === '') return s; // まだ短縮リンクが用意できていなければプレースホルダのまま返す
     return s.replace(new RegExp(fillSrc_(SALE_LINK_SRC), 'g'), function () { return saleLink; });
+  }
+  // ---- X親文＝「投稿本文(固定文)」だけを正にする(2026-10-12 Chami指定・msg 1559121504128471086) ----
+  //   「X投稿は1枚目の投稿本文を参照して。勝手に他から引用したり記憶したままにしない。」
+  //   従来はプレースホルダが無い時にPR行+作品リンク／セール見出し+セールリンクを自動追記していたが、
+  //   これがX親文では「本文に無かった行が増える/古い短縮URLが記憶されたまま出る」の原因になっていた
+  //   (Bluesky親文は既存どおり自動追記を維持＝XとBlueskyは使い分ける。報告はBluesky側への影響を分けて書く)。
+  //   ここでは置換のみ(プレースホルダが無ければ何もしない)。純粋関数・Nodeテスト対象。
+  //   @param {string} fixedText 投稿本文(固定文)の現在値
+  //   @param {{workLink?:string, workShortLink?:string, saleLink?:string}} [opts]
+  //   @returns {string}
+  function composeXParentText(fixedText, opts) {
+    opts = opts || {};
+    var caption = stripAutoBlocks(String(fixedText == null ? '' : fixedText));
+    var out = fillWorkLinkPlaceholder(caption, opts.workShortLink, opts.workLink);
+    out = fillSaleLinkPlaceholder(out, opts.saleLink);
+    return out;
   }
   /**
    * 本文中のプレースホルダ(WORK_LINK_PLACEHOLDER)を実リンクへ置換する。純粋関数。
@@ -567,6 +596,7 @@
     SALE_LINK_PLACEHOLDER: SALE_LINK_PLACEHOLDER,
     fillSaleLinkPlaceholder: fillSaleLinkPlaceholder,
     hasSaleLinkPlaceholder: hasSaleLinkPlaceholder,
+    composeXParentText: composeXParentText,
     shouldSkipDiscSeed: shouldSkipDiscSeed,
     insertHookCta: insertHookCta,
     stripHookCtaLines: stripHookCtaLines,

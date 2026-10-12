@@ -10,7 +10,7 @@
 'use strict';
 
 const assert = require('assert');
-const { buildBlueskyPost, detectFacets, stripAutoBlocks, xWeightedLength, insertHookCta, stripHookCtaLines, HOOK_DEEPEN_LINE, CTA_LINE, WORK_LINK_PLACEHOLDER, fillWorkLinkPlaceholder, hasWorkLinkPlaceholder, SALE_LINK_PLACEHOLDER, fillSaleLinkPlaceholder, hasSaleLinkPlaceholder, resolvePromoTemplate, sanitizeXLinks, shouldSkipDiscSeed } = require('../js/bluesky-core.js');
+const { buildBlueskyPost, detectFacets, stripAutoBlocks, xWeightedLength, insertHookCta, stripHookCtaLines, HOOK_DEEPEN_LINE, CTA_LINE, WORK_LINK_PLACEHOLDER, fillWorkLinkPlaceholder, hasWorkLinkPlaceholder, SALE_LINK_PLACEHOLDER, fillSaleLinkPlaceholder, hasSaleLinkPlaceholder, resolvePromoTemplate, sanitizeXLinks, shouldSkipDiscSeed, composeXParentText } = require('../js/bluesky-core.js');
 
 let passed = 0;
 let failed = 0;
@@ -638,6 +638,43 @@ test('SEED-3: delMapがnull/undefinedでも例外を投げない(false)', functi
 test('SEED-4: アカウント別のidを混同しない(acc3の墓標はacc1の判定に影響しない)', function () {
   assert.strictEqual(shouldSkipDiscSeed({ 'seed-acc3': 1 }, 'seed-acc1'), false);
 });
+
+// ────────────────────────────────────────────────────────────
+// XP-* composeXParentText: X親文＝「投稿本文(固定文)」をプレースホルダ置換のみで正にする
+//   (2026-10-12 Chami指定・msg 1559121504128471086「X投稿は1枚目の投稿本文を参照して。
+//    勝手に他から引用したり記憶したままにしない」)。PR行+作品リンク／セール見出し+セールリンクの
+//    自動追記は行わない(=acc1/acc2/acc3問わず、置換結果以外の行が増えないことを確認する)。
+// ────────────────────────────────────────────────────────────
+test('XP-1: プレースホルダなしの固定文はそのまま(自動追記しない・acc3相当)', function () {
+  const fixed = '今日はこの子が可愛かったね\nまた見てね';
+  const out = composeXParentText(fixed, { workLink: 'https://al.fanza.co.jp/?lurl=x&af_id=acc3' });
+  assert.strictEqual(out, fixed); // PR行+リンクが足されていない
+});
+
+test('XP-2: 作品リンクのプレースホルダだけが置換される(他の行は増えない)', function () {
+  const fixed = '新作できました！\n紹介用短縮リンク\nよろしくね';
+  const out = composeXParentText(fixed, { workShortLink: 'https://5mgl.com/abcd' });
+  assert.strictEqual(out, '新作できました！\nhttps://5mgl.com/abcd\nよろしくね');
+});
+
+test('XP-3: セールプレースホルダだけが置換される(セール見出し行は自動で増えない)', function () {
+  const fixed = '夏の同人祭はこちら\nセール中短縮リンク';
+  const out = composeXParentText(fixed, { saleLink: 'https://5mgl.com/X1iAF' });
+  assert.strictEqual(out, '夏の同人祭はこちら\nhttps://5mgl.com/X1iAF');
+});
+
+test('XP-4: 旧完成形の自動ブロック(PR行/セール見出し行)は剥がされ、剥がした後にも自動追記しない', function () {
+  const fixed = KNOWN_PR_LINES_FOR_TEST() + '\nhttps://al.fanza.co.jp/?lurl=old&af_id=stale\n本文の地の文';
+  const out = composeXParentText(fixed, { workLink: 'https://al.fanza.co.jp/?lurl=new&af_id=fresh' });
+  // ★置換対象のプレースホルダが無いので旧リンクは残したまま(置換は「プレースホルダがある時だけ」)。
+  //   ここでは「新しい作品リンクが末尾に追記されない」ことだけを確認する(auto-append廃止の確認)。
+  assert.ok(out.indexOf('af_id=fresh') < 0, '新リンクが自動追記されていない');
+});
+
+function KNOWN_PR_LINES_FOR_TEST() {
+  // bluesky-core.js の KNOWN_PR_LINES[0](acc1)と同じ文言を使う(exportされていないため直接requireできない)。
+  return '↓詳細はこちらから🎀 #PR #漫画';
+}
 
 // ────────────────────────────────────────────────────────────
 // 結果集計

@@ -1320,34 +1320,26 @@
   // overrideAffLink を渡すと resolveAffLink() の代わりに使う(別作品ロード後の誤リンク防止)
   try {
     window.__go5ComposeXTextForBskyText = function (bskyText, overrideAffLink) {
+      // ★X親文は「投稿本文(固定文)」を正にし、プレースホルダ置換のみ行う(2026-10-12 Chami指定・
+      //   msg 1559121504128471086「X投稿は1枚目の投稿本文を参照して。勝手に他から引用したり記憶したままにしない」)。
+      //   以前はプレースホルダが無い時にPR行+作品リンク／セール見出し+セールリンクを自動追記していたが、
+      //   本文に無かった行がXにだけ増えるため廃止した。Bluesky側(composePostText/renderPreview)は
+      //   既存どおり自動追記を維持する(XとBlueskyで使い分け・Chami同指示)。
       var caption = stripAutoBlocksSafe_(bskyText || '');
       var link = overrideAffLink !== undefined ? overrideAffLink : resolveAffLink();
-      var PH = (window.BlueskyCore && window.BlueskyCore.WORK_LINK_PLACEHOLDER) || '紹介用短縮リンク';
-      var out;
-      if (hasWorkPH_(caption)) {
-        var short = link ? ((workShortCache_.forLink === link) ? workShortCache_.shareUrl : '') : '';
-        out = (window.BlueskyCore && window.BlueskyCore.fillWorkLinkPlaceholder)
-          ? window.BlueskyCore.fillWorkLinkPlaceholder(caption, short, link)
-          : caption;
-      } else {
-        out = (link && caption.indexOf(link) < 0) ? (caption + '\n\n' + PR_LINE_() + '\n' + link) : caption;
-      }
-      if (discountListOn_()) {
-        var dlink = cachedDiscountLink_();
-        var SPH = (window.BlueskyCore && window.BlueskyCore.SALE_LINK_PLACEHOLDER) || 'セール中短縮リンク';
+      var short = link ? ((workShortCache_.forLink === link) ? workShortCache_.shareUrl : '') : '';
+      var dlink = discountListOn_() ? cachedDiscountLink_() : '';
+      // ★置換(のみ)の実体はBlueskyCore.composeXParentText(純粋関数・Nodeテスト対象)に委譲する
+      //   (shouldSkipDiscSeedと同じ作法＝本体はcore関数の薄いラッパーにする)。core未読込時のみ素通し。
+      var out = (window.BlueskyCore && window.BlueskyCore.composeXParentText)
+        ? window.BlueskyCore.composeXParentText(caption, { workShortLink: short, workLink: link, saleLink: dlink })
+        : caption;
+      if (discountListOn_() && hasSalePH_(out) && !dlink) {
         // ★セール短縮リンクが未キャッシュなら発番だけ開始し、出来次第モーダルへ再合成通知(go5-disc-url-changed)。
         //   これが無いと投稿モードでは「(セール紹介短縮用URL)」のプレースホルダが永久に埋まらなかった
         //   (Chami報告2026-08-12②「短縮URLが表示されない」の根治)。ライブ側 composePostText と同じ作法に揃える。
         var _notifyDisc = function () { try { document.dispatchEvent(new CustomEvent('go5-disc-url-changed')); } catch (e) {} };
-        if (hasSalePH_(out)) {
-          if (dlink) out = fillSalePH_(out, dlink); // テンプレ側が位置指定=置換のみ・自動追記しない
-          else ensureDiscountLink_(_notifyDisc);
-        } else {
-          // 本文に同じセール短縮URLが既にある時(https有無どちらでも)は二重に足さない(Chami報告2026-07-31②)。
-          var dbare = String(dlink || '').replace(/^https?:\/\//, '');
-          if (dlink) { if (out.indexOf(dlink) < 0 && (!dbare || out.indexOf(dbare) < 0)) out += '\n\n' + DISCOUNT_LEAD_() + '\n' + dlink; }
-          else ensureDiscountLink_(_notifyDisc);
-        }
+        ensureDiscountLink_(_notifyDisc);
       }
       if (link && out.indexOf(link) >= 0) {
         var shortX = (workShortCache_.forLink === link) ? workShortCache_.shareUrl : '';
@@ -2039,7 +2031,18 @@
   }
   // 投稿履歴タブ(yt-clicks.js)から、過去投稿URLの独自計測リンクを生成するために公開。
   try { window.Go5MakeShort = makeShortAndShare; } catch (e) {}
-  // ドラフト投稿一続き(柱分け)：投稿モードから「Bluesky親(画像+本文)→ランダム秒待ち→返信(作品リンク)」を投げる口。
+  // ★Bluesky返信には「続きはこちら」+この画像を毎回添付する(2026-10-12 Chami指定・msg 1559121504128471086
+  //   「Blueskyの場合は続きはこちらというリプ欄と一緒にこの画像を毎回添付すること」)。全アカウント共通(acc1/2/3)。
+  //   画像は事前に ~950KB(Bluesky blob上限)以下へ静的に圧縮済みの固定アセット(compressFileの実行時圧縮は不要)。
+  var BSKY_REPLY_IMG_SRC = 'assets/bsky-reply-continue.jpg';
+  var BSKY_REPLY_TEXT = '続きはこちら';
+  var _replyImgBlobCache = null; // 同一セッション内の二重fetchを避ける(静的アセットなので毎回fetchする必要がない)
+  function replyImageBlob_() {
+    if (_replyImgBlobCache) return _replyImgBlobCache;
+    _replyImgBlobCache = fetch(BSKY_REPLY_IMG_SRC).then(function (r) { return r.blob(); }).catch(function () { return null; });
+    return _replyImgBlobCache;
+  }
+  // ドラフト投稿一続き(柱分け)：投稿モードから「Bluesky親(画像+本文)→ランダム秒待ち→返信(続きはこちら+画像+作品リンク)」を投げる口。
   //   資格情報はドラフトの所属ch(account)の保存値を読む(今のUIchではない)。値は画面・ログ・戻り値へ出さない。
   //   返信リンクはX側と別コードにする=宛先へ #go5=bsky を付けて短縮(link-workerはドメイン+URLで決定的にコードを作る)。
   //   フラグメントはブラウザがサーバへ送らないので、FANZA側のaf_id・遷移先は変わらない。
@@ -2065,11 +2068,15 @@
       var sv = r && (r.shareUrl || r.shortUrl);
       return (sv && ourShortBase(sv)) ? sv : aff; // 短縮失敗=生アフィリンク(印なし)で返信=リンクは生かす
     }, function () { return aff; }).then(function (link) {
-      out.replyText = link;
+      // ★返信文=「続きはこちら」+作品リンク(リンクは既存どおり維持=クリック計測/導線を壊さない)。
+      //   テキスト行の追加であって作品リンクの代替ではない(Chami指示は「リプ欄と一緒に画像を添付」＝画像の義務付け)。
+      out.replyText = BSKY_REPLY_TEXT + '\n' + link;
       if (ourShortBase(link)) out.bskyWorkShortUrl = link;
       return o.imageBlob ? compressFile(o.imageBlob) : null;
     }).then(function (blob) {
-      return window.BlueskyCore.blueskyPostThread({ identifier: handle, appPassword: appPw, parentText: parentText, replyText: out.replyText, imageBlob: blob });
+      return replyImageBlob_().then(function (replyBlob) {
+        return window.BlueskyCore.blueskyPostThread({ identifier: handle, appPassword: appPw, parentText: parentText, replyText: out.replyText, imageBlob: blob, replyImageBlob: replyBlob });
+      });
     }).then(function (res) {
       out.parentUrl = res.parent.postUrl; out.replyUrl = res.reply.postUrl; out.delayMs = res.delayMs || 0;
       return makeShortAndShare(out.parentUrl, { account: acc }).then(function (r) {

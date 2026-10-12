@@ -3205,15 +3205,11 @@
     if (!m) return;
     var saved = {};
     try { saved = JSON.parse(localStorage.getItem('go5_draft_post_' + meta.id) || '{}'); } catch (e) {}
-    var composedXText;
-    if (saved.xText) {
-      // この投稿を投稿モードで手編集した履歴があるときだけ、その編集を優先(データ喪失を防ぐ)。
-      //   ★空文字('')は「未編集」とみなして再合成する。過去に空で保存されると saved.xText!==undefined が真になり、
-      //     以後ずっと空欄のまま貼れなくなっていた(Chami報告2026-08-02②「X用投稿テキストは空欄」)。
-      composedXText = saved.xText;
-    } else {
-      composedXText = composeXForModal_(meta); // 合成(短縮URL置換)→販促テンプレ解決(%:/¥:・N%/N円)
-    }
+    // ★常に「投稿本文(固定文)」から再合成する(saved.xTextは優先しない・2026-10-12 Chami指定・
+    //   msg 1559121504128471086「勝手に他から引用したり記憶したままにしない」)。
+    //   以前は手編集履歴(saved.xText)を優先してデータ喪失を防いでいたが、これが「前回の内容を記憶したまま
+    //   出てくる」の原因になっていたため廃止した。手編集を残したい場合は毎回「投稿本文」側を編集する運用に変える。
+    var composedXText = composeXForModal_(meta); // 合成(短縮URL置換)→販促テンプレ解決(%:/¥:・N%/N円)
     if (!composedXText) composedXText = masterBody_(meta); // 最後の砦：合成が空でも本文そのままは出す(空欄で貼れない事故の防止)
     $('draftXText').value = composedXText;
     // ①短縮URL置換：この作品のアフィリンクの短縮を発番し、本文に残る生アフィリンク/プレースホルダを短縮へ差し替える。
