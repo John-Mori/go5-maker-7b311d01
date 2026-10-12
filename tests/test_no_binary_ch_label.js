@@ -13,7 +13,7 @@ const hits = [];
 for (const dir of ['js', 'core']) {
   for (const f of fs.readdirSync(path.join(root, dir))) {
     if (!f.endsWith('.js')) continue;
-    fs.readFileSync(path.join(root, dir, f), 'utf8').split(/\r?\n/).forEach((ln, i) => { if (!/^s*///.test(ln) && BIN.test(ln)) hits.push(dir + '/' + f + ':' + (i + 1)); });
+    fs.readFileSync(path.join(root, dir, f), 'utf8').split(/\r?\n/).forEach((ln, i) => { if (!/^\s*\/\//.test(ln) && BIN.test(ln)) hits.push(dir + '/' + f + ':' + (i + 1)); });
   }
 }
 ok(hits.length === 0, 'ch名の二択(acc2→宵桜/他→月詠み)が無い' + (hits.length ? ' → ' + hits.join(', ') : ''));
