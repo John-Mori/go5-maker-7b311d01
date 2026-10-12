@@ -3128,6 +3128,7 @@
       // Bluesky投稿時の自動記録行(autoRecorded)へ、後の投稿完了でX/柱/予定時刻を空欄だけ追記する。
       ['xPostUrl', 'bskyParentUrl', 'bskyReplyUrl', 'bskyWorkShortUrl', 'pillar'].forEach(function (k) { if (!matched[k] && opts[k]) { matched[k] = String(opts[k]); changed = true; } });
       if (!matched.plannedAt && opts.scheduledAt) { matched.plannedAt = opts.scheduledAt; changed = true; }
+      if (!matched.ytTitlePlan && opts.ytTitle) { matched.ytTitlePlan = String(opts.ytTitle).replace(/\n+/g, ' ').trim(); changed = true; }
       var wasAuto = !!matched.autoRecorded;
       if (wasAuto && !opts.autoRecorded) { delete matched.autoRecorded; changed = true; } // 投稿完了で確定=以後は通常の行
       if (changed) { try { saveArrFor_(matchedStore, acc, matchedStore === 'verify_manual' ? manual : hist); } catch (e) {} }
@@ -3168,6 +3169,7 @@
     entry.videoId = vidId; // opts.videoId(背骨ID)優先・無ければ上で発番済み＝post_id列は常に idgen形式で埋まる
     entry.workState = opts.workState || '旧作';
     if (opts.autoRecorded) entry.autoRecorded = true; // Bluesky投稿時の自動記録(投稿完了前)
+    if (opts.ytTitle) entry.ytTitlePlan = String(opts.ytTitle).replace(/\n+/g, ' ').trim(); // ドラフトのYouTube題名=URL自動取得の照合材料
     // ドラフト一続き(柱分け)の投稿先URL群。pushItemToGas_ が初回upsertで同じ行へ載せる。
     ['xPostUrl', 'bskyParentUrl', 'bskyReplyUrl', 'bskyWorkShortUrl', 'pillar'].forEach(function (k) { if (opts[k]) entry[k] = String(opts[k]); });
     // カレンダー公開枠の予定時刻(予約投稿)。YouTube APIのpublishAtが返る前でも「投稿予定 時刻」を出せる。
@@ -3853,6 +3855,115 @@
   function maintDue_() { return (Date.now() - tsGet_('hist_maint_at')) > HIST_MAINT_TTL_MS; }
   function metricsDue_() { return (Date.now() - tsGet_('hist_metrics_at')) > HIST_METRICS_TTL_MS; }
 
+  // ── YouTube URLの自動取得(Chami 2026-10-13 msg 1559259242198737037) ──
+  //   ドラフトでYouTube URLを入れなくても、投稿履歴のURL空欄行へ、そのchの新着アップロードから自動で埋める。
+  //   ch特定=この垢の既存行に入っているYouTube動画のchannelId(yt_meta_cache)の多数決。新着=uploadsプレイリスト
+  //   (APIキー・1回1ユニット)。照合=YouTube題名(ドラフトの題名欄ytTitlePlan or ④コメント)の正規化一致/包含＋
+  //   時刻が行の時刻から前後10日以内。1行に複数候補・1動画に複数行は曖昧なので埋めない(誤結線より空欄を選ぶ)。
+  //   ★APIキーでは予約/非公開の動画はuploadsに出ない=公開された後に埋まる。
+  function ytNormTitle_(s) {
+    var t = String(s || ''); try { t = t.normalize('NFKC'); } catch (e) {}
+    return t.toLowerCase().replace(/#[^\s#]+/g, '').replace(/[^\p{L}\p{N}]/gu, '');
+  }
+  function ytTitleHit_(row, upTitle) {
+    var u = ytNormTitle_(upTitle); if (!u) return false;
+    var cands = [row.ytTitlePlan, row.title].map(ytNormTitle_).filter(function (x) { return x; });
+    for (var i = 0; i < cands.length; i++) {
+      var c = cands[i];
+      if (c === u) return true;
+      var sh = c.length < u.length ? c : u, lg = c.length < u.length ? u : c;
+      if (sh.length >= 8 && lg.indexOf(sh) >= 0) return true;
+    }
+    return false;
+  }
+  var YT_AUTOFILL_WIN_MS = 10 * 86400000;
+  // rows: URL空欄の候補行 / uploads: [{vid,title,at}] / used: 既に何かの行に結線済みの動画ID集合 → [{row, vid}]
+  function matchUploadsToRows_(rows, uploads, used) {
+    var pairs = [];
+    rows.forEach(function (row) {
+      var hits = uploads.filter(function (u) {
+        if (!u.vid || used[u.vid]) return false;
+        if (row.ts && u.at && Math.abs(u.at - row.ts) > YT_AUTOFILL_WIN_MS) return false;
+        return ytTitleHit_(row, u.title);
+      });
+      if (hits.length === 1) pairs.push({ row: row, vid: hits[0].vid });
+    });
+    var cnt = {}; pairs.forEach(function (p) { cnt[p.vid] = (cnt[p.vid] || 0) + 1; });
+    return pairs.filter(function (p) { return cnt[p.vid] === 1; });
+  }
+  var YT_AUTOFILL_TTL_MS = 10 * 60 * 1000;
+  function ytChannelOf_(acc, cb) {
+    var ck = 'yt_channel_id__' + acc;
+    try { var c0 = (localStorage.getItem(ck) || '').trim(); if (/^UC[\w-]{22}$/.test(c0)) { cb(c0); return; } } catch (e) {}
+    var ymap = loadYtMapFor_(acc), vids = [];
+    loadArrFor_('verify_manual', acc).concat(loadArrFor_('short_hist', acc).filter(function (x) { return x && !x.manualOnly; })).forEach(function (x) {
+      if (!x) return; var v = ytIdOf(itemYt_(ymap, x) || x.ytUrl || ''); if (v && vids.indexOf(v) < 0) vids.push(v);
+    });
+    if (!vids.length) { cb(''); return; }
+    fetchChannelIds_(vids.slice(0, 50), function (m) {
+      var votes = {}, best = '', bn = 0;
+      Object.keys(m).forEach(function (v) { var c = m[v]; if (c) votes[c] = (votes[c] || 0) + 1; });
+      Object.keys(votes).forEach(function (c) { if (votes[c] > bn) { bn = votes[c]; best = c; } });
+      // 過半数の時だけ採用(混入行で別chを掴まない)
+      if (best && bn * 2 > Object.keys(m).length) { try { localStorage.setItem(ck, best); } catch (e) {} cb(best); } else cb('');
+    });
+  }
+  function autoFillYtUrls_(acc, force) {
+    var key = apiKey();
+    if (!key) return Promise.resolve(0);
+    var tk = 'yt_autofill_at__' + acc;
+    if (!force && (Date.now() - tsGet_(tk)) < YT_AUTOFILL_TTL_MS) return Promise.resolve(0);
+    var ymap = loadYtMapFor_(acc);
+    var manual = loadArrFor_('verify_manual', acc), hist = loadArrFor_('short_hist', acc);
+    var now = Date.now();
+    var rows = [], bases = [];
+    function pick_(arr, base) {
+      arr.forEach(function (x) {
+        if (!x || x.manualOnly || x.ytAutoNone) return;
+        if (itemYt_(ymap, x) || x.ytUrl) return;
+        if (!x.ts || now - x.ts > 30 * 86400000) return;
+        if (!x.title && !x.ytTitlePlan) return;
+        rows.push(x); bases.push(base);
+      });
+    }
+    pick_(manual, 'verify_manual'); pick_(hist, 'short_hist');
+    if (!rows.length) return Promise.resolve(0);
+    tsSet_(tk, now);
+    return new Promise(function (resolve) { ytChannelOf_(acc, resolve); }).then(function (ch) {
+      if (!ch) return 0;
+      var url = 'https://www.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&maxResults=50&playlistId=UU' + ch.slice(2) + '&key=' + encodeURIComponent(key);
+      return fetch(url).then(function (r) { return r.json(); }).then(function (j) {
+        if (!j || j.error) return 0;
+        var uploads = (j.items || []).map(function (it) {
+          var sn = it.snippet || {}, cd = it.contentDetails || {};
+          var at = Date.parse(cd.videoPublishedAt || sn.publishedAt || '');
+          return { vid: cd.videoId || (sn.resourceId && sn.resourceId.videoId) || '', title: sn.title || '', at: isNaN(at) ? 0 : at };
+        });
+        var used = {};
+        ['acc1', 'acc2', 'acc3'].forEach(function (a) {
+          var m = (a === acc) ? ymap : loadYtMapFor_(a);
+          Object.keys(m).forEach(function (k) { var v = ytIdOf(m[k]); if (v) used[v] = 1; });
+          loadArrFor_('verify_manual', a).concat(loadArrFor_('short_hist', a)).forEach(function (x) { var v = x && ytIdOf(x.ytUrl || ''); if (v) used[v] = 1; });
+        });
+        var pairs = matchUploadsToRows_(rows, uploads, used);
+        var touched = {};
+        pairs.forEach(function (p) {
+          var u = 'https://youtube.com/shorts/' + p.vid;
+          p.row.ytUrl = u; p.row.ytAutoFilled = true;
+          var k = itemKey(p.row); if (k) ymap[k] = u;
+          if (uploads.length) { var up = uploads.filter(function (x) { return x.vid === p.vid; })[0]; if (up && up.title) titleCache[p.vid] = up.title; }
+          touched[bases[rows.indexOf(p.row)]] = 1;
+        });
+        if (!pairs.length) return 0;
+        if (touched.verify_manual) saveArrFor_('verify_manual', acc, manual);
+        if (touched.short_hist) saveArrFor_('short_hist', acc, hist);
+        saveYtMapFor_(acc, ymap);
+        pairs.forEach(function (p) { try { pushItemToGas_(p.row); } catch (e) {} });
+        return pairs.length;
+      });
+    }).catch(function () { return 0; });
+  }
+
   function refresh(announce, background) {
     // ★まずキャッシュから即描画。点検・通信でタブ表示を待たせない(Chami「表示が遅い」対策)。
     var paint_ = background ? renderWhenHistIdle_ : render;
@@ -3884,6 +3995,9 @@
       if (fixed) wireSanUndo_();
       return Promise.resolve(false);
     }
+    // URL空欄行へYouTube新着を自動結線してから再生数を取る(埋まった動画も同じ回で計測される)。
+    return autoFillYtUrls_(acct(), !!announce).catch(function () { return 0; }).then(function (nFilled) {
+    if (nFilled) { note = '・🎬 YouTube URLを' + nFilled + '件自動で入れました' + note; paint_(); }
     var items = allItems(); var ymap = loadYtMap();
     var codes = items.map(function (it) { return codeOf(it.shortUrl || ''); }).concat(items.map(function (it) { return codeOf(it.workShortUrl || ''); })).filter(Boolean);
     var vids = items.map(function (it) { var k = itemKey(it); return ytIdOf(itemYt_(ymap, it) || it.ytUrl || ''); }).filter(Boolean);
@@ -3903,6 +4017,7 @@
       if (fixed) wireSanUndo_();
       return true;
     }).catch(function () { setStatus('⚠️ 更新に失敗しました(通信エラー)', false); return false; });
+    });
   }
 
   // この投稿履歴を正として、全アイテムを記録シート(GAS)へ一括 upsert 同期する。

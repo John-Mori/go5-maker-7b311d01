@@ -1378,6 +1378,7 @@
       bskyParentUrl: pd.bskyParentUrl || '', bskyReplyUrl: pd.bskyReplyUrl || '', bskyWorkShortUrl: pd.bskyWorkShortUrl || '',
       pillar: pillarOf_(pd),
       videoId: meta.videoId || '',
+      ytTitle: (pd.ytTitle || '').trim(), // YouTube題名=投稿履歴のURL自動取得で新着動画と照合する
       scheduledAt: plannedAt, // カレンダー公開枠の予定時刻(予約投稿時のみ・任意)
       attrs: histAttrs // ジャンルのチェックを引き継ぐ(Chami依頼2026-07-30・空なら投稿完了時のライブ値で補完)
     };

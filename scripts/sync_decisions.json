@@ -63,6 +63,8 @@
     "go5_stock_del": { "decision": "sync", "why": "ドラフト削除の墓標=端末をまたぐ削除の伝播" },
     "disc_urls_seeded__<acc>": { "decision": "local", "why": "セールURL初期シード済みフラグ=端末別の一度きり移行フラグ" },
     "yt_scheduled__<acc>": { "decision": "local", "why": "予約投稿の端末側タイマー台帳=無人予約はGAS側が正・端末別" },
+    "yt_channel_id__<acc>": { "decision": "local", "why": "URL自動取得用のYouTube channelIdキャッシュ=既存行の動画から各端末で再導出できる" },
+    "yt_autofill_at__<acc>": { "decision": "local", "why": "URL自動取得の間引き時刻=端末別の通信間隔" },
     "verify_manual__<acc>": { "decision": "local", "why": "検証タブの手入力(成約等)=記録・正本は各端末+シート" },
     "verify_yt__<acc>": { "decision": "local", "why": "YouTube検証の手入力=記録" },
     "verify_hide_remade__<acc>": { "decision": "local", "why": "リビルド済みの非表示状態=端末別UI状態" },
