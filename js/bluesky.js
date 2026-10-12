@@ -490,6 +490,21 @@
   if (els.ytDesc) els.ytDesc.addEventListener('input', function () { saveA('yt_desc', els.ytDesc.value); });
   if (els.ytTags) els.ytTags.addEventListener('input', function () { save('yt_tags_shared', els.ytTags.value); buildTitle(); }); // タグは全チャンネル共通保存
 
+  // 投稿タブ2種(YouTube/Bluesky)の中身を、クラウド同期で取り込んだ値へその場で揃える(Chami msg 1559250741233713345)。
+  //   従来はlocalStorageだけ更新されリロードまで画面が古いまま=古い欄を触ると別端末の内容を上書きしていた。
+  //   入力中(フォーカス中)の欄は触らない。差し替えた欄は input を撃って既存の保存/プレビュー更新に乗せる。
+  function refreshPostTabsFromSync_() {
+    var ae = document.activeElement;
+    [[els.text, loadA('bsky_text')], [els.ytDesc, loadA('yt_desc')], [els.ytTags, load('yt_tags_shared')],
+     [els.threadText, load('field_bskyThreadText')], [els.threadReplyUrl, load('field_bskyThreadReplyUrl')]].forEach(function (p) {
+      var el = p[0], v = p[1];
+      if (!el || v == null || el === ae || el.value === v) return;
+      el.value = v;
+      try { el.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {}
+    });
+  }
+  document.addEventListener('go5-synced', function (e) { if (e && e.detail && e.detail.pulled) refreshPostTabsFromSync_(); });
+
   // ---- 説明欄／本文の編集補助：Qセーブ／Qロード／リセット／元に戻す↶／やり直す↷(アカウント別・確認なし・再読込耐性あり) ----
   // ・Qセーブ＝今の文面を「お気に入りの下書き」として localStorage に退避。(アカウント別)
   // ・Qロード＝退避した下書きを復元。・リセット＝アカウント別の既定テンプレ文「のみ」に戻す。

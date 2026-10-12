@@ -70,6 +70,8 @@
     /^bsky_discount_urls(__|$)/,    // 🔥セール案内URL(複数・名前付き・アカウント別・2026-07-20)。id単位unionで端末をまたいで消えない(Chami依頼2026-08-03)
     /^bsky_discount_del(__|$)/,     // 🔥セール案内URLの削除墓標(id→削除ts・削除を全端末へ伝播・テンプレ帳と同型・Chami依頼2026-08-03)
     /^bsky_discount_selected(__|$)/, // 選択中のセール案内URL(次回も同じものを使う・アカウント別・2026-07-20)
+    // 🧵一括投稿ツールの親文/返信URL(persist-fields の field_<id>)。投稿タブ2種の中身を全端末で揃える(Chami msg 1559250741233713345)。
+    /^field_bskyThread(Text|ReplyUrl)$/,
     // ▼下書き(ドラフト)を全端末で同期(Chami依頼2026-07-31「別端末でドラフトが出ない・localStorageに頼るな」)。
     //   go5_stock_meta は id 単位で union、go5_stock_del は削除の墓標、go5_draft_post_* は per-id LWW。
     //   ★動画本体(stock_v_)・画像(stock_t_/stock_img_)は重いので①-Aでは同期しない(②で運び方を決める)。

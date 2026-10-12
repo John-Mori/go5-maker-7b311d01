@@ -111,5 +111,19 @@ const ta3 = { value: '↑ 案内\nhttps://5mgl.com/abc\n【感想】' };
 mkPut({ ytDesc: ta3 }, () => {}, 'https://5mgl.com/abc')('https://5mgl.com/new');
 eq(ta3.value, '↑ 案内\nhttps://5mgl.com/new\n【感想】', '次の投稿は前回URLの行を置換(上に積まない)');
 
+console.log('--- 投稿タブ2種の中身を同期取り込み後にその場で反映(Chami msg 1559250741233713345) ---');
+eq(/document\.addEventListener\('go5-synced', function \(e\) \{ if \(e && e\.detail && e\.detail\.pulled\) refreshPostTabsFromSync_\(\); \}\);/.test(bs), true, 'go5-synced(pulled>0)で投稿タブの欄を読み直す');
+const rS = bs.indexOf('  function refreshPostTabsFromSync_(');
+const rE = bs.indexOf("  document.addEventListener('go5-synced'", rS);
+const mkRef = new Function('els', 'loadA', 'load', 'document', 'Event', bs.slice(rS, rE) + '\nreturn refreshPostTabsFromSync_;');
+const mkEl = (v) => ({ value: v, fired: 0, dispatchEvent() { this.fired++; } });
+const E = { text: mkEl('古い本文'), ytDesc: mkEl('古い説明'), ytTags: mkEl('#a'), threadText: mkEl('入力中'), threadReplyUrl: mkEl('') };
+const LS = { bsky_text: '新しい本文', yt_desc: '古い説明', yt_tags_shared: '#a', field_bskyThreadText: '別端末の親文', field_bskyThreadReplyUrl: 'https://x.test/r' };
+mkRef(E, (k) => LS[k], (k) => LS[k] == null ? null : LS[k], { activeElement: E.threadText }, function () {})();
+eq([E.text.value, E.text.fired], ['新しい本文', 1], '取り込んだ本文へ差し替えてinputを撃つ');
+eq(E.ytDesc.fired, 0, '同じ値の欄は触らない');
+eq([E.threadText.value, E.threadText.fired], ['入力中', 0], '入力中(フォーカス中)の欄は上書きしない');
+eq(E.threadReplyUrl.value, 'https://x.test/r', '🧵返信URLも反映');
+
 console.log(fails ?`\n${fails} FAIL` : '\nALL PASS');
 process.exit(fails ? 1 : 0);

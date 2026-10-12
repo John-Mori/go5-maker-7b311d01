@@ -25,6 +25,7 @@ const SHOULD_SYNC = [
   'bsky_gas_url', 'fanza_af_id', 'fanza_worker_url', 'ytdesc_tpl_v3',
   'sch_state_v1', 'go5_image_manifest_v1', 'go5_tree_links_v1', 'cand_today_v1',
   'rank_mode', 'rank_metric', 'rank_window',   // ★v621でsyncへ昇格(Chami核2026-08-04・どの端末でも同じランキング表示)
+  'field_bskyThreadText', 'field_bskyThreadReplyUrl', // 🧵一括投稿の親文/返信URL=投稿タブの中身(Chami msg 1559250741233713345)
 ];
 
 // ── 記録/履歴/キャッシュ/下書き/DID/移行フラグ/スナップ/UI状態＝同期しない（sync:false）
@@ -42,7 +43,7 @@ const SHOULD_NOT_SYNC = [
   'cand_items', 'cand_hidden__t1', 'cand_refimg__abc', 'cand_mk2__m1__all',
   'delta_cache', 'peak_cache', 'clicks_cache', 'tree_click_windows_cache', 'yt_meta_cache', 'fanza_title_cache',
   'acct_did_repair_v1', 'acct_split_migrated', 'layout_acct_split_migrated', 'feat_2026q2_migrated',
-  'field_top', 'field_author',
+  'field_top', 'field_author', 'field_bskyThreadTextX', 'field_discUrlName', 'field_discountDigest',
 ];
 
 // ── 秘密キー＝secret かつ 同期しない ─────────────────────────────────────────
