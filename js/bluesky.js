@@ -315,6 +315,7 @@
     return (window.getCurrentAccount ? window.getCurrentAccount() : 'acc1');
   }
   function pk(base) { return base + '__' + acctId(); }
+  function pkOf_(base, a) { return base + '__' + a; } // 指定chの設定キー(今のUIchに依らない)
 
   // ---- アカウント同定(DID)：投稿の所属を「今のUI」ではなくpost_uriのDIDで確定する ----
   // 現在のUIに依存せず特定アカウントのハンドル/DIDを読むための直接キー。
@@ -2025,6 +2026,47 @@
   }
   // 投稿履歴タブ(yt-clicks.js)から、過去投稿URLの独自計測リンクを生成するために公開。
   try { window.Go5MakeShort = makeShortAndShare; } catch (e) {}
+  // ドラフト投稿一続き(柱分け)：投稿モードから「Bluesky親(画像+本文)→ランダム秒待ち→返信(作品リンク)」を投げる口。
+  //   資格情報はドラフトの所属ch(account)の保存値を読む(今のUIchではない)。値は画面・ログ・戻り値へ出さない。
+  //   返信リンクはX側と別コードにする=宛先へ #go5=bsky を付けて短縮(link-workerはドメイン+URLで決定的にコードを作る)。
+  //   フラグメントはブラウザがサーバへ送らないので、FANZA側のaf_id・遷移先は変わらない。
+  //   成功時は親投稿URLも同じchドメインで短縮して返す(YouTube説明欄の1行目=A=1)。
+  function draftBskyThread_(o) {
+    o = o || {};
+    var acc = o.account || acctId();
+    var handle = '', appPw = '';
+    try {
+      handle = handleOfAcct_(acc);
+      appPw = (localStorage.getItem(pkOf_('bsky_app_pw', acc)) || '').trim(); // 設定画面(saveA)と同じキー規則
+    } catch (e) {}
+    if (!handle || !appPw) return Promise.reject(new Error('no-creds'));
+    if (!window.BlueskyCore || !window.BlueskyCore.blueskyPostThread) return Promise.reject(new Error('no-core'));
+    var parentText = String(o.parentText || '').trim();
+    if (!parentText) return Promise.reject(new Error('empty-parent'));
+    if (countGraphemes(parentText) > 300) return Promise.reject(new Error('parent-too-long'));
+    var aff = String(o.workLink || '').trim();
+    if (!/^https?:\/\//.test(aff)) return Promise.reject(new Error('no-work-link'));
+    var tagged = aff + (aff.indexOf('#') < 0 ? '#go5=bsky' : '&go5=bsky');
+    var out = { bskyWorkShortUrl: '', replyText: '', parentUrl: '', replyUrl: '', parentShortUrl: '', delayMs: 0 };
+    return makeShortAndShare(tagged, { account: acc }).then(function (r) {
+      var sv = r && (r.shareUrl || r.shortUrl);
+      return (sv && ourShortBase(sv)) ? sv : aff; // 短縮失敗=生アフィリンク(印なし)で返信=リンクは生かす
+    }, function () { return aff; }).then(function (link) {
+      out.replyText = link;
+      if (ourShortBase(link)) out.bskyWorkShortUrl = link;
+      return o.imageBlob ? compressFile(o.imageBlob) : null;
+    }).then(function (blob) {
+      return window.BlueskyCore.blueskyPostThread({ identifier: handle, appPassword: appPw, parentText: parentText, replyText: out.replyText, imageBlob: blob });
+    }).then(function (res) {
+      out.parentUrl = res.parent.postUrl; out.replyUrl = res.reply.postUrl; out.delayMs = res.delayMs || 0;
+      return makeShortAndShare(out.parentUrl, { account: acc }).then(function (r) {
+        var sv = r && (r.shareUrl || r.shortUrl);
+        out.parentShortUrl = sv || out.parentUrl;
+      }, function () { out.parentShortUrl = out.parentUrl; });
+    }).then(function () { return out; });
+  }
+  try { window.Go5DraftBskyThread = draftBskyThread_; } catch (e) {}
+  try { window.Go5FriendlyBskyError = function (m) { return friendlyLoginError(m); }; } catch (e) {}
 
   // ---- 🔁 URL自動解決：af_id欠落/未短縮のどちらも自動で補い、最終的に「短縮済みアフィリンク」にする ----
   //   Chami依頼2026-07-20②。判定は affiliate-core.js の classifyPromoUrl/ensureAffiliateLink(純粋関数・

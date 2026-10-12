@@ -15,6 +15,37 @@
   var ARCHIVE_KEY = 'go5_stock_archive';
   var ARCHIVE_MAX = 30;
   var PH_URL_ = '(X投稿リンクを入力後、ここに短縮URLが入る)';
+  // ★柱分け(ドラフト投稿一続き化)の切替はここ1箇所(三笘依頼 msg 1559038546835415082・A=1/B=1暫定)。
+  //   true のchは「Bluesky親(画像+本文)+返信(作品リンク)を自動投稿 → X親文/X返信を手動コピー →
+  //   X投稿URL貼付(記録) → 説明欄1行目=Bluesky親の短縮URL」の流れになる。作品リンクの短縮はX用(従来の作品短縮URL)と
+  //   Bluesky用(宛先に #go5=bsky を付けた別コード)に分かれる。未記載のchは従来どおり(X本文に作品リンク同梱)。
+  var PILLAR_SPLIT = { acc3: true };
+  function pillarSplitOn_(meta) { return !!(meta && PILLAR_SPLIT[meta.account || 'acc1']); }
+  // 本文から作品リンクを含む行を外す(柱分け時の親文)。リンクは返信側へ回す。
+  function workLinkTokens_(meta, pd) {
+    pd = pd || {};
+    return [pd.workShareUrl, pd.workShortUrl, meta && meta.affiliateUrl, meta && meta.workUrl]
+      .map(function (t) { return String(t || '').trim(); })
+      .filter(function (t, i, a) { return /^https?:\/\//.test(t) && a.indexOf(t) === i; });
+  }
+  function stripWorkLinks_(text, tokens) {
+    var core = window.BlueskyCore;
+    var lines = String(text || '').split('\n').filter(function (ln) {
+      for (var i = 0; i < tokens.length; i++) { if (ln.indexOf(tokens[i]) >= 0) return false; }
+      return !(core && core.hasWorkLinkPlaceholder && core.hasWorkLinkPlaceholder(ln));
+    });
+    return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  }
+  function loadDraftPost_(id) { try { return JSON.parse(localStorage.getItem('go5_draft_post_' + id) || '{}') || {}; } catch (e) { return {}; } }
+  // go5_draft_post_ へ指定フィールドだけ非破壊マージ(本文編集の「空=未編集」判定に触れない)。
+  function mergeDraftPost_(id, obj) {
+    try {
+      var k = 'go5_draft_post_' + id, sv = loadDraftPost_(id), changed = false;
+      Object.keys(obj).forEach(function (f) { if (obj[f] && sv[f] !== obj[f]) { sv[f] = obj[f]; changed = true; } });
+      if (changed) { localStorage.setItem(k, JSON.stringify(sv)); kickSync_(); }
+    } catch (e) {}
+  }
+  var BSKY_DRAFT_FIELDS_ = ['bskyParentUrl', 'bskyReplyUrl', 'bskyWorkShortUrl', 'bskyParentShortUrl'];
 
   // 動画の「存在」ではなく、最低限使える実体かを全保存境界で同じ規則にする。
   // core/video-integrity.js がキャッシュ不整合で未読込でも、空/極小Blobだけは必ず拒否する。
@@ -81,6 +112,12 @@
   function applyXPostUrl_(raw, btn) {
     raw = (raw || '').trim();
     var xin = $('draftXPostUrl'); if (xin) xin.value = raw;
+    // 柱分けでBluesky親を投稿済みなら、説明欄1行目はBluesky親の短縮URLのまま(A=1)。X投稿URLは記録だけする。
+    if (_modalMeta && pillarSplitOn_(_modalMeta) && loadDraftPost_(_modalMeta.id).bskyParentShortUrl) {
+      saveDraftPost_();
+      if (btn && raw) { btn.textContent = '記録しました'; setTimeout(function () { btn.textContent = '貼り付け'; }, 2000); }
+      return;
+    }
     if (!raw) { setDescUrlSlot_(''); saveDraftPost_(); return; }
     if (btn) btn.textContent = '短縮中...';
     var p = window.Go5MakeShort ? window.Go5MakeShort(raw) : Promise.resolve(null);
@@ -1391,6 +1428,10 @@
       //   これで完了時の非同期再発行(離脱で消える)に頼らず一発で欄が埋まる=空欄の恒久対策(REQ-65c7897f2f他)。
       workShortUrl: (pd.workShortUrl || '').trim(),
       workShareUrl: (pd.workShareUrl || '').trim(),
+      // 柱分け：X親/Bluesky親・返信の実URLとBluesky側の作品短縮URL、柱(x/bsky/both)をシートへ渡す。
+      xPostUrl: (pd.xPostUrl || '').trim(),
+      bskyParentUrl: pd.bskyParentUrl || '', bskyReplyUrl: pd.bskyReplyUrl || '', bskyWorkShortUrl: pd.bskyWorkShortUrl || '',
+      pillar: pillarOf_(pd),
       videoId: meta.videoId || '',
       scheduledAt: plannedAt, // カレンダー公開枠の予定時刻(予約投稿時のみ・任意)
       attrs: histAttrs // ジャンルのチェックを引き継ぐ(Chami依頼2026-07-30・空なら投稿完了時のライブ値で補完)
@@ -2959,7 +3000,7 @@
     //   握り潰さないよう既存レコードから引き継ぐ(dataに項目が無いとJSON全置換で消える=空欄再発の穴)。
     try {
       var _ex0 = JSON.parse(localStorage.getItem('go5_draft_post_' + _modalMeta.id) || '{}') || {};
-      ['workShortUrl', 'workShareUrl', 'workShortFor'].forEach(function (f) { if (_ex0[f] && !data[f]) data[f] = _ex0[f]; });
+      ['workShortUrl', 'workShareUrl', 'workShortFor'].concat(BSKY_DRAFT_FIELDS_).forEach(function (f) { if (_ex0[f] && !data[f]) data[f] = _ex0[f]; });
     } catch (e) {}
     try { localStorage.setItem('go5_draft_post_' + _modalMeta.id, JSON.stringify(data)); } catch (e) {}
     kickSync_(); // 投稿編集も全端末へ運ぶ
@@ -3082,6 +3123,7 @@
       var go5 = window.Go5Short || {};
       if (!(go5.ourBase && res.shortUrl && go5.ourBase(res.shortUrl))) return; // 計測キー(r2)のみ永続化。fallbackは完了時mint(リトライ付)へ委ねる
       saveDraftWorkShortField_(meta.id, { workShortUrl: res.shortUrl, workShareUrl: res.shareUrl || res.shortUrl, workShortFor: aff });
+      var xr = $('draftXReply'); if (xr && pillarSplitOn_(meta)) xr.value = res.shareUrl || res.shortUrl; // 柱分け：X返信=X用の作品短縮URL
     }
     function applyShare_(res) {
       persistWorkShort_(res);
@@ -3205,7 +3247,10 @@
     }
     $('draftYtDescText').value = lines.join('\n');
     if (saved.xShortUrl) slotUrl = saved.xShortUrl;
+    if (pillarSplitOn_(meta) && saved.bskyParentShortUrl) slotUrl = saved.bskyParentShortUrl; // A=1：説明欄1行目=Bluesky親
     setDescUrlSlot_(slotUrl);
+    syncPillarUI_(meta, saved);
+    loadDraftImg_(meta);
     $('draftXPostUrl').value = saved.xPostUrl || '';
     // 修正前(x.comがALLOWED_HOSTS未登録の頃)に発行された非ワーカー短縮=da.gd等は、
     //   元のX投稿リンクが残っていれば開いた時にチャンネル別ドメイン(5mgl/yoz2)へ格上げする。
@@ -3263,6 +3308,90 @@
       parts.join('<span style="color:var(--sub);margin:0 8px;">/</span>');
   }
 
+  // 柱(シート「柱」列)：Bluesky親とX投稿URLの有無から x / bsky / both。
+  function pillarOf_(pd) {
+    pd = pd || {};
+    var b = !!pd.bskyParentUrl, x = !!String(pd.xPostUrl || '').trim();
+    return (b && x) ? 'both' : (b ? 'bsky' : (x ? 'x' : ''));
+  }
+  // 柱分けUIの表示切替(openPostModal_ から毎回)。対象外chでは従来の画面のまま。
+  function syncPillarUI_(meta, saved) {
+    var split = pillarSplitOn_(meta);
+    var bw = $('draftBskyWrap'), xr = $('draftXReplyRow'), cx = $('draftCopyX'), lb = $('draftXPostUrlLabel');
+    if (bw) bw.style.display = split ? '' : 'none';
+    if (xr) xr.style.display = split ? '' : 'none';
+    if (cx) cx.textContent = split ? '親文をコピー' : 'コピー';
+    if (lb) lb.textContent = split ? 'X投稿リンク(X親の投稿URL・記録用。Bluesky未投稿ならこれが説明欄へ入る)' : 'X投稿リンク(Xに投稿後に貼ると説明欄へ短縮URLが入る)';
+    var xi = $('draftXReply'); if (xi) xi.value = split ? (saved.workShareUrl || saved.workShortUrl || '') : '';
+    renderBskyStatus_(saved);
+  }
+  function renderBskyStatus_(saved) {
+    var st = $('draftBskyStatus'); if (!st) return;
+    if (saved && saved.bskyParentUrl) {
+      st.innerHTML = '✅ 投稿済み 親：<a href="' + esc(saved.bskyParentUrl) + '" target="_blank" rel="noopener">開く</a>' +
+        (saved.bskyReplyUrl ? '／返信：<a href="' + esc(saved.bskyReplyUrl) + '" target="_blank" rel="noopener">開く</a>' : '') +
+        (saved.bskyWorkShortUrl ? '<br>Bluesky作品リンク：' + esc(saved.bskyWorkShortUrl) : '');
+    } else st.textContent = '';
+  }
+  function postDraftBsky_(btn) {
+    var meta = _modalMeta; if (!meta) return;
+    var st = $('draftBskyStatus');
+    function say(h) { if (st) st.innerHTML = h; }
+    if (!window.Go5DraftBskyThread) { say('投稿モジュール未読込。ページを再読み込みしてください。'); return; }
+    var pd = loadDraftPost_(meta.id);
+    var parentText = stripWorkLinks_(($('draftXText') || {}).value || '', workLinkTokens_(meta, pd));
+    var aff = (meta.affiliateUrl || meta.workUrl || '').trim();
+    if (pd.bskyParentUrl && !window.confirm('このドラフトはBlueskyへ投稿済みです。もう一度投稿しますか？(二重投稿になります)')) return;
+    if (!window.confirm('Blueskyへ親(画像+本文)を投稿し、数十秒あけて返信に作品リンクを投稿します。よろしいですか？')) return;
+    btn.disabled = true; say('投稿中…(親→待機→返信。1分ほどかかります)');
+    var imgP = (_draftImg.id === meta.id && _draftImg.blob) ? Promise.resolve(_draftImg.blob) : resolveSrcImageBlob_(meta.id);
+    imgP.catch(function () { return null; }).then(function (blob) {
+      return window.Go5DraftBskyThread({ account: meta.account || 'acc1', parentText: parentText, workLink: aff, imageBlob: blob || null });
+    }).then(function (r) {
+      mergeDraftPost_(meta.id, { bskyParentUrl: r.parentUrl, bskyReplyUrl: r.replyUrl, bskyWorkShortUrl: r.bskyWorkShortUrl, bskyParentShortUrl: r.parentShortUrl });
+      if (_modalMeta === meta) { setDescUrlSlot_(r.parentShortUrl || r.parentUrl); saveDraftPost_(); }
+      renderBskyStatus_(loadDraftPost_(meta.id));
+    }).catch(function (e) {
+      var m = String(e && e.message ? e.message : e);
+      var known = { 'no-creds': '⚙設定でこのchのBlueskyハンドルとアプリパスワードを入れてください。',
+                    'parent-too-long': '親の本文(作品リンク行を除く)が300文字を超えています。短くしてください。',
+                    'empty-parent': '親の本文が空です。', 'no-work-link': 'このドラフトに作品URLがありません。',
+                    'no-core': '投稿モジュール未読込。ページを再読み込みしてください。' };
+      var msg = known[m] || esc(window.Go5FriendlyBskyError ? window.Go5FriendlyBskyError(m) : m);
+      say('⚠️ 投稿できませんでした：<br>' + msg);
+    }).then(function () { btn.disabled = false; });
+  }
+  // 投稿画像(元画像)を動画とは別枠で表示。保存/共有は共有シート(画像ファイル)→不可なら保存リンク。
+  var _draftImg = { id: '', blob: null, url: '' };
+  function loadDraftImg_(meta) {
+    var wrap = $('draftImgWrap'), img = $('draftImg');
+    if (_draftImg.url) { try { URL.revokeObjectURL(_draftImg.url); } catch (e) {} }
+    _draftImg = { id: meta.id, blob: null, url: '' };
+    if (wrap) wrap.style.display = 'none';
+    if (img) img.removeAttribute('src');
+    resolveSrcImageBlob_(meta.id).then(function (blob) {
+      if (!blob || _modalMeta !== meta || _draftImg.id !== meta.id) return;
+      _draftImg.blob = blob; _draftImg.url = URL.createObjectURL(blob);
+      if (img) img.src = _draftImg.url;
+      if (wrap) wrap.style.display = '';
+    }).catch(function () {});
+  }
+  function shareDraftImg_(btn) {
+    var b = _draftImg.blob; if (!b) return;
+    var type = b.type || 'image/jpeg';
+    var ext = /png/.test(type) ? 'png' : (/webp/.test(type) ? 'webp' : 'jpg');
+    var base = String(driveDataTitle_((_modalMeta && _modalMeta.title) || '') || 'image').replace(/[\\/:*?"<>|]/g, '_').slice(0, 60);
+    var name = base + '.' + ext;
+    var file = null; try { file = new File([b], name, { type: type }); } catch (e) {}
+    if (file && navigator.canShare && navigator.share && navigator.canShare({ files: [file] })) {
+      navigator.share({ files: [file] }).catch(function () {});
+      return;
+    }
+    var a = document.createElement('a'); a.href = _draftImg.url; a.download = name;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    var o = btn.textContent; btn.textContent = '保存しました'; setTimeout(function () { btn.textContent = o; }, 2000);
+  }
+
   function createModal_() {
     var m = document.createElement('div');
     m.id = 'draftPostModal';
@@ -3308,9 +3437,25 @@
           // ★見出しは white-space:nowrap で必ず1行に(flex:1;min-width:0 だと iOS Safari で幅が1文字ぶんへ潰れ、
           //   日本語は文字間どこでも改行できるため「X／投／稿」と縦積みになっていた・Chami報告2026-07-31①)。
           //   コピーは margin-left:auto で右端へ寄せ、幅は文字ぶんだけ(Chami③「文字の幅に合うだけ」)。
+          // 投稿画像(動画とは別枠)。スマホは「保存/共有」(共有シート)か長押しで保存できる。
+          '<div id="draftImgWrap" style="display:none;margin-bottom:16px;">' +
+            '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><div style="' + sH + 'white-space:nowrap;">投稿画像</div><button type="button" id="draftImgShare" style="' + btnW + 'margin-left:auto;">保存/共有</button></div>' +
+            '<img id="draftImg" alt="投稿画像" style="display:block;width:100%;max-height:60vh;object-fit:contain;border-radius:8px;border:1px solid var(--line);background:#000;">' +
+          '</div>' +
+          // 柱分け：Bluesky親(画像+本文)→返信(作品リンク)を自動投稿。成功で説明欄1行目がBluesky親の短縮URLになる。
+          '<div id="draftBskyWrap" style="display:none;margin-bottom:18px;">' +
+            '<div style="' + sH + 'margin-bottom:8px;">Bluesky(親+返信を自動投稿)</div>' +
+            '<button type="button" id="draftBskyPost" style="' + btnW + '">🦋 Blueskyへ親+返信を投稿</button>' +
+            '<div id="draftBskyStatus" style="font-size:.78rem;margin-top:8px;line-height:1.6;color:var(--sub);word-break:break-all;"></div>' +
+            '<div style="height:1px;background:var(--line);margin:18px 0 0;"></div>' +
+          '</div>' +
           '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><div style="' + sH + 'white-space:nowrap;">X 投稿</div><button type="button" id="draftCopyX" style="' + btnW + 'margin-left:auto;">コピー</button></div>' +
           '<textarea id="draftXText" rows="9" style="' + iS + 'resize:vertical;"></textarea>' + // ①縦幅(rows6→8→9・もう1行分・Chami依頼2026-08-03)
-          '<div style="' + fL + '">X投稿リンク(Xに投稿後に貼ると説明欄へ短縮URLが入る)</div>' +
+          '<div id="draftXReplyRow" style="display:none;">' +
+            '<div style="display:flex;align-items:center;gap:8px;' + fL + '"><span style="white-space:nowrap;">X返信(作品リンク)</span><button type="button" id="draftCopyXReply" style="' + btnW + 'margin-left:auto;">コピー</button></div>' +
+            '<input type="text" id="draftXReply" readonly size="1" style="' + iS + 'cursor:default;">' +
+          '</div>' +
+          '<div id="draftXPostUrlLabel" style="' + fL + '">X投稿リンク(Xに投稿後に貼ると説明欄へ短縮URLが入る)</div>' +
           '<div style="' + rowWrap + '">' +
             '<input type="url" id="draftXPostUrl" size="1" placeholder="https://x.com/.../status/..." style="' + rowIn + '">' +
             '<button type="button" id="draftPasteXPostUrl" style="' + cpS + '">貼り付け</button>' +
@@ -3389,7 +3534,15 @@
     $('draftPubSched').addEventListener('change', onPubModeChange_);
     $('draftPickSlot').addEventListener('click', openSlotPicker_);
     $('draftClearSlot').addEventListener('click', function () { _pickedSlot = null; renderPickedSlot_(); saveDraftPost_(); });
-    $('draftCopyX').addEventListener('click', function () { copyText_(($('draftXText') || {}).value || '', this); });
+    $('draftCopyX').addEventListener('click', function () {
+      var t = ($('draftXText') || {}).value || '';
+      // 柱分け：X親文は作品リンク行を外してコピー(リンクは「X返信」側)。
+      if (_modalMeta && pillarSplitOn_(_modalMeta)) t = stripWorkLinks_(t, workLinkTokens_(_modalMeta, loadDraftPost_(_modalMeta.id)));
+      copyText_(t, this);
+    });
+    $('draftCopyXReply').addEventListener('click', function () { copyText_(($('draftXReply') || {}).value || '', this); });
+    $('draftBskyPost').addEventListener('click', function () { postDraftBsky_(this); });
+    $('draftImgShare').addEventListener('click', function () { shareDraftImg_(this); });
     $('draftCopyYtTitle').addEventListener('click', function () { copyText_(($('draftYtTitleText') || {}).value || '', this); });
     $('draftCopyYtTags').addEventListener('click', function () { copyText_(($('draftYtTagsInput') || {}).value || '', this); }); // タグ欄をコピー(Chami依頼2026-07-30③)
     $('draftDlVideo').addEventListener('click', function () { if (_modalMeta) downloadStock_(_modalMeta.id, _modalMeta.videoName, this); }); // 動画DL(Chami依頼2026-07-30④)。this=押した瞬間に「準備中…」表示

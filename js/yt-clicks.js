@@ -2029,6 +2029,12 @@
     attrDefs_().forEach(function (a) { payload[a.key] = !!it[a.key]; }); // カテゴリ列：属性名を明記
     payload.workState = it.workState || '旧作'; // 作品状態列
     if (it.platform === 'x' || it.platform === 'bsky') payload.platform = it.platform; // 投稿先(X/Bsky)列
+    // ドラフト一続き(柱分け)：X親/Bluesky親・返信の実URL、Bluesky側の作品短縮URL、柱(x/bsky/both)。空は送らない=GASのputIfが既存保護。
+    if (it.xPostUrl) payload.x_post_url = it.xPostUrl;
+    if (it.bskyParentUrl) payload.bsky_parent_url = it.bskyParentUrl;
+    if (it.bskyReplyUrl) payload.bsky_reply_url = it.bskyReplyUrl;
+    if (it.bskyWorkShortUrl) payload.bsky_work_short_url = it.bskyWorkShortUrl;
+    if (it.pillar === 'x' || it.pillar === 'bsky' || it.pillar === 'both') payload.pillar = it.pillar;
     try { fetch(gasUrl, { method: 'POST', body: JSON.stringify(payload) }).catch(function () {}); } catch (e) {}
   }
 
@@ -3151,6 +3157,8 @@
     //   videoId が来ていればそれ(ドラフトの背骨ID)、無ければ idgen で正規IDを発番＝「今まで通り」の形式へ戻す。
     entry.videoId = vidId; // opts.videoId(背骨ID)優先・無ければ上で発番済み＝post_id列は常に idgen形式で埋まる
     entry.workState = opts.workState || '旧作';
+    // ドラフト一続き(柱分け)の投稿先URL群。pushItemToGas_ が初回upsertで同じ行へ載せる。
+    ['xPostUrl', 'bskyParentUrl', 'bskyReplyUrl', 'bskyWorkShortUrl', 'pillar'].forEach(function (k) { if (opts[k]) entry[k] = String(opts[k]); });
     // カレンダー公開枠の予定時刻(予約投稿)。YouTube APIのpublishAtが返る前でも「投稿予定 時刻」を出せる。
     if (opts.scheduledAt) entry.plannedAt = opts.scheduledAt;
     // ジャンル(カテゴリ)のチェックを引き継ぐ＝投稿完了で履歴にジャンルが渡らない穴を塞ぐ(Chami依頼2026-07-30)。
