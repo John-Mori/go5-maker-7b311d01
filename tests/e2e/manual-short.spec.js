@@ -5,6 +5,7 @@ test.describe('単体短縮リンク発行', () => {
   for (const accountCase of [
     { account: 'acc1', channel: '月詠み色恋劇場', domain: '5mgl.com', code: 'reply-tsukuyomi' },
     { account: 'acc2', channel: '宵桜艶帖', domain: 'yoz2.com', code: 'reply-yoizakura' },
+    { account: 'acc3', channel: '癒やし倉庫', domain: 'xdgh3.com', code: 'reply-iyashi' },
   ]) {
     test(accountCase.channel + 'はアフィリンクを検証して専用ドメインだけを発行する', async ({ page }) => {
       const longUrl = 'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_e2e_manual_short/';
@@ -72,10 +73,14 @@ test.describe('単体短縮リンク発行', () => {
     });
   }
 
-  test('表示中chのドメインが空なら旧ドメインへ落とさず元URLを使う', async ({ page }) => {
+  // 2026-10-12 癒やし倉庫(acc3)に xdgh3.com が入ったので「未設定」前提をやめた(v988以降 smoke が赤だった)。
+  //   ドメインが空の時に元URLのまま返す守りは tests/test_worker_base.js(workerBase 単体)で固定している。
+  test('表示中chに追従し、旧共通上書きがあっても旧ドメインへ落ちない', async ({ page }) => {
     const longUrl = 'https://example.com/reply-guide';
     let legacyCalls = 0;
+    let ownCalls = 0;
     await page.addInitScript(() => {
+      localStorage.setItem('current_account', 'acc3');
       localStorage.setItem('fanza_af_id', 'test-affiliate-990');
       localStorage.removeItem('short_worker_url__acc3');
       localStorage.setItem('short_worker_url', 'https://legacy-short.invalid');
@@ -84,16 +89,24 @@ test.describe('単体短縮リンク発行', () => {
       legacyCalls++;
       await route.abort();
     });
+    await page.route('https://xdgh3.com/api/shorten', async (route) => {
+      // 画面は表示中chのキャンペーン短縮も自動で発行するので、手入力URLの分だけ数える。
+      if (new URLSearchParams(route.request().postData() || '').get('url') === longUrl) ownCalls++;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ short: 'https://xdgh3.com/reply-guide', url: longUrl }),
+      });
+    });
     await page.goto('index.html', { waitUntil: 'domcontentloaded' });
     await page.locator('#tabAffi').click();
     await expect(page.locator('#manualShortAccount')).toHaveValue(await page.evaluate(() => window.getCurrentAccount()));
-    await expect(page.locator('#manualShortDomain')).toContainText('未設定');
+    await expect(page.locator('#manualShortDomain')).toHaveText('発行ドメイン: xdgh3.com');
     await page.locator('#manualAffiliateOn').uncheck();
     await page.locator('#manualUrl').fill(longUrl);
     await page.locator('#manualShortBtn').click();
-    await expect(page.locator('#manualOut')).toHaveText(longUrl);
-    await expect(page.locator('#manualOut')).toHaveAttribute('data-url', longUrl);
-    await expect(page.locator('#manualAffStatus')).toContainText('アフィリンクなし・短縮なし');
+    await expect(page.locator('#manualOut')).toHaveText('https://xdgh3.com/reply-guide');
+    expect(ownCalls).toBe(1);
     expect(legacyCalls).toBe(0);
   });
 
