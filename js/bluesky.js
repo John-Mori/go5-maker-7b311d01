@@ -1603,6 +1603,9 @@
   var prevShortUrl = '', lastShortUrl = '';
   var PLACEHOLDER_URL = '(投稿するとここに短縮URLが入ります)';
   var BSKY_SHORT_PH = '(ブルスカ短縮URL)'; // 説明欄テンプレの手書き目印(Chami)。投稿後の短縮URLでこの行を置換する
+  // 目印の表記ゆれ=「(ブルスカ短縮URL)」「(ブルスカ短縮リンク)」のどちらも同じ目印(Chami 2026-10-13 msg 1559267964866535467)。
+  function isBskyShortPh_(t) { return /^\(ブルスカ短縮(?:URL|リンク)\)$/.test(String(t || '').trim()); }
+  try { window.Go5IsBskyShortPh = isBskyShortPh_; } catch (e) {}
   function fallbackCopy(text, ok) {
     var ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
     document.body.appendChild(ta); ta.focus(); ta.select();
@@ -1619,7 +1622,7 @@
     // 「(ブルスカ短縮URL)」の行(と、そこへ前回入れたURLの行)は何行目でもその行を置換(Chami 2026-10-13 msg 1559249835989925978)。
     for (var bi = 0; bi < lines.length; bi++) {
       var lt = lines[bi].trim();
-      if (lt === BSKY_SHORT_PH || (prevShortUrl && lt === prevShortUrl)) { lines[bi] = url; els.ytDesc.value = lines.join('\n'); saveA('yt_desc', els.ytDesc.value); return; }
+      if (lt === BSKY_SHORT_PH || isBskyShortPh_(lt) || (prevShortUrl && lt === prevShortUrl)) { lines[bi] = url; els.ytDesc.value = lines.join('\n'); saveA('yt_desc', els.ytDesc.value); return; }
     }
     var f = (lines[0] || '').trim();
     // 1行目が「短縮URLプレースホルダ」or 前回URL or URL なら置換。それ以外(例：↑案内文)は上に差し込む。
@@ -2152,7 +2155,7 @@
     var aff = String(o.workLink || '').trim();
     if (!/^https?:\/\//.test(aff)) return Promise.reject(new Error('no-work-link'));
     var tagged = aff + (aff.indexOf('#') < 0 ? '#go5=bsky' : '&go5=bsky');
-    var out = { bskyWorkShortUrl: '', replyText: '', parentUrl: '', replyUrl: '', parentShortUrl: '', delayMs: 0 };
+    var out = { bskyWorkShortUrl: '', replyText: '', parentUrl: '', replyUrl: '', parentShortUrl: '', replyShortUrl: '', delayMs: 0 };
     return makeShortAndShare(tagged, { account: acc }).then(function (r) {
       var sv = r && (r.shareUrl || r.shortUrl);
       return (sv && ourShortBase(sv)) ? sv : aff; // 短縮失敗=生アフィリンク(印なし)で返信=リンクは生かす
@@ -2170,10 +2173,16 @@
     }).then(function (res) {
       dropPendingReply_(res.parent.uri); delete _bskyReplyInflight[res.parent.uri];
       out.parentUrl = res.parent.postUrl; out.replyUrl = res.reply.postUrl; out.delayMs = res.delayMs || 0;
-      return makeShortAndShare(out.parentUrl, { account: acc }).then(function (r) {
+      // 子(返信)の投稿URLも短縮=YouTube説明欄の(ブルスカ短縮リンク)へ入れる値(Chami 2026-10-13 msg 1559267964866535467)。
+      var pShort = makeShortAndShare(out.parentUrl, { account: acc }).then(function (r) {
         var sv = r && (r.shareUrl || r.shortUrl);
         out.parentShortUrl = sv || out.parentUrl;
       }, function () { out.parentShortUrl = out.parentUrl; });
+      var cShort = makeShortAndShare(out.replyUrl, { account: acc }).then(function (r) {
+        var sv = r && (r.shareUrl || r.shortUrl);
+        out.replyShortUrl = sv || out.replyUrl;
+      }, function () { out.replyShortUrl = out.replyUrl; });
+      return Promise.all([pShort, cShort]);
     }, function (e) {
       // 子だけ失敗=親は出ている。台帳に残したまま少し置いて子を出し直す(呼び出し側には reply-pending で伝える)。
       if (e && e.parentOut) { delete _bskyReplyInflight[e.parentOut.uri]; retryPendingSoon_(); var pe = new Error('reply-pending'); pe.parentUrl = e.parentOut.postUrl; throw pe; }

@@ -45,7 +45,13 @@
       if (changed) { localStorage.setItem(k, JSON.stringify(sv)); kickSync_(); }
     } catch (e) {}
   }
-  var BSKY_DRAFT_FIELDS_ = ['bskyParentUrl', 'bskyReplyUrl', 'bskyWorkShortUrl', 'bskyParentShortUrl'];
+  var BSKY_DRAFT_FIELDS_ = ['bskyParentUrl', 'bskyReplyUrl', 'bskyWorkShortUrl', 'bskyParentShortUrl', 'bskyReplyShortUrl'];
+  // 説明欄へ入れるBluesky側の短縮URL=子(返信)が正(Chami 2026-10-13 msg 1559267964866535467)。子の短縮が無い旧ドラフトだけ親。
+  function bskyDescShortOf_(pd) { return (pd && (pd.bskyReplyShortUrl || pd.bskyParentShortUrl)) || ''; }
+  function isBskyShortPhLine_(t) {
+    if (window.Go5IsBskyShortPh) return window.Go5IsBskyShortPh(t);
+    return /^\(ブルスカ短縮(?:URL|リンク)\)$/.test(String(t || '').trim());
+  }
 
   // 動画の「存在」ではなく、最低限使える実体かを全保存境界で同じ規則にする。
   // core/video-integrity.js がキャッシュ不整合で未読込でも、空/極小Blobだけは必ず拒否する。
@@ -97,7 +103,14 @@
     //   既存の先頭URL行(+続く空行)を一旦剥がしてから入れ直す=貼り替えても重複しない。空なら剥がすだけ。
     //   ここ1箇所に集約=貼り付け時(applyXPostUrl_)もモーダル再表示時(openPostModal_)も同じ経路で最上段に乗る。
     var ta = $('draftYtDescText');
-    if (ta) {
+    // ★説明欄に「(ブルスカ短縮リンク)」の目印行があれば、何行目でもその行をURLへ置換する(Chami 2026-10-13 msg 1559267964866535467)。
+    //   既にそのURLが本文のどこかに在れば触らない(モーダル再表示で二重に足さない)。
+    var tl = ta ? String(ta.value || '').split('\n') : [];
+    var inBody = ok && tl.some(function (l) { return l.trim() === url; });
+    var phAt = -1; tl.forEach(function (l, i) { if (phAt < 0 && isBskyShortPhLine_(l)) phAt = i; });
+    if (ta && ok && (inBody || phAt >= 0)) {
+      if (!inBody) { tl[phAt] = url; ta.value = tl.join('\n'); }
+    } else if (ta) {
       var lines = String(ta.value || '').split('\n');
       if (lines.length && /^https?:\/\//.test((lines[0] || '').trim())) {
         lines.shift(); if (lines.length && lines[0].trim() === '') lines.shift();
@@ -113,7 +126,7 @@
     raw = (raw || '').trim();
     var xin = $('draftXPostUrl'); if (xin) xin.value = raw;
     // 柱分けでBluesky親を投稿済みなら、説明欄1行目はBluesky親の短縮URLのまま(A=1)。X投稿URLは記録だけする。
-    if (_modalMeta && pillarSplitOn_(_modalMeta) && loadDraftPost_(_modalMeta.id).bskyParentShortUrl) {
+    if (_modalMeta && pillarSplitOn_(_modalMeta) && bskyDescShortOf_(loadDraftPost_(_modalMeta.id))) {
       saveDraftPost_();
       if (btn && raw) { btn.textContent = '記録しました'; setTimeout(function () { btn.textContent = '貼り付け'; }, 2000); }
       return;
@@ -3272,7 +3285,7 @@
     }
     $('draftYtDescText').value = lines.join('\n');
     if (saved.xShortUrl) slotUrl = saved.xShortUrl;
-    if (pillarSplitOn_(meta) && saved.bskyParentShortUrl) slotUrl = saved.bskyParentShortUrl; // A=1：説明欄1行目=Bluesky親
+    if (pillarSplitOn_(meta) && bskyDescShortOf_(saved)) slotUrl = bskyDescShortOf_(saved); // 説明欄=Bluesky子(返信)の短縮URL(旧ドラフトは親)
     setDescUrlSlot_(slotUrl);
     syncPillarUI_(meta, saved);
     loadDraftImg_(meta);
@@ -3376,6 +3389,13 @@
     var meta = null; try { loadMeta().forEach(function (m) { if (m.id === job.draftId) meta = m; }); } catch (e) {}
     if (meta) autoRecordBskyHistory_(meta);
     if (_modalMeta && _modalMeta.id === job.draftId) renderBskyStatus_(loadDraftPost_(job.draftId));
+    // 出し直した子も短縮して説明欄の(ブルスカ短縮リンク)へ入れる(失敗時は生URL)。
+    var mk = window.Go5MakeShort ? window.Go5MakeShort(reply.postUrl, { account: job.acc }) :Promise.resolve(null);
+    mk.catch(function () { return null; }).then(function (r) {
+      var su = (r && (r.shareUrl || r.shortUrl)) || reply.postUrl;
+      mergeDraftPost_(job.draftId, { bskyReplyShortUrl: su });
+      if (_modalMeta && _modalMeta.id === job.draftId) { setDescUrlSlot_(su); saveDraftPost_(); }
+    });
   });
   function postDraftBsky_(btn) {
     var meta = _modalMeta; if (!meta) return;
@@ -3393,8 +3413,8 @@
     imgP.catch(function () { return null; }).then(function (blob) {
       return window.Go5DraftBskyThread({ account: meta.account || 'acc1', parentText: parentText, workLink: aff, imageBlob: blob || null, draftId: meta.id });
     }).then(function (r) {
-      mergeDraftPost_(meta.id, { bskyParentUrl: r.parentUrl, bskyReplyUrl: r.replyUrl, bskyWorkShortUrl: r.bskyWorkShortUrl, bskyParentShortUrl: r.parentShortUrl });
-      if (_modalMeta === meta) { setDescUrlSlot_(r.parentShortUrl || r.parentUrl); saveDraftPost_(); }
+      mergeDraftPost_(meta.id, { bskyParentUrl: r.parentUrl, bskyReplyUrl: r.replyUrl, bskyWorkShortUrl: r.bskyWorkShortUrl, bskyParentShortUrl: r.parentShortUrl, bskyReplyShortUrl: r.replyShortUrl });
+      if (_modalMeta === meta) { setDescUrlSlot_(r.replyShortUrl || r.replyUrl || r.parentShortUrl || r.parentUrl); saveDraftPost_(); }
       renderBskyStatus_(loadDraftPost_(meta.id));
       var hr = autoRecordBskyHistory_(meta);
       if (st && hr && (hr.ok || hr.reason === 'dupe' || hr.reason === 'persist-pending')) st.innerHTML += '<br>📒 投稿履歴にも載せました(YouTube URLは投稿完了で追記されます)。';

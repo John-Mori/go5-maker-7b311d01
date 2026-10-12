@@ -101,7 +101,7 @@ eq(/if \(!account \|\| account === acctId\(\)\) setShareOutputs\(share, longUrl\
 // putUrlTop を切り出して実際に置換させる
 const pS = bs.indexOf('  function putUrlTop(');
 const pE = bs.indexOf('  function setShareOutputs(');
-const mkPut = new Function('els', 'saveA', 'prevShortUrl', "var PLACEHOLDER_URL = '(投稿するとここに短縮URLが入ります)'; var BSKY_SHORT_PH = '(ブルスカ短縮URL)';\n" + bs.slice(pS, pE) + '\nreturn putUrlTop;');
+const mkPut = new Function('els', 'saveA', 'prevShortUrl', "var PLACEHOLDER_URL = '(投稿するとここに短縮URLが入ります)'; var BSKY_SHORT_PH = '(ブルスカ短縮URL)'; function isBskyShortPh_(t) { return /^\\(ブルスカ短縮(?:URL|リンク)\\)$/.test(String(t || '').trim()); }\n" + bs.slice(pS, pE) + '\nreturn putUrlTop;');
 const ta = { value: '(ブルスカ短縮URL)\n\n※URLを長押し→リンクを開く 💕' };
 mkPut({ ytDesc: ta }, () => {}, '')('https://5mgl.com/abc');
 eq(ta.value, 'https://5mgl.com/abc\n\n※URLを長押し→リンクを開く 💕', '1行目の(ブルスカ短縮URL)を置換');
@@ -111,6 +111,9 @@ eq(ta2.value, '↑ 案内\nhttps://5mgl.com/abc\n【感想】', '途中行の(�
 const ta3 = { value: '↑ 案内\nhttps://5mgl.com/abc\n【感想】' };
 mkPut({ ytDesc: ta3 }, () => {}, 'https://5mgl.com/abc')('https://5mgl.com/new');
 eq(ta3.value, '↑ 案内\nhttps://5mgl.com/new\n【感想】', '次の投稿は前回URLの行を置換(上に積まない)');
+const ta4 = { value: '(ブルスカ短縮リンク)\n\n↑ 案内' };
+mkPut({ ytDesc: ta4 }, () => {}, '')('https://5mgl.com/abc');
+eq(ta4.value, 'https://5mgl.com/abc\n\n↑ 案内', '(ブルスカ短縮リンク)表記も目印として置換(Chami msg 1559267964866535467)');
 
 console.log('--- 投稿タブ2種の中身を同期取り込み後にその場で反映(Chami msg 1559250741233713345) ---');
 eq(/document\.addEventListener\('go5-synced', function \(e\) \{ if \(e && e\.detail && e\.detail\.pulled\) refreshPostTabsFromSync_\(\); \}\);/.test(bs), true, 'go5-synced(pulled>0)で投稿タブの欄を読み直す');
