@@ -1628,7 +1628,7 @@
         if (t && t !== meta.title && titles.indexOf(t) < 0) titles.push(t);
       });
       if (!(window.Go5Drive && typeof window.Go5Drive.fetchVideo === 'function') ||
-          (meta.account !== 'acc1' && meta.account !== 'acc2') || !titles.length) {
+          (meta.account !== 'acc1' && meta.account !== 'acc2' && meta.account !== 'acc3') || !titles.length) {
         legacyDriveVideoRead_ = Promise.resolve(null);
         return legacyDriveVideoRead_;
       }
@@ -1658,7 +1658,7 @@
     // 取得したバイトは後段でタグなしmeta.titleへ保存する。旧フォルダへの書込・rememberはしない。
     function readDriveAsset_(method) {
       if (!(window.Go5Drive && typeof window.Go5Drive[method] === 'function') ||
-          (meta.account !== 'acc1' && meta.account !== 'acc2') || !meta.title) return Promise.resolve(null);
+          (meta.account !== 'acc1' && meta.account !== 'acc2' && meta.account !== 'acc3') || !meta.title) return Promise.resolve(null);
       var titles = [meta.title];
       // 動画の旧フォルダ照会は readLegacyDriveVideo_ に集約し、プレビュー生成と保存救出で同じ取得を共有する。
       if (method !== 'fetchVideo') {
@@ -1836,7 +1836,7 @@
     function resolveOkFolder_() {
       if (folderId)
         return Go5Drive.checkSaved(meta.account, meta.title).then(function (saved) { return saved ? folderId : ''; }, function () { return ''; });
-      if (!(Go5Drive.checkSaved && Go5Drive.resolveFolderUrl && (meta.account === 'acc1' || meta.account === 'acc2') && meta.title))
+      if (!(Go5Drive.checkSaved && Go5Drive.resolveFolderUrl && (meta.account === 'acc1' || meta.account === 'acc2' || meta.account === 'acc3') && meta.title))
         return Promise.resolve('');
       return Go5Drive.checkSaved(meta.account, meta.title).then(function (saved) {
         if (!saved) return ''; // Driveに動画がまだ無い＝本当の保存(全部)へ倒す
@@ -1921,7 +1921,7 @@
     //   手元にあるプレビュー/元画像だけ Worker(ensure_folder) で退避保存する。動画は正直に「見つからず保存できない・
     //   手動で追加して」と返す(素直にギブアップ)。Driveに既に在るものは上げ直さない(冪等・重複プレビューを再演しない)。
     function salvageWithoutVideo_() {
-      if (!(window.Go5Drive && typeof window.Go5Drive.ensureFolder === 'function') || (meta.account !== 'acc1' && meta.account !== 'acc2') || !meta.title) {
+      if (!(window.Go5Drive && typeof window.Go5Drive.ensureFolder === 'function') || (meta.account !== 'acc1' && meta.account !== 'acc2' && meta.account !== 'acc3') || !meta.title) {
         if (!opts.silent) alert('動画データが見つかりません(保存期間が過ぎたか削除されました)。投稿履歴には記録済み・使用画像のプレビューも設定済みです。Google Driveへの動画保存だけスキップしました。');
         finishDriveDataset_(false, '動画データ無し(プレビューは設定済み)');
         return;
@@ -2127,7 +2127,7 @@
     // Google Driveの同一チャンネル親＋safeName(題名)完全一致を照合し、既存なら必ず再利用する。
     var floorReady = Promise.resolve(null);
     if (window.Go5Drive && typeof window.Go5Drive.ensureFolder === 'function' &&
-        (meta.account === 'acc1' || meta.account === 'acc2') && meta.title) {
+        (meta.account === 'acc1' || meta.account === 'acc2' || meta.account === 'acc3') && meta.title) {
       floorReady = window.Go5Drive.ensureFolder(meta.account, meta.title, [], vid || meta.id).then(function (floor) {
         if (floor && floor.ok && floor.folderId && window.Go5Drive.rememberFolder) {
           // 履歴ID・元の投稿ID・stock IDのどれから来ても同じ実フォルダへ戻す。

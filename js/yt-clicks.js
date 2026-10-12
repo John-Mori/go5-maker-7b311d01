@@ -2139,7 +2139,7 @@
       var prevN = cand.usedPrevCount ? (cand.usedPrevCount(pKey) || 0) : 0;
       if (prevN > 0) { finishItem('had'); return; }
       // ①Driveを先に見る → 無ければ②動画の末尾(約5秒)フレームから生成。
-      var driveP = (window.Go5Drive && window.Go5Drive.fetchPreview && (ch === 'acc1' || ch === 'acc2'))
+      var driveP = (window.Go5Drive && window.Go5Drive.fetchPreview && (ch === 'acc1' || ch === 'acc2' || ch === 'acc3'))
         ? window.Go5Drive.fetchPreview(ch, t.title || '').catch(function () { return null; })
         : Promise.resolve(null);
       driveP.then(function (durl) {
@@ -2155,7 +2155,7 @@
         //   →Driveの[題名]フォルダから動画本体を取り寄せ、末尾(約5秒)フレームからプレビューを起こす
         //   (Chami指摘2026-08-14「別端末とか関係なくDriveの動画を参照すればできる」)。
         if (window.Go5Drive && window.Go5Drive.fetchVideo &&
-            window.Go5Stock && window.Go5Stock.previewFromVideoBlob && (ch === 'acc1' || ch === 'acc2')) {
+            window.Go5Stock && window.Go5Stock.previewFromVideoBlob && (ch === 'acc1' || ch === 'acc2' || ch === 'acc3')) {
           return window.Go5Drive.fetchVideo(ch, t.title || '').then(function (vb) {
             if (!vb) return null;
             return window.Go5Stock.previewFromVideoBlob(vb);

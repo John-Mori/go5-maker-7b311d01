@@ -249,9 +249,11 @@ function channelToFolderId(channel, env) {
   const c = (channel || "").toLowerCase();
   if (c === "acc1") return env.FOLDER_ID_ACC1 || "";
   if (c === "acc2") return env.FOLDER_ID_ACC2 || "";
+  if (c === "acc3") return env.FOLDER_ID_ACC3 || "";
   // 予備：ラベル一致（IDが主、これは保険）
   if (env.LABEL_ACC1 && channel === env.LABEL_ACC1) return env.FOLDER_ID_ACC1 || "";
   if (env.LABEL_ACC2 && channel === env.LABEL_ACC2) return env.FOLDER_ID_ACC2 || "";
+  if (env.LABEL_ACC3 && channel === env.LABEL_ACC3) return env.FOLDER_ID_ACC3 || "";
   return "";
 }
 

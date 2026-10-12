@@ -14,6 +14,7 @@ ALLOWED_ORIGIN = "https://john-mori.github.io"
 # 保存先フォルダID（SETUP.md の手順で取得して貼る。空のままだと保存されずエラー）
 FOLDER_ID_ACC1 = "1B8444oTjKfvEEx6Wcb3BTUqW5TcKn1M-"   # 月詠み色恋劇場
 FOLDER_ID_ACC2 = "12OnAu286z8Z0pCDz0bZb1khS3ydmmtwa"   # 宵桜艶帖～Yoizakura Tsuyacho～
+FOLDER_ID_ACC3 = "1dHmzSWVaKERlnsjMcE75sO2nWH4m1PLh"   # 癒やし倉庫(マイドライブ/5秒動画総合/癒し倉庫。PCがE:\5秒動画総合\癒し倉庫へ写す・2026-10-12)
 # 1日あたりのアップロード上限（レート制限）
 DAILY_LIMIT = "100"
 # 同題名の上書きを有効化（Chami指示2026-08-13）。'1' の時だけ、フロントが overwrite=1 を送った保存で
@@ -22,6 +23,7 @@ ALLOW_OVERWRITE = "1"
 # 予備：ラベル一致用（任意。IDが主。未設定でも可）
 LABEL_ACC1 = "月詠み色恋劇場"
 LABEL_ACC2 = "宵桜艶帖～Yoizakura Tsuyacho～"
+LABEL_ACC3 = "癒やし倉庫"
 
 # ── 動画/画像の R2 バケット（sync-worker と共有）──★真因対策(2026-08-18 実測)：go5-drive-saver から
 #    go5-sync.workers.dev への「同一アカウント workers.dev 間 fetch」は、外部curlが 200/8.7MB を返す同一URLでも

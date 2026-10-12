@@ -2,7 +2,7 @@
  * drive-upload.js — 動画作成完了時に、生成動画＋元画像を Cloudflare Worker 経由で
  * Google Drive(マイドライブ/AFI5秒動画/[チャンネル]/[動画名]/)へ自動保存する。
  *
- * - チャンネルは window.getCurrentAccount()。(acc1=月詠み色恋劇場 / acc2=宵桜艶帖)
+ * - チャンネルは window.getCurrentAccount()。(acc1=月詠み色恋劇場 / acc2=宵桜艶帖 / acc3=癒やし倉庫)
  *   不明なら保存せずエラー表示。(取り違え防止)
  * - 失敗しても動画作成自体は成功のまま。リトライ可能なエラーを出す。
  * - 共有シークレットは「閲覧可能でも問題ない前提」。実防御は Worker 側の Origin制限＋
@@ -61,8 +61,10 @@
   function setStatus(html) { statusEl().innerHTML = html; }
 
   function channelLabel(id) {
-    return id === "acc1" ? "月詠み色恋劇場" : id === "acc2" ? "宵桜艶帖" : "";
+    return id === "acc1" ? "月詠み色恋劇場" : id === "acc2" ? "宵桜艶帖" : id === "acc3" ? "癒やし倉庫" : "";
   }
+  // 保存先を持つチャンネルか(acc3=癒やし倉庫は2026-10-12追加。Worker側 FOLDER_ID_ACC3 と対)
+  function isDriveCh(c) { return c === "acc1" || c === "acc2" || c === "acc3"; }
 
   var lastPayload = null; // 手動リトライ用(メモリのみ)
   // 直近アップロードの文脈：Bsky添付画像を「同じ動画フォルダ」へ後追い保存するために保持。
@@ -188,9 +190,9 @@
     if (!d.blob || d.test) return;
     var name = d.name || "video.mp4";
     var title = (d.title || "").trim() || name.replace(/\.[^.]+$/, "");
-    var channel = (d.account === "acc1" || d.account === "acc2") ? d.account
+    var channel = isDriveCh(d.account) ? d.account
       : ((typeof window.getCurrentAccount === "function") ? window.getCurrentAccount() : "");
-    if (channel !== "acc1" && channel !== "acc2") return;
+    if (!isDriveCh(channel)) return;
     // 宛先の題名/チャンネルだけ控える。folderId は投稿完了時に確定するのでここでは空のまま。
     lastCtx = { videoId: d.videoId || "", title: title, channel: channel, folderId: "", queuedImage: lastCtx.queuedImage };
   });
@@ -201,7 +203,7 @@
     opts = opts || {};
     if (!configured()) { showError("channel_unresolved"); return; }
     if (!blob) return;
-    if (channel !== "acc1" && channel !== "acc2") { showError("channel_unresolved"); return; }
+    if (!isDriveCh(channel)) { showError("channel_unresolved"); return; }
     // キューに溜まっていた Bsky 添付画像は引き継ぐ
     lastCtx = { videoId: videoId || "", title: title, channel: channel, folderId: "", queuedImage: lastCtx.queuedImage };
     var videoFile = new File([blob], videoName || (title.replace(/[\\/:"*?<>|]/g, '_') + '.mp4'), { type: blob.type || "video/mp4" });
@@ -221,7 +223,7 @@
   //   見つからなければ null(Chami「ないものはなかったでOK」)。Worker側は read-only=非破壊。
   function fetchPreview_(channel, title) {
     if (!configured()) return Promise.resolve(null);
-    if (channel !== "acc1" && channel !== "acc2") return Promise.resolve(null);
+    if (!isDriveCh(channel)) return Promise.resolve(null);
     if (!title) return Promise.resolve(null);
     var fd = new FormData();
     fd.append("action", "fetch_preview");
@@ -237,7 +239,7 @@
   //   ★Chami指摘2026-08-14「別端末とか関係なく保存先のGoogleドライブの動画参照すればできる」への対応。
   function fetchVideo_(channel, title) {
     if (!configured()) return Promise.resolve(null);
-    if (channel !== "acc1" && channel !== "acc2") return Promise.resolve(null);
+    if (!isDriveCh(channel)) return Promise.resolve(null);
     if (!title) return Promise.resolve(null);
     var fd = new FormData();
     fd.append("action", "fetch_video");
@@ -257,7 +259,7 @@
   //   足りない元画像だけを補う(Chami報告2026-08-18)。返り= {saved,hasPreview,hasSrc} / 判定不能は null
   //   (呼び出し側は null を「不明」として重複防止側=追記しない へ倒す)。
   function folderState_(channel, title) {
-    if (!configured() || (channel !== "acc1" && channel !== "acc2") || !title) return Promise.resolve(null);
+    if (!configured() || !isDriveCh(channel) || !title) return Promise.resolve(null);
     var fd = new FormData();
     fd.append("action", "folder_state");
     fd.append("channel", channel);
@@ -273,7 +275,7 @@
   //   Worker側(action=ensure_folder)が既存フォルダ再利用＋同役割の重複を上げない(冪等)。命名は投稿完了時と同じ
   //   "題名_プレビュー.拡張子"/"題名_元画像.拡張子"。返り= {ok,folderId,folderLink,created,added,skipped} / 失敗は{ok:false}。
   function ensureFolderSave_(channel, title, imgs, videoId) {
-    if (!configured() || (channel !== "acc1" && channel !== "acc2") || !title) return Promise.resolve({ ok: false, error: "not_ready" });
+    if (!configured() || !isDriveCh(channel) || !title) return Promise.resolve({ ok: false, error: "not_ready" });
     var safeTitle = String(title || "動画").replace(/[\\/:"*?<>|]/g, '_');
     var fd = new FormData();
     fd.append("action", "ensure_folder");
@@ -308,7 +310,7 @@
   //   ★動画/元画像は作成時に保存済み=ここでは上げ直さない。プレビューだけ「動画名_プレビュー.拡張子」で足す。
   function appendImageToFolder_(channel, title, folderId, imgBlob, fileName) {
     if (!configured() || !folderId || !imgBlob) return;
-    if (channel !== "acc1" && channel !== "acc2") return;
+    if (!isDriveCh(channel)) return;
     var safeTitle = String(title || "動画").replace(/[\\/:"*?<>|]/g, '_');
     var name = fileName || (safeTitle + "_プレビュー." + imgExt(imgBlob));
     // ★File実体が既に別名(候補タブ由来の candidate_N.jpg 等)を持っていても、必ず意図した名前で上げ直す。
@@ -329,7 +331,7 @@
     opts = opts || {};
     var channel = opts.channel, title = opts.title, videoId = opts.videoId;
     if (!configured()) return Promise.resolve({ ok: false, error: "not_configured" });
-    if (channel !== "acc1" && channel !== "acc2") return Promise.resolve({ ok: false, error: "channel_unresolved" });
+    if (!isDriveCh(channel)) return Promise.resolve({ ok: false, error: "channel_unresolved" });
     if (!title || !videoId) return Promise.resolve({ ok: false, error: "missing_fields" });
     if (!(window.Go5Sync && Go5Sync.keyForName && Go5Sync.getConfig)) return Promise.resolve({ ok: false, error: "no_sync" });
     var r2Base = (Go5Sync.getConfig() || {}).url || "";
@@ -358,7 +360,7 @@
   }
   // 完走確認(read-only)：[題名]フォルダに動画が在れば true。永続pendingを畳めるかの照会に使う。
   function checkSaved_(channel, title) {
-    if (!configured() || (channel !== "acc1" && channel !== "acc2") || !title) return Promise.resolve(false);
+    if (!configured() || !isDriveCh(channel) || !title) return Promise.resolve(false);
     var fd = new FormData();
     fd.append("action", "check_saved");
     fd.append("channel", channel);
@@ -384,7 +386,7 @@
   //   ので、パスまわりを直したい時はこのブロック1箇所を見ればよい。
   var DRIVE_PATH = {
     root: "AFI5秒動画",                                   // マイドライブ直下の親フォルダ名(保存先の頂点)
-    channels: { acc1: "月詠み色恋劇場", acc2: "宵桜艶帖" }, // チャンネル→フォルダ名(表示・照合用の控え)
+    channels: { acc1: "月詠み色恋劇場", acc2: "宵桜艶帖", acc3: "癒やし倉庫" }, // チャンネル→フォルダ名(表示・照合用の控え)
   };
   function folderLink_(fid) { return "https://drive.google.com/drive/folders/" + encodeURIComponent(fid); }
   // 題名ベースの控えキー(videoIdが無い過去投稿でも実フォルダIDを覚えておける)。
@@ -426,7 +428,7 @@
   function resolveFolderUrl_(channel, title, videoId) {
     var fid = cachedFolderId_(channel, title, videoId);
     if (fid) return Promise.resolve(folderLink_(fid));
-    if (!configured() || (channel !== "acc1" && channel !== "acc2") || !title) return Promise.resolve("");
+    if (!configured() || !isDriveCh(channel) || !title) return Promise.resolve("");
     var fd = new FormData();
     fd.append("action", "folder_link");
     fd.append("channel", channel);
