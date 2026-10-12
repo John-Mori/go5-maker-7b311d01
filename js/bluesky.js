@@ -1587,6 +1587,7 @@
   // ---- 短縮URL表示・コピー助関数 ----
   var prevShortUrl = '', lastShortUrl = '';
   var PLACEHOLDER_URL = '(投稿するとここに短縮URLが入ります)';
+  var BSKY_SHORT_PH = '(ブルスカ短縮URL)'; // 説明欄テンプレの手書き目印(Chami)。投稿後の短縮URLでこの行を置換する
   function fallbackCopy(text, ok) {
     var ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
     document.body.appendChild(ta); ta.focus(); ta.select();
@@ -1600,6 +1601,11 @@
   function putUrlTop(url) {
     if (!url || !els.ytDesc) return;
     var lines = els.ytDesc.value.split('\n'); if (!lines.length) lines = [''];
+    // 「(ブルスカ短縮URL)」の行(と、そこへ前回入れたURLの行)は何行目でもその行を置換(Chami 2026-10-13 msg 1559249835989925978)。
+    for (var bi = 0; bi < lines.length; bi++) {
+      var lt = lines[bi].trim();
+      if (lt === BSKY_SHORT_PH || (prevShortUrl && lt === prevShortUrl)) { lines[bi] = url; els.ytDesc.value = lines.join('\n'); saveA('yt_desc', els.ytDesc.value); return; }
+    }
     var f = (lines[0] || '').trim();
     // 1行目が「短縮URLプレースホルダ」or 前回URL or URL なら置換。それ以外(例：↑案内文)は上に差し込む。
     if (f === PLACEHOLDER_URL || f === prevShortUrl || /^https?:\/\//.test(f) || /短縮URL/.test(f)) lines[0] = url;
@@ -2863,6 +2869,12 @@
         })
         .then(function (res) {
           setThreadStatus('✅ 親を投稿 → ' + Math.round(res.delayMs / 1000) + '秒後にリプライへURLを投稿しました。<br>親：<a href="' + res.parent.postUrl + '" target="_blank" rel="noopener">開く</a>／リプ：<a href="' + res.reply.postUrl + '" target="_blank" rel="noopener">開く</a>', true);
+          // 子(リプ)の投稿URLを短縮してYouTube説明欄の「(ブルスカ短縮URL)」へ入れる(Chami 2026-10-13 msg 1559249835989925978)。
+          //   投稿は済んでいるので、短縮の失敗は投稿失敗として出さない(生URLのまま入る)。
+          var replyPostUrl = res.reply.postUrl;
+          makeShortAndShare(replyPostUrl, { account: acctId() }).then(function (r) {
+            setShareOutputs((r && (r.shareUrl || r.shortUrl)) || '', replyPostUrl);
+          }, function () { setShareOutputs('', replyPostUrl); });
         })
         .catch(function (e) { setThreadStatus('⚠️ 投稿に失敗：<br>' + friendlyLoginError(e && e.message ? e.message : e), true); })
         .then(function () { els.threadPostBtn.disabled = false; });

@@ -93,5 +93,23 @@ eq(/replyImageBlob_\(\)\.then\(function \(replyBlob\)/.test(threadBtnBlock), tru
 eq(/replyText: BSKY_REPLY_TEXT \+ '\\n' \+ replyUrl/.test(threadBtnBlock), true, '手動ツールの返信本文も「続きはこちら」+URL');
 eq(/replyImageBlob: replyBlob/.test(threadBtnBlock), true, '手動ツールのblueskyPostThread呼び出しにreplyImageBlobを渡す');
 
-console.log(fails ? `\n${fails} FAIL` : '\nALL PASS');
+console.log('--- YouTube説明欄の(ブルスカ短縮URL)を子(リプ)投稿の短縮URLで置換(Chami msg 1559249835989925978) ---');
+eq(/var BSKY_SHORT_PH = '\(ブルスカ短縮URL\)';/.test(bs), true, '目印(ブルスカ短縮URL)の定義');
+eq(/makeShortAndShare\(replyPostUrl, \{ account: acctId\(\) \}\)/.test(threadBtnBlock), true, '手動ツール成功時に子(リプ)の投稿URLを短縮');
+eq(/setShareOutputs\(\(r && \(r\.shareUrl \|\| r\.shortUrl\)\) \|\| '', replyPostUrl\)/.test(threadBtnBlock), true, '短縮結果を説明欄へ流す(失敗時は生URL)');
+// putUrlTop を切り出して実際に置換させる
+const pS = bs.indexOf('  function putUrlTop(');
+const pE = bs.indexOf('  function setShareOutputs(');
+const mkPut = new Function('els', 'saveA', 'prevShortUrl', "var PLACEHOLDER_URL = '(投稿するとここに短縮URLが入ります)'; var BSKY_SHORT_PH = '(ブルスカ短縮URL)';\n" + bs.slice(pS, pE) + '\nreturn putUrlTop;');
+const ta = { value: '(ブルスカ短縮URL)\n\n※URLを長押し→リンクを開く 💕' };
+mkPut({ ytDesc: ta }, () => {}, '')('https://5mgl.com/abc');
+eq(ta.value, 'https://5mgl.com/abc\n\n※URLを長押し→リンクを開く 💕', '1行目の(ブルスカ短縮URL)を置換');
+const ta2 = { value: '↑ 案内\n(ブルスカ短縮URL)\n【感想】' };
+mkPut({ ytDesc: ta2 }, () => {}, '')('https://5mgl.com/abc');
+eq(ta2.value, '↑ 案内\nhttps://5mgl.com/abc\n【感想】', '途中行の(ブルスカ短縮URL)もその行を置換');
+const ta3 = { value: '↑ 案内\nhttps://5mgl.com/abc\n【感想】' };
+mkPut({ ytDesc: ta3 }, () => {}, 'https://5mgl.com/abc')('https://5mgl.com/new');
+eq(ta3.value, '↑ 案内\nhttps://5mgl.com/new\n【感想】', '次の投稿は前回URLの行を置換(上に積まない)');
+
+console.log(fails ?`\n${fails} FAIL` : '\nALL PASS');
 process.exit(fails ? 1 : 0);
