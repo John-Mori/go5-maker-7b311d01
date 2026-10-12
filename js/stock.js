@@ -3377,8 +3377,8 @@
     var parentText = String(($('draftParentText') || {}).value || '').trim();
     var aff = (meta.affiliateUrl || meta.workUrl || '').trim();
     if (pd.bskyParentUrl && !window.confirm('このドラフトはBlueskyへ投稿済みです。もう一度投稿しますか？(二重投稿になります)')) return;
-    if (!window.confirm('Blueskyへ親(画像+本文)を投稿し、数十秒あけて返信に作品リンクを投稿します。よろしいですか？')) return;
-    btn.disabled = true; say('投稿中…(親→待機→返信。1分ほどかかります)');
+    if (!window.confirm('Blueskyへ親(画像+本文)を投稿し、3〜10秒あけて返信に作品リンクを投稿します。よろしいですか？')) return;
+    btn.disabled = true; say('投稿中…(親→3〜10秒待機→返信)');
     var imgP = (_draftImg.id === meta.id && _draftImg.blob) ? Promise.resolve(_draftImg.blob) : resolveSrcImageBlob_(meta.id);
     imgP.catch(function () { return null; }).then(function (blob) {
       return window.Go5DraftBskyThread({ account: meta.account || 'acc1', parentText: parentText, workLink: aff, imageBlob: blob || null });

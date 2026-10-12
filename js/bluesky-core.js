@@ -234,8 +234,8 @@
    * 一括投稿：親(本文はそのまま・手入力想定)を投稿 → ランダムな秒数を空ける →
    * リプライ(URLを本文として)を親へぶら下げる。(Chami依頼2026-10-09「同時には出さない。
    * 親を出した後、ランダムな秒数を空けてリプライを出す。1分以内に収め、その範囲から乱数で選ぶ」)
-   * delayMinMs/delayMaxMs は既定 8000〜55000(8〜55秒)。「1分以内」の指定に対し、瞬時投稿に見えない
-   * 下限と、60秒の上限に食い込まない余裕を両方取った範囲。呼び出し側で上書き可。
+   * delayMinMs/delayMaxMs は既定 3000〜10000(3〜10秒)。(Chami 2026-10-13 msg 1559260340318109789「子のリプライもっと早くして3〜10秒でいい」で旧8〜55秒から短縮)
+   * 呼び出し側で上書き可。
    * @returns Promise<{ parent:{uri,cid,handle,rkey,postUrl}, reply:{...}, delayMs }>
    */
   function blueskyPostThread(o) {
@@ -244,8 +244,8 @@
     var ident = String(o.identifier || '').trim().replace(/^@/, '');
     var parentText = String(o.parentText || '');
     var replyText = String(o.replyText || '');
-    var delayMin = (typeof o.delayMinMs === 'number') ? o.delayMinMs : 8000;
-    var delayMax = (typeof o.delayMaxMs === 'number') ? o.delayMaxMs : 55000;
+    var delayMin = (typeof o.delayMinMs === 'number') ? o.delayMinMs : 3000;
+    var delayMax = (typeof o.delayMaxMs === 'number') ? o.delayMaxMs : 10000;
     var delayMs = Math.round(delayMin + Math.random() * Math.max(0, delayMax - delayMin));
     var sess;
     var blobs = (o.imageBlobs || []).concat(o.imageBlob ? [o.imageBlob] : []).filter(Boolean);

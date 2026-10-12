@@ -2870,7 +2870,7 @@
       if (!replyUrl) { setThreadStatus('リプライに吊り下げるURLを入力してください。'); return; }
       var c = creds(); if (!c.handle || !c.appPw) { setThreadStatus('⚙設定でハンドルとアプリパスワードを入れてください。'); return; }
       if (!window.BlueskyCore || !window.BlueskyCore.blueskyPostThread) { setThreadStatus('投稿モジュール未読込。'); return; }
-      if (!window.confirm('親の投稿(本文はそのまま)を投稿し、ランダムな秒数(1分以内)を空けてからリプライにURLを投稿します。よろしいですか？')) return;
+      if (!window.confirm('親の投稿(本文はそのまま)を投稿し、ランダムな秒数(3〜10秒)を空けてからリプライにURLを投稿します。よろしいですか？')) return;
       els.threadPostBtn.disabled = true; setThreadStatus('リンクを準備中…');
       var f = selectedPostFile || photoFile();
       threadReplyLink_(replyUrl)
