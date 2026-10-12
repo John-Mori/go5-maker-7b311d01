@@ -164,10 +164,13 @@
       return body;
     });
   }
-  function pullState() { return api("/api/pull").then(function (r) { return readApiJson(r, false); }); }
+  // ★同期本体の通信にも上限を付ける(2026-10-12 サブ端末iPhone16で「画像を確認 0/178」のまま固着)。
+  //   どれか1本でも無期限ハングすると _busy が立ちっぱなしになり、以後の同期が全部 skipped になる。
+  var STATE_TIMEOUT_MS = 90000, PUSH_TIMEOUT_MS = 120000, IMG_HAS_TIMEOUT_MS = 20000, IMG_FETCH_TIMEOUT_MS = 60000;
+  function pullState() { return api("/api/pull", { timeoutMs: STATE_TIMEOUT_MS }).then(function (r) { return readApiJson(r, false); }); }
   function pushState(map, baseVersion) {
     var body = { blob: JSON.stringify(map), updatedAt: new Date().toISOString(), device: deviceName(), baseVersion: baseVersion || 0 };
-    return api("/api/push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(function (r) { return readApiJson(r, true); });
+    return api("/api/push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), timeoutMs: PUSH_TIMEOUT_MS }).then(function (r) { return readApiJson(r, true); });
   }
 
   // ── 画像(R2)：dataURL⇄content-hash ──
@@ -191,7 +194,11 @@
     if (!refs.length) return Promise.resolve({ val: val, failed: 0 });
     var c = cfg(), byHash = {}, uniq = {}; refs.forEach(function (h) { uniq[h] = 1; });
     return Promise.all(Object.keys(uniq).map(function (h) {
-      return root.fetch(c.url + "/img/" + h).then(function (r) { return r.ok ? r.text() : ""; }).then(function (t) { byHash[h] = /^data:/.test(t) ? t : ""; }).catch(function () { byHash[h] = ""; });
+      // ★本文の読み終わりまで含めて60秒で打ち切る(iOS Safariは無期限ハングし得る→同期全体が固着する)。
+      var ctl = typeof root.AbortController === "function" ? new root.AbortController() : null;
+      var timer = ctl ? root.setTimeout(function () { try { ctl.abort(); } catch (e) {} }, IMG_FETCH_TIMEOUT_MS) : null;
+      return root.fetch(c.url + "/img/" + h, ctl ? { signal: ctl.signal } : undefined).then(function (r) { return r.ok ? r.text() : ""; }).then(function (t) { byHash[h] = /^data:/.test(t) ? t : ""; }).catch(function () { byHash[h] = ""; })
+        .then(function () { if (timer) root.clearTimeout(timer); });
     })).then(function () {
       var failed = 0;
       var out = mapVal(val, isImgRef, function (ref) { var v = byHash[ref.__img]; if (!v) failed++; return v || ""; });
@@ -276,6 +283,8 @@
   }
 
   var _busy = false, _lastErr = "", _lastAt = 0;
+  // 同期1回の世代番号。見張りが打ち切った古い同期は、後から完了しても保存・送信・_busy解除をしない。
+  var _gen = 0, SYNC_WATCHDOG_MS = 300000;
   // 進捗(Chami依頼2026-07-14「同期中…が長い・進んでるか分からない」): 画像の送受信を件数で見せる。
   var _prog = { phase: "", done: 0, total: 0 };
   function setProg(phase, done, total) { _prog = { phase: phase, done: done, total: total }; }
@@ -829,6 +838,16 @@
   function syncOnce(retry) {
     if (!configured() || (_busy && !retry)) return Promise.resolve({ ok: false, skipped: true });
     var c = cfg(); _busy = true;
+    var gen = ++_gen;
+    function live() { return gen === _gen; }
+    function release() { if (live()) { _busy = false; root.clearTimeout(watchdog); } }
+    // ★見張り: 通信の打ち切りをすり抜けて終わらない同期があっても、5分で必ず次の同期へ道を空ける。
+    var watchdog = root.setTimeout(function () {
+      if (!live() || !_busy) return;
+      _gen++; _busy = false; setProg("", 0, 0);
+      _lastErr = "同期が5分で終わらないため打ち切りました(次の同期でやり直します)";
+      try { root.console && root.console.warn("[go5 sync] watchdog: 同期を打ち切り"); } catch (x) {}
+    }, SYNC_WATCHDOG_MS);
     var snap = loadSnap(), ts = loadTs(), now = Date.now();
     var snapLs = snap.ls || {}, snapIdb = snap.idb || {};
     // ★初回参加(この端末が未同期)は、確立済みのクラウドを壊さないよう「既存キーは雲を採用」。
@@ -877,8 +896,10 @@
       };
       var hByUrl = {};
       if (!urls.length) { keys.forEach(function (k) { curIdb[k] = all[k]; }); return; }
+      // 「画像を確認」はハッシュ化とhas照会の両方で数字を進める(旧実装は終わるまで 0/N のまま=止まって見えた)。
+      var chkDone = 0;
       setProg("画像を確認", 0, urls.length);
-      return Promise.all(urls.map(function (u) { return sha256hex(u).then(function (h) { hByUrl[u] = h; }); })).then(function () {
+      return Promise.all(urls.map(function (u) { return sha256hex(u).then(function (h) { hByUrl[u] = h; if (live()) setProg("画像を確認", ++chkDone, urls.length); }); })).then(function () {
         var okSet = loadImgOk(), tNow = Date.now(), present = {};
         var unknown = urls.filter(function (u) { var t = okSet[hByUrl[u]]; return !(t && (tNow - t) < IMGOK_TTL_MS); });
         if (!unknown.length) return;                       // 全部確認済み＝リクエスト0本
@@ -886,7 +907,7 @@
         for (var i = 0; i < unknown.length; i += CH) chunks.push(unknown.slice(i, i + CH));
         return chunks.reduce(function (p, ch) {
           return p.then(function () {
-            return api("/api/img/has?keys=" + ch.map(function (u) { return hByUrl[u]; }).join(","))
+            return api("/api/img/has?keys=" + ch.map(function (u) { return hByUrl[u]; }).join(","), { timeoutMs: IMG_HAS_TIMEOUT_MS })
               .then(function (r) { return r.json(); }).catch(function () { return { present: [] }; })
               .then(function (res) { (res.present || []).forEach(function (h) { present[h] = 1; }); });
           });
@@ -895,7 +916,8 @@
           var done = 0; if (toUp.length) setProg("画像を送信", 0, toUp.length);
           return toUp.reduce(function (p, u) {
             return p.then(function () {
-              return api("/api/img/" + hByUrl[u], { method: "PUT", headers: { "Content-Type": "text/plain" }, body: u })
+              if (!live()) return; // 打ち切られた古い同期は送信を続けない
+              return api("/api/img/" + hByUrl[u], { method: "PUT", headers: { "Content-Type": "text/plain" }, body: u, timeoutMs: IMG_FETCH_TIMEOUT_MS })
                 .then(function (r) { return r.json(); })
                 .then(function (j) { if (!j || !j.ok) hByUrl[u] = null; else present[hByUrl[u]] = 1; })
                 .catch(function () { hByUrl[u] = null; })
@@ -1235,16 +1257,21 @@
           //   のたびに候補タブを全再描画=「見てるだけで勝手にリロード」になる真因(Chami 2026-08-06)。
           var pulledImg = pulledImgReal;
           var pulledCand = pulledCandReal;
-          function persist(ver) { setVer(ver); saveTs(ts); saveSnap({ ls: newSnapLs, idb: newSnapIdb, secPlain: newSecPlain }); _busy = false; _lastErr = ""; _lastAt = Date.now(); setProg("", 0, 0); fireSynced(pulledLs, pulledImg, pulledCand, pulledImgKeys); }
+          function persist(ver) { setVer(ver); saveTs(ts); saveSnap({ ls: newSnapLs, idb: newSnapIdb, secPlain: newSecPlain }); release(); _lastErr = ""; _lastAt = Date.now(); setProg("", 0, 0); fireSynced(pulledLs, pulledImg, pulledCand, pulledImgKeys); }
+          if (!live()) return { ok: false, stale: true }; // 見張りに打ち切られた同期は保存も送信もしない
           if (!changed) { persist(rver); return { ok: true, version: rver, noChange: true, pulled: pulledLs, pulledCand: pulledCand }; }
           return pushState(outState, rver).then(function (pr) {
+            if (!live()) return { ok: false, stale: true };
             if (pr && pr.ok) { persist(pr.version); return { ok: true, version: pr.version, pulled: pulledLs, pulledCand: pulledCand }; }
-            if (pr && pr.conflict && !retry) { _busy = false; return syncOnce(true); } // 再pull→マージ→再push
-            _busy = false; _lastErr = (pr && pr.error) || "push失敗"; setProg("", 0, 0); return { ok: false, error: _lastErr };
+            if (pr && pr.conflict && !retry) { release(); return syncOnce(true); } // 再pull→マージ→再push
+            release(); _lastErr = (pr && pr.error) || "push失敗"; setProg("", 0, 0); return { ok: false, error: _lastErr };
           });
         });
       });
-    }).catch(function (e) { _busy = false; _lastErr = String((e && e.message) || e); setProg("", 0, 0); return { ok: false, error: _lastErr }; });
+    }).catch(function (e) {
+      if (!live()) return { ok: false, stale: true };
+      release(); _lastErr = String((e && e.message) || e); setProg("", 0, 0); return { ok: false, error: _lastErr };
+    });
   }
 
   // 候補ページ専用の高速レール。候補配列だけをpull/union/pushし、画像prefix走査・hash化・R2確認を待たない。
