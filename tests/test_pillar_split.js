@@ -83,5 +83,15 @@ eq(/window\.Go5DraftBskyThread = draftBskyThread_/.test(bs), true, 'Go5DraftBsky
 eq(/console\.(log|warn|error)\([^)]*appPw/.test(bs), false, 'アプリパスワードをconsoleへ出さない');
 eq(/if \(ev && ev\.detail && ev\.detail\.draft\) return;/.test(bs), true, 'ドラフト作成時のBluesky自動投稿ガードは残っている');
 
+console.log('--- 手動acc3ツール(els.threadPostBtn)の返信にも画像を毎回添付(三笘指示msg 1559132079621672981) ---');
+eq((bs.match(/blueskyPostThread\(/g) || []).length, 2, 'blueskyPostThreadの呼び出し元は2箇所(draftBskyThread_・els.threadPostBtn)');
+const threadBtnStart = bs.indexOf("if (els.threadPostBtn) {");
+const threadBtnEnd = bs.indexOf('\n  }', threadBtnStart);
+if (threadBtnStart < 0 || threadBtnEnd < 0) { console.log('  FAIL els.threadPostBtnのブロックが見つからない'); fails++; }
+const threadBtnBlock = bs.slice(threadBtnStart, threadBtnEnd);
+eq(/replyImageBlob_\(\)\.then\(function \(replyBlob\)/.test(threadBtnBlock), true, '手動ツールもreplyImageBlob_()で固定画像を取得');
+eq(/replyText: BSKY_REPLY_TEXT \+ '\\n' \+ replyUrl/.test(threadBtnBlock), true, '手動ツールの返信本文も「続きはこちら」+URL');
+eq(/replyImageBlob: replyBlob/.test(threadBtnBlock), true, '手動ツールのblueskyPostThread呼び出しにreplyImageBlobを渡す');
+
 console.log(fails ? `\n${fails} FAIL` : '\nALL PASS');
 process.exit(fails ? 1 : 0);

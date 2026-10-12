@@ -2855,7 +2855,11 @@
       threadReplyLink_(replyUrl)
         .then(function (link) { replyUrl = link; setThreadStatus('親を投稿中…'); return f ? compressFile(f) : null; })
         .then(function (blob) {
-          return window.BlueskyCore.blueskyPostThread({ identifier: c.handle, appPassword: c.appPw, parentText: parentText, replyText: replyUrl, imageBlob: blob });
+          // 手動ツールの返信にも draftBskyThread_ と同じ「続きはこちら」+固定画像を毎回添付する
+          //   (Chami「毎回添付」msg 1559121504128471086を字義どおり適用・三笘指示msg 1559132079621672981)。
+          return replyImageBlob_().then(function (replyBlob) {
+            return window.BlueskyCore.blueskyPostThread({ identifier: c.handle, appPassword: c.appPw, parentText: parentText, replyText: BSKY_REPLY_TEXT + '\n' + replyUrl, imageBlob: blob, replyImageBlob: replyBlob });
+          });
         })
         .then(function (res) {
           setThreadStatus('✅ 親を投稿 → ' + Math.round(res.delayMs / 1000) + '秒後にリプライへURLを投稿しました。<br>親：<a href="' + res.parent.postUrl + '" target="_blank" rel="noopener">開く</a>／リプ：<a href="' + res.reply.postUrl + '" target="_blank" rel="noopener">開く</a>', true);
