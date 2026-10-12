@@ -5212,9 +5212,11 @@
     { key: 'b30', min: 30, label: '30分' },
     { key: 'b60', min: 60, label: '1時間' },
     { key: 'b120', min: 120, label: '2時間' },
+    { key: 'b180', min: 180, label: '3時間' },     // 3h/36h はGAS時点記録 2026-10-12B と対(Chami 5Sec軍議 2026-10-12)
     { key: 'b360', min: 360, label: '6時間' },
     { key: 'b720', min: 720, label: '12時間' },
     { key: 'b1440', min: 1440, label: '24時間' },
+    { key: 'b2160', min: 2160, label: '36時間' },
     { key: 'b2880', min: 2880, label: '48時間' },
     { key: 'b4320', min: 4320, label: '72時間' }
   ];
@@ -5360,7 +5362,7 @@
     var RANK_WINS = [
       { key: 'total', label: '総合' },
       { key: 'peak', label: 'ピーク' }
-    ].concat(SNAP_BUCKETS.map(function (b) { return { key: b.key, label: b.label }; })); // 30分/1時間/2時間/6時間/12時間/24時間/48時間/72時間
+    ].concat(SNAP_BUCKETS.map(function (b) { return { key: b.key, label: b.label }; })); // 30分/1時間/2時間/3時間/6時間/12時間/24時間/36時間/48時間/72時間
     // 旧・単一モード(rank_mode)からの移行。views→(v,総合) clicks→(c1,総合) pv→(v,ピーク) pc→(c1,ピーク) bXXX→(v,窓)。
     (function migrate_() {
       if (_rankMetric || _rankWin) return; // 既に新形式が入っていれば触らない
