@@ -253,11 +253,16 @@
   //   初回参加の端末は無条件に雲へ負けていた。同期対象キーへの実際の保存/削除の時刻を端末ローカル
   //   (sync2_edit_at・sync2_*なので同期対象外)に記録し、t に使う=保存時刻が一番新しい値が勝つ。
   //   同期自身の書き込み(sysSet/sysRemove)・同じ値の書き直し・同期設定前(新端末の初期値書き込み)は数えない。
-  var EDIT_AT_KEY = "sync2_edit_at", _sysWrite = 0;
+  var EDIT_AT_KEY = "sync2_edit_at", _sysWrite = 0, _lastUserAt = 0;
   function loadEditAt() { try { return JSON.parse(LS.getItem(EDIT_AT_KEY) || "{}") || {}; } catch (e) { return {}; } }
   function noteEdit_(k, origSet) {
     if (_sysWrite || !isSyncLsKey(k) || !configured()) return;
     try { var m = loadEditAt(); m[k] = Date.now(); origSet.call(LS, EDIT_AT_KEY, JSON.stringify(m)); } catch (e) {}
+    // ★保存したら即同期を予約(Chami msg 1559251833242001409「すぐ同期されない」)。従来は記録だけで、
+    //   本文・説明欄・field_* 等の通常の保存は60秒周期か「タブを隠す」まで雲へ出なかった。
+    //   打鍵の連続は requestSync のデバウンス(3秒・直近同期から最小10秒)で1回にまとまる。
+    _lastUserAt = Date.now();
+    requestSync();
   }
   function sysSet(k, v) { _sysWrite++; try { LS.setItem(k, v); } finally { _sysWrite--; } }
   function sysRemove(k) { _sysWrite++; try { LS.removeItem(k); } finally { _sysWrite--; } }
@@ -1199,9 +1204,13 @@
             // 非配列キーはライブ値がこの同期開始後に変わっている＝マージ結果は古い。上書きせず次回同期に委ねる
             //   。(スナップショット/push対象もLIVE値のまま記録＝クラウドへ古い値を送らず、次回の変更検知も正しく働く)
             newSnapLs[k] = live; mls[k] = { t: Math.max(now, Number(loadEditAt()[k]) || 0), v: live }; // t=そのライブ値を保存した時刻
+            ts["ls:" + k] = mls[k].t; delete ts["ls:" + k + " d"];
             return;
           }
           newSnapLs[k] = finalV; if (finalV !== e.v) mls[k] = { t: e.t, v: finalV }; // 再union分をpush対象にも反映
+          // ★受け取った値にも「その値の時刻」を記録する。従来は自端末で変えたキーにしか t が無く、受け取っただけの
+          //   キーは次の同期で t=今 と見なされ、その間に他端末で保存された新しい値を古い値で巻き戻していた。
+          ts["ls:" + k] = mls[k].t || ts["ls:" + k]; delete ts["ls:" + k + " d"];
           // ★ローカルの値が実際に変わった時だけ合図を立てる。候補配列はpulledCand、それ以外はpulledへ分離し、
           //   URL等の文字だけ届いた時も候補を更新しつつ、無関係なタブの再描画は起こさない。
           try {
@@ -1239,7 +1248,7 @@
         Object.keys(midb).forEach(function (k) {
           var e = midb[k];
           if (e.d) { if (Idb && Idb.available()) applies.push(Idb.del(k).catch(function () {})); return; }
-          newSnapIdb[k] = e.v;
+          newSnapIdb[k] = e.v; ts["idb:" + k] = e.t || ts["idb:" + k]; delete ts["idb:" + k + " d"];
           if (Idb && Idb.available()) applies.push((function (kk) {
             return Idb.get(kk).catch(function () { return undefined; }).then(function (prev) {
               return downloadImagesIn(e.v).then(function (res) {
@@ -1410,15 +1419,26 @@
   // 自動同期の周期。25秒→60秒(Cloudflare無料枠10万req/日の超過対策2026-07-16: 1タブ3,456回/日→1,440回/日)。
   //   変更駆動の requestSync(デバウンス)があるので、周期を伸ばしても実変更の反映は遅れない。
   var AUTO_MS = 60000;
+  var ACTIVE_POLL_MS = 20000, ACTIVE_WINDOW_MS = 5 * 60000;
   function startAuto() {
     if (_timer || !configured()) return;
     syncOnce(false);
     // 非表示タブでは回さない＝裏で開きっぱなしのタブがWorkerを叩き続けるのを止める。
     //   表示に戻った瞬間に1回同期するため、体感の反映速度は落とさない。
+    // ★受け取り側の待ちを縮める(Chami msg 1559251833242001409): 直近5分に操作がある表示中の端末は20秒ごと、
+    //   放置中は従来どおり60秒ごとに取り込む。押し通知は無いので、操作中だけ間隔を詰めてWorker枠を守る。
+    var _lastTickAt = 0;
     _timer = root.setInterval(function () {
       if (root.document && root.document.visibilityState === "hidden") return;
-      syncOnce(false);
-    }, AUTO_MS);
+      var t = Date.now();
+      if (t - _lastUserAt > ACTIVE_WINDOW_MS && t - _lastTickAt < AUTO_MS - 1000) return;
+      _lastTickAt = t; syncOnce(false);
+    }, ACTIVE_POLL_MS);
+    if (root.document && root.document.addEventListener) {
+      ["pointerdown", "keydown", "touchstart"].forEach(function (ev) {
+        root.document.addEventListener(ev, function () { _lastUserAt = Date.now(); }, { capture: true, passive: true });
+      });
+    }
     // 復帰イベント(visibilitychange/pageshow/focus/online)は連続して撃たれる=1.5s以内はまとめて1回に。
     var _lastReturnAt = 0;
     function syncOnReturn() {
@@ -1438,6 +1458,8 @@
       root.addEventListener("pageshow", syncOnReturn);
       root.addEventListener("focus", syncOnReturn);
       root.addEventListener("online", syncOnReturn);
+      // iOS は閉じる時に visibilitychange を撃たない事がある=pagehide でも未送信の保存を押し出す。
+      root.addEventListener("pagehide", function () { syncOnce(false); });
     }
   }
 
@@ -1451,7 +1473,11 @@
     if (!configured() || _reqTimer) return;             // 既に予約済み＝デバウンス(追加予約しない)
     var sinceLast = Date.now() - (_lastAt || 0);
     var wait = Math.max(REQ_DEBOUNCE_MS, REQ_MIN_GAP_MS - sinceLast);
-    _reqTimer = root.setTimeout(function () { _reqTimer = null; syncOnce(false); }, wait);
+    // 予約が同期中(_busy)に当たって skipped になったら予約し直す(従来は次の60秒周期まで保存が残った)。
+    _reqTimer = root.setTimeout(function () {
+      _reqTimer = null;
+      syncOnce(false).then(function (r) { if (r && r.skipped && _busy) requestSync(); });
+    }, wait);
   }
 
   // 即時同期。デバウンス(3〜10秒)を待たずに今すぐpush/pullする。
