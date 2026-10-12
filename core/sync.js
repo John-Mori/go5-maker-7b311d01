@@ -248,6 +248,38 @@
   function saveTs(t) { try { LS.setItem("sync2_ts", JSON.stringify(t)); } catch (e) {} }
   function getVer() { try { return parseInt(LS.getItem("sync2_ver") || "0", 10) || 0; } catch (e) { return 0; } }
   function setVer(v) { try { LS.setItem("sync2_ver", String(v)); } catch (e) {} }
+  // ★「どれが親端末とか関係なく、最新に入力して保存されたものが正」(Chami msg 1559250925288300635)。
+  //   従来の per-key t は「同期がその変化を検知した時刻」だった=先に保存しても同期が遅れた端末が勝ち、
+  //   初回参加の端末は無条件に雲へ負けていた。同期対象キーへの実際の保存/削除の時刻を端末ローカル
+  //   (sync2_edit_at・sync2_*なので同期対象外)に記録し、t に使う=保存時刻が一番新しい値が勝つ。
+  //   同期自身の書き込み(sysSet/sysRemove)・同じ値の書き直し・同期設定前(新端末の初期値書き込み)は数えない。
+  var EDIT_AT_KEY = "sync2_edit_at", _sysWrite = 0;
+  function loadEditAt() { try { return JSON.parse(LS.getItem(EDIT_AT_KEY) || "{}") || {}; } catch (e) { return {}; } }
+  function noteEdit_(k, origSet) {
+    if (_sysWrite || !isSyncLsKey(k) || !configured()) return;
+    try { var m = loadEditAt(); m[k] = Date.now(); origSet.call(LS, EDIT_AT_KEY, JSON.stringify(m)); } catch (e) {}
+  }
+  function sysSet(k, v) { _sysWrite++; try { LS.setItem(k, v); } finally { _sysWrite--; } }
+  function sysRemove(k) { _sysWrite++; try { LS.removeItem(k); } finally { _sysWrite--; } }
+  (function installEditHook_() {
+    // 各画面の保存処理(saveA/persist-fields 等)を1つずつ書き換えず、localStorage の書き込み口で拾う。
+    var S = root.Storage, proto = S && S.prototype;
+    if (!LS || !proto || !(LS instanceof S) || proto.__go5EditHook) return;
+    var oSet = proto.setItem, oRem = proto.removeItem, oGet = proto.getItem;
+    proto.setItem = function (k, v) {
+      var watch = this === LS, prev = watch ? oGet.call(this, k) : null;
+      var r = oSet.apply(this, arguments);
+      if (watch && prev !== String(v)) noteEdit_(String(k), oSet);
+      return r;
+    };
+    proto.removeItem = function (k) {
+      var had = this === LS && oGet.call(this, k) !== null;
+      var r = oRem.apply(this, arguments);
+      if (had) noteEdit_(String(k), oSet);
+      return r;
+    };
+    proto.__go5EditHook = 1;
+  })();
   // R2に存在が確定した画像ハッシュの記憶(端末ローカル・sync2_*なので同期対象外)。
   //   毎サイクル /api/img/has を投げ直さないためのキャッシュ。24hで期限切れ＝R2から実体が
   //   消えた場合(既知症状②)も最長1日で再検出して再アップロードできる。
@@ -943,15 +975,21 @@
       var snapLsStamp = snapLs;
       if (secInfo.skip) { snapLsStamp = {}; Object.keys(snapLs).forEach(function (k) { if (k.indexOf(SEC_PREFIX) !== 0) snapLsStamp[k] = snapLs[k]; }); }
       // 変更/削除→タイムスタンプ更新。
+      // 変化の t は「実際に保存した時刻」。記録が無い/前回の t 以前(記録外の書き込み)の時だけ従来どおり同期時刻。
+      var editAt = loadEditAt();
+      function editT(prefix, k) {
+        var e = prefix === "ls:" ? Number(editAt[k]) || 0 : 0;
+        return (e && e > (ts[prefix + k] || 0) && e <= now) ? e : now;
+      }
       function stamp(prefix, cur, snp) {
         Object.keys(cur).forEach(function (k) {
-          if (ts[prefix + k + " d"]) { delete ts[prefix + k + " d"]; ts[prefix + k] = now; return; } // 復活
-          if (JSON.stringify(cur[k]) !== JSON.stringify(snp[k])) ts[prefix + k] = now;
+          if (ts[prefix + k + " d"]) { delete ts[prefix + k + " d"]; ts[prefix + k] = editT(prefix, k); return; } // 復活
+          if (JSON.stringify(cur[k]) !== JSON.stringify(snp[k])) ts[prefix + k] = editT(prefix, k);
           else if (!ts[prefix + k]) ts[prefix + k] = now;
         });
         Object.keys(snp).forEach(function (k) {
           if (prefix === "ls:" && k.indexOf(SEC_PREFIX) === 0) return; // ★鍵は絶対にtombstone(削除)しない＝復号失敗端末による鍵消失を防ぐ
-          if (!(k in cur) && !ts[prefix + k + " d"]) { ts[prefix + k] = now; ts[prefix + k + " d"] = 1; }
+          if (!(k in cur) && !ts[prefix + k + " d"]) { ts[prefix + k] = editT(prefix, k); ts[prefix + k + " d"] = 1; }
         });
       }
       stamp("ls:", curLs, snapLsStamp); stamp("idb:", curIdb, snapIdb);
@@ -970,9 +1008,10 @@
         var remote = {}; if (res && res.ok && !res.empty && res.blob) { try { remote = JSON.parse(res.blob); } catch (e) {} }
         var rver = (res && res.version) || 0, rls = remote.ls || {}, ridb = remote.idb || {};
         // ★初回参加：クラウドに既にあるキーは雲を採用。(この端末の値で上書きしない)候補はunionで両立。
+        //   ただし同期設定後にこの端末で実際に保存した記録(editAt)があるキーは、親子を問わず保存時刻で比べる(LWW)。
         if (firstSync) {
           // 配列/墓標(候補・ドラフト)は初回でも union で両立させる＝新規端末の下書きを雲で潰さない。
-          Object.keys(lmapLs).forEach(function (k) { if (!isCandArrayKey(k) && !isCandDelKey(k) && !isStockArrayKey(k) && !isStockArchiveKey(k) && !isStockDelKey(k) && !isArchDelKey(k) && !isTplBookKey(k) && !isTplDelKey(k) && !isDiscUrlsKey(k) && !isDiscDelKey(k) && !isScheduleStateKey(k) && !isPostedMapKey(k) && !isCandTextKey(k) && !isCandTodayKey(k) && !isImageManifestKey(k) && !isTreeLinksKey(k) && rls[k] !== undefined) delete lmapLs[k]; });
+          Object.keys(lmapLs).forEach(function (k) { if (!editAt[k] && !isCandArrayKey(k) && !isCandDelKey(k) && !isStockArrayKey(k) && !isStockArchiveKey(k) && !isStockDelKey(k) && !isArchDelKey(k) && !isTplBookKey(k) && !isTplDelKey(k) && !isDiscUrlsKey(k) && !isDiscDelKey(k) && !isScheduleStateKey(k) && !isPostedMapKey(k) && !isCandTextKey(k) && !isCandTodayKey(k) && !isImageManifestKey(k) && !isTreeLinksKey(k) && rls[k] !== undefined) delete lmapLs[k]; });
           Object.keys(lmapIdb).forEach(function (k) { if (ridb[k] !== undefined) delete lmapIdb[k]; });
         }
         var mls = mergeMaps(lmapLs, rls), midb = mergeMaps(lmapIdb, ridb);
@@ -1083,7 +1122,7 @@
             newSnapLs[k] = undefined;
             try {
               if (isSyncLsKey(k) && LS.getItem(k) !== null) {
-                LS.removeItem(k);
+                sysRemove(k);
                 if (isCandArrayKey(k) || isCandTextKey(k) || isCandTodayKey(k)) pulledCandReal++; else pulledLsReal++;
               }
             } catch (x) {}
@@ -1159,7 +1198,7 @@
           } else if (live !== null && live !== curLs[k] && live !== e.v) {
             // 非配列キーはライブ値がこの同期開始後に変わっている＝マージ結果は古い。上書きせず次回同期に委ねる
             //   。(スナップショット/push対象もLIVE値のまま記録＝クラウドへ古い値を送らず、次回の変更検知も正しく働く)
-            newSnapLs[k] = live; mls[k] = { t: now, v: live };
+            newSnapLs[k] = live; mls[k] = { t: Math.max(now, Number(loadEditAt()[k]) || 0), v: live }; // t=そのライブ値を保存した時刻
             return;
           }
           newSnapLs[k] = finalV; if (finalV !== e.v) mls[k] = { t: e.t, v: finalV }; // 再union分をpush対象にも反映
@@ -1168,7 +1207,7 @@
           try {
             if (LS.getItem(k) !== finalV) {
               try {
-                LS.setItem(k, finalV);
+                sysSet(k, finalV);
                 if (isCandArrayKey(k) || isCandTextKey(k) || isCandTodayKey(k)) {
                   pulledCandReal++;
                   if (isCandArrayKey(k)) fireCandidateListApplied_(k, "ls");
@@ -1284,7 +1323,7 @@
       var v = mergedLs[k];
       if (isCandArrayKey(k)) {
         var changed = true, lsOk = false;
-        try { changed = LS.getItem(k) !== v; if (changed) LS.setItem(k, v); lsOk = true; } catch (e) {}
+        try { changed = LS.getItem(k) !== v; if (changed) sysSet(k, v); lsOk = true; } catch (e) {}
         if (lsOk) {
           // 通常端末はLS着地の瞬間に描画。IDBミラーの書込は背景で続け、画面を待たせない。
           if (changed) { pulled++; fireCandidateListApplied_(k, 'ls'); }
@@ -1298,7 +1337,7 @@
         return;
       }
       if (isCandDelKey(k)) {
-        try { if (LS.getItem(k) !== v) LS.setItem(k, v); } catch (e) {}
+        try { if (LS.getItem(k) !== v) sysSet(k, v); } catch (e) {}
         return;
       }
       if (isImageManifestKey(k)) {
@@ -1306,8 +1345,8 @@
         try { changedManifest = LS.getItem(k) !== v; } catch (e) { changedManifest = true; }
         if (!changedManifest) return;
         try {
-          if (root.Go5ImageCdn && root.Go5ImageCdn.acceptRaw) accepted = !!root.Go5ImageCdn.acceptRaw(v, "fast-sync");
-          else { LS.setItem(k, v); accepted = true; }
+          if (root.Go5ImageCdn && root.Go5ImageCdn.acceptRaw) { _sysWrite++; try { accepted = !!root.Go5ImageCdn.acceptRaw(v, "fast-sync"); } finally { _sysWrite--; } }
+          else { sysSet(k, v); accepted = true; }
         } catch (e) {}
         if (accepted && !(root.Go5ImageCdn && root.Go5ImageCdn.acceptRaw)) {
           try { if (root.document) root.document.dispatchEvent(new root.CustomEvent("go5-image-manifest-changed", { detail: { ids: [], source: "fast-sync" } })); } catch (e) {}
