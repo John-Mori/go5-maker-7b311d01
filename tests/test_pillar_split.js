@@ -57,6 +57,17 @@ eq(api.pillarOf_({ bskyParentUrl: 'https://bsky.app/profile/a/post/1' }), 'bsky'
 eq(api.pillarOf_({ xPostUrl: 'https://x.com/a/status/1', bskyParentUrl: 'https://bsky.app/p' }), 'both', '両方 -> both');
 eq(api.pillarOf_({ xPostUrl: '   ' }), '', '空白だけのX URL -> 空');
 
+console.log('--- 投稿モード:親投稿カード(短文2行+画像)→子の文(Chami依頼2026-10-12 msg 1559125603393867776) ---');
+eq(/id="draftParentText" rows="2"/.test(stock), true, '親投稿の本文欄は2行');
+eq(stock.indexOf('id="draftParentText"') < stock.indexOf('id="draftImg"'), true, '本文欄が画像の上');
+eq(/id="draftImg"[^>]*max-height:220px/.test(stock), true, '画像は小さく(max-height 220px)');
+eq(/max-height:60vh/.test(stock), false, '旧サイズ(60vh)は残っていない');
+eq(/var parentText = String\(\(\$\('draftParentText'\)/.test(stock), true, 'Bluesky親文=親投稿カードの短文(X投稿欄から作らない)');
+eq(/if \(xr\) xr\.style\.display = 'none';/.test(stock), true, '「X返信(作品リンク)」行は出さない');
+eq(/xl\.textContent = split \? '子の文\(返信\)'/.test(stock), true, '柱分け時のX投稿欄は「子の文」');
+eq(/parentText: \(\$\('draftParentText'\)/.test(stock), true, '親投稿の短文はこのドラフトに保存');
+eq(/\$\('draftCopyX'\)\.addEventListener\('click', function \(\) \{ copyText_\(\(\$\('draftXText'\)/.test(stock), true, '子の文はリンク込みでそのままコピー');
+
 console.log('--- 配線(片側だけの変更で無言の空欄にしない) ---');
 const gas = read('gas/コード.gs');
 ['X投稿URL', 'Bluesky親URL', 'Bluesky返信URL', 'Bluesky作品短縮URL', '柱'].forEach((h) => {

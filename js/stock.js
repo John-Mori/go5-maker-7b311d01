@@ -2987,6 +2987,7 @@
     var slotEl = $('draftYtDescUrlLink');
     var data = {
       xText:   ($('draftXText')       || {}).value || '',
+      parentText: ($('draftParentText') || {}).value || '', // 親投稿カードの短文(柱分けch)
       ytTitle: ($('draftYtTitleText') || {}).value || '',
       ytTags:  ($('draftYtTagsInput') || {}).value || '',
       ytUrl:   ($('draftYtUrl')       || {}).value || '',
@@ -3315,8 +3316,17 @@
     var split = pillarSplitOn_(meta);
     var bw = $('draftBskyWrap'), xr = $('draftXReplyRow'), cx = $('draftCopyX'), lb = $('draftXPostUrlLabel');
     if (bw) bw.style.display = split ? '' : 'none';
-    if (xr) xr.style.display = split ? '' : 'none';
-    if (cx) cx.textContent = split ? '親文をコピー' : 'コピー';
+    // ★柱分け時は「親投稿カード(短文2行+画像)」→「子の文(=X投稿欄・固定文の印をリンクへ置換)」の並び。
+    //   子の文に作品リンクが入るので、別枠の「X返信(作品リンク)」行は出さない(Chami依頼2026-10-12②「その下はいらない」)。
+    if (xr) xr.style.display = 'none';
+    if (cx) cx.textContent = 'コピー';
+    var pl = $('draftParentLabel'), pc = $('draftParentCard'), pt = $('draftParentText'), cp = $('draftCopyParent'), xl = $('draftXLabel'), xt = $('draftXText');
+    if (pl) pl.textContent = split ? '親投稿' : '投稿画像';
+    if (pc) pc.style.cssText = split ? 'border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--field-bg,rgba(0,0,0,.28));' : '';
+    if (pt) { pt.style.display = split ? 'block' : 'none'; pt.value = split ? (saved.parentText || '') : ''; }
+    if (cp) cp.style.display = split ? '' : 'none';
+    if (xl) xl.textContent = split ? '子の文(返信)' : 'X 投稿';
+    if (xt) xt.rows = split ? 4 : 9;
     if (lb) lb.textContent = split ? 'X投稿リンク(X親の投稿URL・記録用。Bluesky未投稿ならこれが説明欄へ入る)' : 'X投稿リンク(Xに投稿後に貼ると説明欄へ短縮URLが入る)';
     var xi = $('draftXReply'); if (xi) xi.value = split ? (saved.workShareUrl || saved.workShortUrl || (meta.affiliateUrl || meta.workUrl || '').trim()) : ''; // 短縮前/失敗時は生リンク(踏める)
     renderBskyStatus_(saved);
@@ -3335,7 +3345,8 @@
     function say(h) { if (st) st.innerHTML = h; }
     if (!window.Go5DraftBskyThread) { say('投稿モジュール未読込。ページを再読み込みしてください。'); return; }
     var pd = loadDraftPost_(meta.id);
-    var parentText = stripWorkLinks_(($('draftXText') || {}).value || '', workLinkTokens_(meta, pd));
+    // 親=「親投稿」カードの短文(Chami依頼2026-10-12①)。子の文(X投稿欄)は親へ混ぜない。
+    var parentText = String(($('draftParentText') || {}).value || '').trim();
     var aff = (meta.affiliateUrl || meta.workUrl || '').trim();
     if (pd.bskyParentUrl && !window.confirm('このドラフトはBlueskyへ投稿済みです。もう一度投稿しますか？(二重投稿になります)')) return;
     if (!window.confirm('Blueskyへ親(画像+本文)を投稿し、数十秒あけて返信に作品リンクを投稿します。よろしいですか？')) return;
@@ -3351,7 +3362,7 @@
       var m = String(e && e.message ? e.message : e);
       var known = { 'no-creds': '⚙設定でこのchのBlueskyハンドルとアプリパスワードを入れてください。',
                     'parent-too-long': '親の本文(作品リンク行を除く)が300文字を超えています。短くしてください。',
-                    'empty-parent': '親の本文が空です。', 'no-work-link': 'このドラフトに作品URLがありません。',
+                    'empty-parent': '親投稿の本文(画像の上の欄)が空です。', 'no-work-link': 'このドラフトに作品URLがありません。',
                     'no-core': '投稿モジュール未読込。ページを再読み込みしてください。' };
       var msg = known[m] || esc(window.Go5FriendlyBskyError ? window.Go5FriendlyBskyError(m) : m);
       say('⚠️ 投稿できませんでした：<br>' + msg);
@@ -3434,9 +3445,20 @@
           //   日本語は文字間どこでも改行できるため「X／投／稿」と縦積みになっていた・Chami報告2026-07-31①)。
           //   コピーは margin-left:auto で右端へ寄せ、幅は文字ぶんだけ(Chami③「文字の幅に合うだけ」)。
           // 投稿画像(動画とは別枠)。スマホは「保存/共有」(共有シート)か長押しで保存できる。
-          '<div id="draftImgWrap" style="display:none;margin-bottom:16px;">' +
-            '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><div style="' + sH + 'white-space:nowrap;">投稿画像</div><button type="button" id="draftImgShare" style="' + btnW + 'margin-left:auto;">保存/共有</button></div>' +
-            '<img id="draftImg" alt="投稿画像" style="display:block;width:100%;max-height:60vh;object-fit:contain;border-radius:8px;border:1px solid var(--line);background:#000;">' +
+          // ★柱分けch(acc3)は「親投稿」カード=Blueskyの実投稿の見た目で、上に短文2行の本文欄・下に画像(Chami依頼
+          //   2026-10-12 msg 1559125603393867776①)。画像は確認用なので小さく(max-height 60vh→220px・全ch共通)。
+          '<div id="draftParentBlock" style="margin-bottom:16px;">' +
+            '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><div id="draftParentLabel" style="' + sH + 'white-space:nowrap;">投稿画像</div>' +
+              '<span style="margin-left:auto;display:flex;gap:6px;">' +
+                '<button type="button" id="draftCopyParent" style="' + btnW + 'display:none;">親文をコピー</button>' +
+                '<button type="button" id="draftImgShare" style="' + btnW + '">保存/共有</button>' +
+              '</span></div>' +
+            '<div id="draftParentCard">' +
+              '<textarea id="draftParentText" rows="2" placeholder="親投稿の本文(短文)" style="display:none;width:100%;box-sizing:border-box;margin:0 0 8px;padding:0;border:none;outline:none;resize:none;background:transparent;color:var(--ink);font-size:.92rem;line-height:1.5;"></textarea>' +
+              '<div id="draftImgWrap" style="display:none;">' +
+                '<img id="draftImg" alt="投稿画像" style="display:block;width:100%;max-height:220px;object-fit:contain;border-radius:8px;border:1px solid var(--line);background:#000;">' +
+              '</div>' +
+            '</div>' +
           '</div>' +
           // 柱分け：Bluesky親(画像+本文)→返信(作品リンク)を自動投稿。成功で説明欄1行目がBluesky親の短縮URLになる。
           '<div id="draftBskyWrap" style="display:none;margin-bottom:18px;">' +
@@ -3445,7 +3467,7 @@
             '<div id="draftBskyStatus" style="font-size:.78rem;margin-top:8px;line-height:1.6;color:var(--sub);word-break:break-all;"></div>' +
             '<div style="height:1px;background:var(--line);margin:18px 0 0;"></div>' +
           '</div>' +
-          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><div style="' + sH + 'white-space:nowrap;">X 投稿</div><button type="button" id="draftCopyX" style="' + btnW + 'margin-left:auto;">コピー</button></div>' +
+          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><div id="draftXLabel" style="' + sH + 'white-space:nowrap;">X 投稿</div><button type="button" id="draftCopyX" style="' + btnW + 'margin-left:auto;">コピー</button></div>' +
           '<textarea id="draftXText" rows="9" style="' + iS + 'resize:vertical;"></textarea>' + // ①縦幅(rows6→8→9・もう1行分・Chami依頼2026-08-03)
           '<div id="draftXReplyRow" style="display:none;">' +
             '<div style="display:flex;align-items:center;gap:8px;' + fL + '"><span style="white-space:nowrap;">X返信(作品リンク)</span><button type="button" id="draftCopyXReply" style="' + btnW + 'margin-left:auto;">コピー</button></div>' +
@@ -3530,12 +3552,10 @@
     $('draftPubSched').addEventListener('change', onPubModeChange_);
     $('draftPickSlot').addEventListener('click', openSlotPicker_);
     $('draftClearSlot').addEventListener('click', function () { _pickedSlot = null; renderPickedSlot_(); saveDraftPost_(); });
-    $('draftCopyX').addEventListener('click', function () {
-      var t = ($('draftXText') || {}).value || '';
-      // 柱分け：X親文は作品リンク行を外してコピー(リンクは「X返信」側)。
-      if (_modalMeta && pillarSplitOn_(_modalMeta)) t = stripWorkLinks_(t, workLinkTokens_(_modalMeta, loadDraftPost_(_modalMeta.id)));
-      copyText_(t, this);
-    });
+    // 柱分け時のX投稿欄は「子の文」=作品リンク込みでそのままコピー(親は親投稿カード側・Chami依頼2026-10-12)。
+    $('draftCopyX').addEventListener('click', function () { copyText_(($('draftXText') || {}).value || '', this); });
+    $('draftParentText').addEventListener('input', saveDraftPost_);
+    $('draftCopyParent').addEventListener('click', function () { copyText_(($('draftParentText') || {}).value || '', this); });
     $('draftCopyXReply').addEventListener('click', function () { copyText_(($('draftXReply') || {}).value || '', this); });
     $('draftBskyPost').addEventListener('click', function () { postDraftBsky_(this); });
     $('draftImgShare').addEventListener('click', function () { shareDraftImg_(this); });
