@@ -10,7 +10,7 @@
 'use strict';
 
 const assert = require('assert');
-const { buildBlueskyPost, detectFacets, stripAutoBlocks, xWeightedLength, insertHookCta, stripHookCtaLines, HOOK_DEEPEN_LINE, CTA_LINE, WORK_LINK_PLACEHOLDER, fillWorkLinkPlaceholder, hasWorkLinkPlaceholder, SALE_LINK_PLACEHOLDER, fillSaleLinkPlaceholder, hasSaleLinkPlaceholder, resolvePromoTemplate, sanitizeXLinks } = require('../js/bluesky-core.js');
+const { buildBlueskyPost, detectFacets, stripAutoBlocks, xWeightedLength, insertHookCta, stripHookCtaLines, HOOK_DEEPEN_LINE, CTA_LINE, WORK_LINK_PLACEHOLDER, fillWorkLinkPlaceholder, hasWorkLinkPlaceholder, SALE_LINK_PLACEHOLDER, fillSaleLinkPlaceholder, hasSaleLinkPlaceholder, resolvePromoTemplate, sanitizeXLinks, shouldSkipDiscSeed } = require('../js/bluesky-core.js');
 
 let passed = 0;
 let failed = 0;
@@ -615,6 +615,28 @@ test('PR-7: 非販促行を含む本文は%/¥どちらでも空にならない(
     assert.ok(r.trim().length > 0, t + 'モードで本文が空になった');
     assert.ok(r.indexOf('続きが気になっちゃう一冊') >= 0, t + 'モードで素の行が消えた');
   });
+});
+
+// ────────────────────────────────────────────────────────────
+// SEED-* shouldSkipDiscSeed(セール案内URLの既定シード再出現防止・2026-10-12 Chami報告・v999/a1c95e9)
+//   disc_urls_seeded__<acc>が端末ローカルで、sync未着の間に[]と誤判定して既定のセールページを
+//   再シードしてしまうと、core/sync.jsのapplyTombstoneが「at>削除tsなら意図的な再追加」とみなし
+//   過去の削除墓標を必ず乗り越えて復活する(Chamiが見た「削除したはずのセール行が出る」不具合)。
+//   js/bluesky.jsのensureDiscUrlsSeeded_はこの判定をBlueskyCore.shouldSkipDiscSeedへ委譲する。
+// ────────────────────────────────────────────────────────────
+test('SEED-1: 削除墓標が無ければ再シードを止めない(false=通常の初回シード)', function () {
+  assert.strictEqual(shouldSkipDiscSeed({}, 'seed-acc3'), false);
+  assert.strictEqual(shouldSkipDiscSeed({ 'other-id': 123 }, 'seed-acc3'), false);
+});
+test('SEED-2: 削除墓標があれば再シードを止める(true=Chamiが過去に削除済み・復活バグの恒久対策)', function () {
+  assert.strictEqual(shouldSkipDiscSeed({ 'seed-acc3': 1760000000000 }, 'seed-acc3'), true);
+});
+test('SEED-3: delMapがnull/undefinedでも例外を投げない(false)', function () {
+  assert.strictEqual(shouldSkipDiscSeed(null, 'seed-acc3'), false);
+  assert.strictEqual(shouldSkipDiscSeed(undefined, 'seed-acc3'), false);
+});
+test('SEED-4: アカウント別のidを混同しない(acc3の墓標はacc1の判定に影響しない)', function () {
+  assert.strictEqual(shouldSkipDiscSeed({ 'seed-acc3': 1 }, 'seed-acc1'), false);
 });
 
 // ────────────────────────────────────────────────────────────

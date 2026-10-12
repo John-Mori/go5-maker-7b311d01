@@ -358,6 +358,12 @@
   function fillSrc_(inner) { return '[(（]?[ \\t]*(?:' + inner + ')[ \\t]*[)）]?'; }
   function hasWorkLinkPlaceholder(text) { return new RegExp(WORK_LINK_SRC).test(String(text == null ? '' : text)); }
   function hasSaleLinkPlaceholder(text) { return new RegExp(SALE_LINK_SRC).test(String(text == null ? '' : text)); }
+  // ---- セール案内URLの既定シード再出現防止(2026-10-12 Chami報告・修正はjs/bluesky.jsのensureDiscUrlsSeeded_) ----
+  //   delMap(bsky_discount_del__<acc>の中身=id→削除ts)に既にseedIdの墓標があるなら「過去に意図的に削除済み」
+  //   なので再シードしない。純粋関数化してNodeテスト対象にする(本体のDOM/localStorage依存から分離)。
+  function shouldSkipDiscSeed(delMap, seedId) {
+    return !!(delMap && Object.prototype.hasOwnProperty.call(delMap, seedId) && delMap[seedId] != null);
+  }
   function fillSaleLinkPlaceholder(text, saleLink) {
     var s = String(text == null ? '' : text);
     if (saleLink == null || saleLink === '') return s; // まだ短縮リンクが用意できていなければプレースホルダのまま返す
@@ -561,6 +567,7 @@
     SALE_LINK_PLACEHOLDER: SALE_LINK_PLACEHOLDER,
     fillSaleLinkPlaceholder: fillSaleLinkPlaceholder,
     hasSaleLinkPlaceholder: hasSaleLinkPlaceholder,
+    shouldSkipDiscSeed: shouldSkipDiscSeed,
     insertHookCta: insertHookCta,
     stripHookCtaLines: stripHookCtaLines,
     HOOK_DEEPEN_LINE: HOOK_DEEPEN_LINE,

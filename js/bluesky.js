@@ -877,7 +877,11 @@
     //   墓標(bsky_discount_del__<acc>)より新しい at で必ず墓標を乗り越えて全端末へ復活していた。
     //   → 既にこのidへ削除墓標が立っているなら「意図的な削除」と確定しているので、再シードしない。
     var delMap; try { delMap = JSON.parse(localStorage.getItem(discDelKey_()) || '{}') || {}; } catch (e) { delMap = {}; }
-    if (delMap && delMap['seed-' + acc] != null) return; // 過去に削除済み＝再シードしない(復活バグの恒久対策)
+    // 実体は純粋関数 BlueskyCore.shouldSkipDiscSeed(＝Nodeテスト対象)。詳しい経緯は上のコメント参照。
+    var skip = (window.BlueskyCore && typeof window.BlueskyCore.shouldSkipDiscSeed === 'function')
+      ? window.BlueskyCore.shouldSkipDiscSeed(delMap, 'seed-' + acc)
+      : !!(delMap && delMap['seed-' + acc] != null);
+    if (skip) return; // 過去に削除済み＝再シードしない(復活バグの恒久対策)
     var seed = { id: 'seed-' + acc, name: '既定のセールページ', url: DISCOUNT_LIST_URL, at: Date.now() };
     discUrlsSave_([seed]);
     if (!discSelectedId_()) discSetSelectedId_(seed.id);
