@@ -3322,7 +3322,7 @@
     if (xr) xr.style.display = split ? '' : 'none';
     if (cx) cx.textContent = split ? '親文をコピー' : 'コピー';
     if (lb) lb.textContent = split ? 'X投稿リンク(X親の投稿URL・記録用。Bluesky未投稿ならこれが説明欄へ入る)' : 'X投稿リンク(Xに投稿後に貼ると説明欄へ短縮URLが入る)';
-    var xi = $('draftXReply'); if (xi) xi.value = split ? (saved.workShareUrl || saved.workShortUrl || '') : '';
+    var xi = $('draftXReply'); if (xi) xi.value = split ? (saved.workShareUrl || saved.workShortUrl || (meta.affiliateUrl || meta.workUrl || '').trim()) : ''; // 短縮前/失敗時は生リンク(踏める)
     renderBskyStatus_(saved);
   }
   function renderBskyStatus_(saved) {
