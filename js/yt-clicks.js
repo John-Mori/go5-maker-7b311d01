@@ -3322,7 +3322,12 @@
   }; } catch (e) {}
 
   // ── アイテムのアカウント間移動(誤って別アカウントに入った履歴/手動追加を正しい側へ)──
-  function acctName_(a) { return a === 'acc2' ? '宵桜艶帖' : '月詠み色恋劇場'; }
+  // ch表示名の正本は Go5Acct.labelOf。旧実装は acc2/月詠み の二択で、癒やし倉庫(acc3)を「月詠み色恋劇場」と誤表示していた。
+  function acctName_(a) {
+    if (a === 'acc1') return '月詠み色恋劇場';
+    var lb = window.Go5Acct && window.Go5Acct.labelOf ? window.Go5Acct.labelOf(a) : '';
+    return lb || ({ acc2: '宵桜艶帖', acc3: '癒やし倉庫' })[a] || String(a || '');
+  }
   function loadArrFor_(base, a) {
     if (window.Go5Hist) { try { var v = window.Go5Hist.read(base + '__' + a); return Array.isArray(v) ? v : []; } catch (e) {} }
     try { var x = JSON.parse(localStorage.getItem(base + '__' + a) || '[]'); return Array.isArray(x) ? x : []; } catch (e) { return []; }
