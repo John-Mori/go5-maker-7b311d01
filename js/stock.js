@@ -930,6 +930,7 @@
       account: evDetail.account || 'acc1',
       label: title.length > 22 ? title.slice(0, 22) + '…' : (title || '(無題)'),
       title: title,
+      twoLine: !!($('topTwoLine') || {}).checked, // 2行モードで作ったか(投稿モードのYouTube題名欄の行数)
       author: ($('author') || {}).value || '',
       bskyText: ($('bskyText') || {}).value || '',
       affiliateUrl: ($('movieWorkAffi') || {}).value || '',
@@ -2953,6 +2954,8 @@
     var title = (_modalMeta.title || '').replace(/\n+/g, '');
     var tags = ($('draftYtTagsInput') || {}).value || '';
     el.value = title + (title && tags.trim() ? ' ' : '') + tags.trim();
+    el.rows = _modalMeta.twoLine ? 2 : 1; // 1行表示・2行モードで作った動画だけ2行(Chami msg 1559681061078835231②)
+    el.wrap = _modalMeta.twoLine ? 'soft' : 'off'; // 1行の時は折り返さない(2行目の頭が欠けて覗かない)
   }
 
   // ---- 公開設定(即時/予約)＋公開枠ピッカー ----
@@ -3380,7 +3383,8 @@
     var pl = $('draftParentLabel'), pc = $('draftParentCard'), pt = $('draftParentText'), cp = $('draftCopyParent'), xl = $('draftXLabel'), xt = $('draftXText');
     if (pl) pl.textContent = split ? '親投稿' : '投稿画像';
     if (pc) pc.style.cssText = split ? 'border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--field-bg,rgba(0,0,0,.28));' : '';
-    if (pt) { pt.style.display = split ? 'block' : 'none'; pt.value = split ? (saved.parentText || '') : ''; }
+    // 親投稿の本文が空なら題名を自動で入れる(Chami msg 1559681061078835231①)。書き換えた本文は保存値を優先。
+    if (pt) { pt.style.display = split ? 'block' : 'none'; pt.value = split ? (saved.parentText || String(meta.title || '').replace(/\n+/g, '')) : ''; }
     if (cp) cp.style.display = split ? '' : 'none';
     if (xl) xl.textContent = split ? '子の文(返信)' : 'X 投稿';
     if (xt) xt.rows = split ? 4 : 9;
@@ -3567,7 +3571,7 @@
           '<div style="height:1px;background:var(--line);margin:18px 0;"></div>' +
           '<div style="' + sH + 'margin-bottom:10px;">YouTube</div>' +
           '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><div style="font-size:.78rem;font-weight:600;color:var(--sub);white-space:nowrap;">題名(コピーして貼り付け)</div><button type="button" id="draftCopyYtTitle" style="' + btnW + 'margin-left:auto;">題名をコピー</button></div>' +
-          '<textarea id="draftYtTitleText" readonly rows="2" style="' + iS + 'resize:vertical;cursor:default;"></textarea>' + // ②2行の幅に(rows3→2・Chami依頼2026-08-02)
+          '<textarea id="draftYtTitleText" readonly rows="1" style="' + iS + 'resize:vertical;cursor:default;"></textarea>' + // ②1行表示(2行モードの動画だけ2行=buildModalYtTitle_・Chami msg 1559681061078835231)
           '<div style="display:flex;align-items:center;gap:8px;' + fL + '"><span style="white-space:nowrap;">タグ(半角スペース区切り)</span><button type="button" id="draftCopyYtTags" style="' + btnW + 'margin-left:auto;">コピー</button></div>' +
           '<input type="text" id="draftYtTagsInput" style="' + iS + '">' +
           // 見出し行に作品遷移リンク(作品↗)を右寄せで同居させる(Chami依頼2026-08-03①=作品↗が
