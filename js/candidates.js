@@ -3328,14 +3328,14 @@
       '<label class="hint" style="display:block;margin:10px 0 2px;">X / Bluesky URL</label>' +
       '<div style="display:flex;gap:6px;align-items:stretch;">' +
         '<input id="refImgTwitter" size="1" type="text" inputmode="url" class="cand-refimg-line" autocomplete="off" placeholder="https://x.com/… " style="flex:1;min-width:0;">' +
-        '<button type="button" class="ghost paste-btn" data-paste="refImgTwitter" style="margin:0;color:#fff;font-size:12px;padding:0 12px;white-space:nowrap;flex:0 0 auto;width:auto;">貼り付け</button>' +
+        '<button type="button" class="ghost paste-btn" data-paste="refImgTwitter" style="margin:0;color:#fff;text-shadow:-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000,1px 1px 0 #000,0 1px 0 #000,0 -1px 0 #000,1px 0 0 #000,-1px 0 0 #000;font-size:12px;padding:0 12px;white-space:nowrap;flex:0 0 auto;width:auto;">貼り付け</button>' +
       '</div>' +
       // 2つ目以降のURL(カードに X2↗ / B2↗ / Web2↗ で表示)。下の「URL追加」ボタンで欄が増える(1モーダル完結)。
       '<div id="refImgUrls2Wrap"></div>' +
       '<label class="hint" style="display:block;margin:10px 0 2px;font-size:11px;white-space:nowrap;">アフィリンク付き作品URLを貼ると、正式な作品URLに自動変換</label>' +
       '<div style="display:flex;gap:6px;align-items:stretch;">' +
         '<input id="refImgWorkUrl" size="1" type="text" inputmode="url" class="cand-refimg-line" autocomplete="off" placeholder="作品URLを貼り付け" value="' + esc(workUrlPrefill) + '" style="flex:1;min-width:0;">' +
-        '<button type="button" class="ghost paste-btn" data-paste="refImgWorkUrl" style="margin:0;color:#fff;font-size:12px;padding:0 12px;white-space:nowrap;flex:0 0 auto;width:auto;">貼り付け</button>' +
+        '<button type="button" class="ghost paste-btn" data-paste="refImgWorkUrl" style="margin:0;color:#fff;text-shadow:-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000,1px 1px 0 #000,0 1px 0 #000,0 -1px 0 #000,1px 0 0 #000,-1px 0 0 #000;font-size:12px;padding:0 12px;white-space:nowrap;flex:0 0 auto;width:auto;">貼り付け</button>' +
       '</div>' +
       // 保存を小さくし、空いた枠にメモ追加・URL追加ボタン(押下でそれぞれの欄を生成)。狭ければ折り返す(Chami依頼2026-08-09)。
       '<div style="display:flex;gap:8px;margin-top:10px;align-items:stretch;flex-wrap:wrap;">' +
@@ -3424,7 +3424,7 @@
       row.className = 'refimg-url2-row';
       row.innerHTML =
         '<input id="' + id + '" size="1" type="text" inputmode="url" class="cand-refimg-line refimg-url2-input" autocomplete="off" placeholder="2つ目以降のX/Bluesky/その他URL" style="flex:1;min-width:0;">' +
-        '<button type="button" class="ghost paste-btn" data-paste="' + id + '" style="margin:0;color:#fff;font-size:12px;padding:0 12px;white-space:nowrap;flex:0 0 auto;width:auto;">貼り付け</button>' +
+        '<button type="button" class="ghost paste-btn" data-paste="' + id + '" style="margin:0;color:#fff;text-shadow:-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000,1px 1px 0 #000,0 1px 0 #000,0 -1px 0 #000,1px 0 0 #000,-1px 0 0 #000;font-size:12px;padding:0 12px;white-space:nowrap;flex:0 0 auto;width:auto;">貼り付け</button>' +
         '<button type="button" class="cand-url2-del" title="このURL欄を消す">✕</button>';
       urls2Wrap.appendChild(row);
       row.querySelector('input').value = val || '';
