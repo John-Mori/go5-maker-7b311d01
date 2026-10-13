@@ -28,10 +28,20 @@ check('全文の形(1行目/2行目/空行/リンク)',
   Core.affiPostText({ releaseDate: '2026-10-01' }, 'https://xdgh3.com/abc', NOW) === '⇩気になった方はコチラから💕 #PR #漫画\n新作✨️\n\nhttps://xdgh3.com/abc');
 check('リンク空なら2行だけ(Blueskyの返信側でリンクを足す)', Core.affiPostText({}, '', NOW) === '⇩気になった方はコチラから💕 #PR #漫画\n話題作✨️');
 
+// ドラフトの子の文欄(msg 1559679396363636736「ドラフトの子の文にも反映して」=見出しの次に2行目が無かった)。
+var CHILD = '⇩気になった方はコチラから💕 #PR #漫画\n\nhttps://xdgh3.com/Yi2gI';
+check('子の文: 見出しの次へ準新作行を差し込む', Core.withAffiStatusLine(CHILD, { releaseDate: '2026-08-20', pct: 30 }, NOW) === '⇩気になった方はコチラから💕 #PR #漫画\n準新作30%OFF✨️\n\nhttps://xdgh3.com/Yi2gI');
+var once = Core.withAffiStatusLine(CHILD, { releaseDate: '2026-10-01' }, NOW);
+check('子の文: 既にある2行目は今の情報で置き換える(二重にしない)', Core.withAffiStatusLine(once, { releaseDate: '2025-01-01', pct: 20 }, NOW) === '⇩気になった方はコチラから💕 #PR #漫画\n20%OFFの話題作✨️\n\nhttps://xdgh3.com/Yi2gI');
+check('子の文: 見出しが無い文は触らない(null)', Core.withAffiStatusLine('続きはこちら\nhttps://x', {}, NOW) === null);
+check('子の文: Blueskyの返信文になってもリンクだけ差し替わり2行目は残る',
+  (function () { var t = Core.withAffiStatusLine(CHILD, { releaseDate: '2026-08-20' }, NOW); return t.replace(/https?:\/\/\S+/g, 'https://bsky-link') === '⇩気になった方はコチラから💕 #PR #漫画\n準新作✨️\n\nhttps://bsky-link'; })());
+
 // 配線: Blueskyドラフトの子投稿と即アフィが同じ口を通す。
 var stock = fs.readFileSync(path.join(__dirname, '..', 'js', 'stock.js'), 'utf8');
 var qa = fs.readFileSync(path.join(__dirname, '..', 'js', 'quick-affi.js'), 'utf8');
-check('stock.js の子投稿が affiPostText を通す', /core\.affiPostText\(got\[1\] \|\| meta\.priceInfo/.test(stock));
+check('stock.js の子投稿が withAffiStatusLine を通す', /core\.withAffiStatusLine\(xv, info\)/.test(stock));
+check('stock.js の子の文欄(openPostModal_)が withAffiStatusLine を通す', /acore\.withAffiStatusLine\(composedXText, meta\.priceInfo/.test(stock));
 check('quick-affi.js が affiPostText を通す', /core\.affiPostText\(info, link\)/.test(qa));
 
 if (fails) { console.log('\n' + fails + ' 件 NG'); process.exit(1); }

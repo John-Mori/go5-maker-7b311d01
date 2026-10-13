@@ -100,8 +100,24 @@
     var t = AFFI_POST_HEAD + '\n' + affiStatusLine(info, nowMs);
     return link ? t + '\n\n' + link : t;
   }
+  // ドラフトの「子の文(返信)」=投稿本文(固定文)由来の文へ、見出し行の直後に2行目(新作/準新作/話題作)を差し込む。
+  //   既に2行目があれば今の作品情報で置き換える。見出し行が無い文は触らない(null=差し込めなかった)。
+  //   (Chami msg 1559679396363636736「ドラフトの子の文にも反映して」)
+  var AFFI_STATUS_RE = /^(?:(?:新作|準新作)(?:\d+%OFF)?|(?:\d+%OFFの)?話題作)✨️?$/;
+  function withAffiStatusLine(text, info, nowMs) {
+    var lines = String(text == null ? '' : text).replace(/\r\n?/g, '\n').split('\n');
+    for (var i = 0; i < lines.length; i++) {
+      if (lines[i].trim().indexOf('⇩気になった方はコチラから') !== 0) continue; // 絵文字の異体(💕/💕️)や後ろのタグ違いでも拾う
+      var st = affiStatusLine(info, nowMs);
+      if (i + 1 < lines.length && AFFI_STATUS_RE.test(lines[i + 1].trim())) lines[i + 1] = st;
+      else lines.splice(i + 1, 0, st);
+      return lines.join('\n');
+    }
+    return null;
+  }
 
   var API = {
+    withAffiStatusLine: withAffiStatusLine,
     affiStatusLine: affiStatusLine,
     affiPostText: affiPostText,
     toHalfWidth: toHalfWidth,

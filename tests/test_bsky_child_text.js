@@ -37,7 +37,7 @@ eq(f('あ'.repeat(290) + '\n\nhttps://x.example/a', BS), '続きはこちら\nht
 console.log('--- 配線 ---');
 eq(/out\.replyText = bskyReplyTextOf_\(o\.childText, link\);/.test(src), true, 'ドラフト一続きの返信文は子の文から作る');
 const st = fs.readFileSync(path.join(__dirname, '..', 'js/stock.js'), 'utf8');
-// 2026-10-13 Chami msg 1559480072589803612: 子の文は定型文(affiPostText)へ。X欄の文は定型文の芯が無い時だけの退避。
-eq(/draftId: meta\.id, childText: childText \}/.test(st) && /core\.affiPostText\(got\[1\] \|\| meta\.priceInfo \|\| null, ''\)/.test(st), true, '投稿モードは定型文を子の文として渡す');
+// 2026-10-13 Chami msg 1559480072589803612: 子の文は定型文へ。msg 1559679396363636736 以降は子の文欄の2行目を差し替えて使う(見出しが無い時だけ affiPostText)。
+eq(/draftId: meta\.id, childText: childText \}/.test(st) && /core\.withAffiStatusLine\(xv, info\)/.test(st), true, '投稿モードは子の文欄(2行目を差し替え)を子の文として渡す');
 if (fails) { console.log(fails + ' FAIL'); process.exit(1); }
 console.log('all ok');

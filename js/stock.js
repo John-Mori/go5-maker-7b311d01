@@ -3257,6 +3257,18 @@
     //   出てくる」の原因になっていたため廃止した。手編集を残したい場合は毎回「投稿本文」側を編集する運用に変える。
     var composedXText = composeXForModal_(meta); // 合成(短縮URL置換)→販促テンプレ解決(%:/¥:・N%/N円)
     if (!composedXText) composedXText = masterBody_(meta); // 最後の砦：合成が空でも本文そのままは出す(空欄で貼れない事故の防止)
+    // 柱分け時の子の文=見出し行の次へ「新作N%OFF✨️/準新作✨️/話題作✨️」等を入れる(Chami msg 1559679396363636736)。
+    //   まずドラフト時のスナップで入れ、作品情報を取り直せたらその行だけ差し替える(手入力の他の行は触らない)。
+    var acore = window.Go5MovieAttrsCore;
+    if (pillarSplitOn_(meta) && acore && acore.withAffiStatusLine) {
+      composedXText = acore.withAffiStatusLine(composedXText, meta.priceInfo || null) || composedXText;
+      if (window.Go5FreshWorkInfo) window.Go5FreshWorkInfo(meta.workUrl || meta.affiliateUrl || '').then(function (fi) {
+        var cur = $('draftXText');
+        if (!fi || _modalMeta !== meta || !cur) return;
+        var nv = acore.withAffiStatusLine(cur.value, fi);
+        if (nv && nv !== cur.value) cur.value = nv;
+      }).catch(function () {});
+    }
     $('draftXText').value = composedXText;
     // ①短縮URL置換：この作品のアフィリンクの短縮を発番し、本文に残る生アフィリンク/プレースホルダを短縮へ差し替える。
     //   ★短縮は draft の作品に対して非同期で発番する(live UIの作品とは別・workShortCache_は使わない)。
@@ -3420,7 +3432,9 @@
     var infoP = window.Go5FreshWorkInfo ? window.Go5FreshWorkInfo(meta.workUrl || meta.affiliateUrl || '') : Promise.resolve(null);
     Promise.all([imgP.catch(function () { return null; }), infoP.catch(function () { return null; })]).then(function (got) {
       var blob = got[0], core = window.Go5MovieAttrsCore;
-      var childText = (core && core.affiPostText) ? core.affiPostText(got[1] || meta.priceInfo || null, '') : String(($('draftXText') || {}).value || '');
+      // 子の文欄(見出し行あり)ならその文の2行目を投稿直前の情報で差し替えて使う=欄の見た目と投稿が一致する(Chami msg 1559679396363636736)。
+      var xv = String(($('draftXText') || {}).value || ''), info = got[1] || meta.priceInfo || null;
+      var childText = (core && core.withAffiStatusLine && core.withAffiStatusLine(xv, info)) || ((core && core.affiPostText) ? core.affiPostText(info, '') : xv);
       return window.Go5DraftBskyThread({ account: meta.account || 'acc1', parentText: parentText, workLink: aff, imageBlob: blob || null, draftId: meta.id, childText: childText });
     }).then(function (r) {
       mergeDraftPost_(meta.id, { bskyParentUrl: r.parentUrl, bskyReplyUrl: r.replyUrl, bskyWorkShortUrl: r.bskyWorkShortUrl, bskyParentShortUrl: r.parentShortUrl, bskyReplyShortUrl: r.replyShortUrl });
