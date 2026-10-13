@@ -2074,7 +2074,12 @@
   try { window.Go5BskyReplyTextOf = bskyReplyTextOf_; } catch (e) {}
   function replyImageBlob_() {
     if (_replyImgBlobCache) return _replyImgBlobCache;
-    _replyImgBlobCache = fetch(BSKY_REPLY_IMG_SRC).then(function (r) { return r.blob(); }).catch(function () { return null; });
+    // 時限付き(応答が返らないと子の投稿がずっと待ちになる)。失敗/時限は null=画像なしで子を出す。
+    var ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    var timer = ctl ? setTimeout(function () { try { ctl.abort(); } catch (e) {} }, 8000) : null;
+    _replyImgBlobCache = fetch(BSKY_REPLY_IMG_SRC, { signal: ctl ? ctl.signal : undefined }).then(function (r) { return r.blob(); })
+      .then(function (b) { if (timer) clearTimeout(timer); return b; })
+      .catch(function () { if (timer) clearTimeout(timer); _replyImgBlobCache = null; return null; });
     return _replyImgBlobCache;
   }
   // ★子(リプライ)の取りこぼし台帳(Chami 2026-10-13 msg 1559263050572369951「リプライができてない」)。
@@ -2097,7 +2102,9 @@
   // 親へ既に自分の返信が付いているか(公開API・ログイン不要)。分からない時は false=出す側へ倒す。
   function replyAlreadyThere_(job) {
     var u = 'https://public.api.bsky.app/xrpc/app.bsky.feed.getPostThread?depth=1&uri=' + encodeURIComponent(job.parentUri);
-    return fetch(u).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+    var ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    var timer = ctl ? setTimeout(function () { try { ctl.abort(); } catch (e) {} }, 6000) : null;
+    return fetch(u, { signal: ctl ? ctl.signal : undefined }).then(function (r) { if (timer) clearTimeout(timer); return r.ok ? r.json() : null; }).then(function (d) {
       var reps = (d && d.thread && d.thread.replies) || [];
       for (var i = 0; i < reps.length; i++) {
         var p = reps[i] && reps[i].post;
