@@ -145,4 +145,27 @@ if (existsSync(stampScript)) {
   }
   console.log("↳ schedule/.verstamp.json も焼き直した(差分があれば同じコミットに含めること)");
 }
+
+// ★恒久(2026-10-13 朝の振り返り): CIの番犬(secret-guard)を bump の瞬間にも回す。
+//   10/12 18:01 の 484336b で js/bluesky.js に時限の無い fetch が入り、番犬が赤のまま15回pushされた
+//   (=その間 smoke は1度も走らず、v1008〜v1015 は画面テスト無しで出荷)。失敗メールを止めているので誰も気づかなかった。
+//   検査の一覧は smoke.yml の secret-guard から読む=ここへ二重に書かない(足された検査も自動で回る)。
+const ymlPath = join(ROOT, ".github", "workflows", "smoke.yml");
+const guardFails = [];
+if (existsSync(ymlPath)) {
+  const yml = readFileSync(ymlPath, "utf8");
+  const guards = [...new Set([...yml.matchAll(/run:\s*node (scripts\/check_[\w-]+\.mjs)\s*$/gm)].map((m) => m[1]))]
+    .filter((p) => !p.endsWith("check_schedule_ver.mjs") && existsSync(join(ROOT, p)));
+  for (const g of guards) {
+    const r = spawnSync(process.execPath, [join(ROOT, g)], { encoding: "utf8", cwd: ROOT });
+    if (r.status !== 0) guardFails.push({ g, out: (r.stderr || "") + (r.stdout || "") });
+  }
+  if (guardFails.length) {
+    for (const f of guardFails) console.error(`✗ ${f.g}\n${f.out.trim().split("\n").slice(-8).join("\n")}`);
+    console.error(`⚠ CIの番犬 ${guardFails.length} 本が赤。このまま push すると smoke が走らない。直してから commit すること。`);
+  } else {
+    console.log(`↳ CIの番犬 ${guards.length} 本を回した: すべて緑`);
+  }
+}
 console.log("V=" + next);
+if (guardFails.length) process.exit(8);
