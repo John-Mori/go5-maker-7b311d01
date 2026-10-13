@@ -12,9 +12,9 @@ window.PERSONA_HUB_DATA = {
   "_source_fingerprint": {
    "口調": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
-    "sha1": "69fb39821c7342f36b17c8ca71eb78753a1e64f2",
-    "bytes": 60060,
-    "mtime": 1791923326.343
+    "sha1": "05a09e221e6905396351d7b6773853c04c19e784",
+    "bytes": 60094,
+    "mtime": 1791928896.444
    },
    "呼称": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
@@ -3629,7 +3629,9 @@ window.PERSONA_HUB_DATA = {
      "からね",
      "やつよ",
      "わよ",
-     "かしら"
+     "かしら",
+     "状況よ",
+     "まだよ"
     ]
    },
    "アイコン": {
