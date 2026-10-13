@@ -83,7 +83,8 @@
   }
 
   // 作品紹介の定型文(即アフィのコピペ欄・Blueskyドラフトの子投稿)。唯一の正本(Chami msg 1559480072589803612)。
-  //   2行目: 新作/準新作=割引ありで「新作N%OFF✨️」・なしで「新作✨️」/ 旧作(発売日不明も)=「N%OFFの話題作✨️」「話題作✨️」。
+  //   2行目: 新作=割引ありで「新作N%OFF✨️」・なしで「新作✨️」/ 準新作=「準新作N%OFF✨️」「準新作✨️」
+  //   (準新作を新作と出さない・Chami msg 1559676496841539657)/ 旧作(発売日不明も)=「N%OFFの話題作✨️」「話題作✨️」。
   //   info は FANZA作品情報(releaseDate|date・discountPct・price・listPrice)。割引は定価>売価が分かる時はそれも満たす時だけ。
   var AFFI_POST_HEAD = '⇩気になった方はコチラから💕 #PR #漫画';
   function affiStatusLine(info, nowMs) {
@@ -92,8 +93,8 @@
     var pct = Math.round(Number(info.discountPct || info.pct) || 0);
     if (pct > 0 && info.listPrice && info.price != null && !(Number(info.price) < Number(info.listPrice))) pct = 0;
     var fresh = (ws === '新作' || ws === '準新作');
-    if (pct > 0) return fresh ? '新作' + pct + '%OFF✨️' : pct + '%OFFの話題作✨️';
-    return fresh ? '新作✨️' : '話題作✨️';
+    if (pct > 0) return fresh ? ws + pct + '%OFF✨️' : pct + '%OFFの話題作✨️';
+    return fresh ? ws + '✨️' : '話題作✨️';
   }
   function affiPostText(info, link, nowMs) {
     var t = AFFI_POST_HEAD + '\n' + affiStatusLine(info, nowMs);
