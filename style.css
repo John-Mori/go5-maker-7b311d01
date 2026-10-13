@@ -1388,6 +1388,10 @@ button, select, .ctl-btn, .tab, .acct-btn, .photo-btn { touch-action: manipulati
 .qa-card .qa-go{width:100%;margin:16px 0 0;padding:13px;border-radius:10px;border:none;background:linear-gradient(180deg,var(--cta-from,var(--accent)),var(--cta-to,var(--accent)));color:var(--cta-ink,#04222a);font-size:.95rem;font-weight:700;cursor:pointer;}
 .qa-card .qa-go:disabled{opacity:.6;}
 .qa-result{margin-top:18px;padding-top:16px;border-top:1px solid var(--line);}
+.qa-card .qa-post-label{margin-top:14px;}
+.qa-card .qa-post{display:block;width:100%;box-sizing:border-box;margin:0;min-height:96px;resize:vertical;font-size:.86rem;line-height:1.55;white-space:pre-wrap;}
+.qa-post-note{font-size:.72rem;color:var(--sub);margin:5px 0 0;}
+.qa-card .qa-post-copy{display:block;margin:8px 0 0 auto;}
 
 /* ── 投稿履歴編集：返信ツリーと返信内アフィ計測リンク ── */
 .vedit-tree-box{margin:2px 0 14px;padding:11px;border:1px solid var(--line);border-radius:10px;background:rgba(43,179,192,.045);}

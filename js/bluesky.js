@@ -1663,6 +1663,27 @@
   }
   // drafts.js(下書きの作品名/作者表示)などから参照できるよう公開。(読み取りのみ)
   try { window.Go5WorkInfo = function (url) { return fanzaInfoForWorkUrl_(url); }; } catch (e) {}
+  // 定型文(新作/話題作・N%OFF)用に、今の割引と発売日を取る。セールの終わり/始まりを拾うためFANZAへ取り直し(9秒時限)、
+  //   取れなければ手元キャッシュ(movieInfoCache→fanza_title_cache のスナップ)へ倒す。何も無ければ null。
+  function freshWorkInfo_(url) {
+    url = String(url || '').trim();
+    var r = (url && window.buildAffiliateLink) ? window.buildAffiliateLink(url, '') : null;
+    var cid = (r && r.ok) ? r.cid : '';
+    function cached() {
+      var hit = cid && movieInfoCache[cid] && movieInfoCache[cid].title ? movieInfoCache[cid] : null;
+      if (hit) return hit;
+      try { var fc = (JSON.parse(localStorage.getItem('fanza_title_cache') || '{}') || {})[url]; if (fc && fc.priceInfo) return fc.priceInfo; } catch (e) {}
+      return null;
+    }
+    var workerUrl = '', secret = '';
+    try { workerUrl = localStorage.getItem('fanza_worker_url') || ''; secret = localStorage.getItem('fanza_shared_secret') || ''; } catch (e) {}
+    if (!cid || !workerUrl || !window.FanzaCore) return Promise.resolve(cached());
+    return window.FanzaCore.fetchFanzaInfo(cid, workerUrl, secret, url).then(function (info) {
+      if (info && info.title) { movieInfoCache[cid] = info; return info; }
+      return cached();
+    }, cached);
+  }
+  try { window.Go5FreshWorkInfo = freshWorkInfo_; } catch (e) {}
   // ---- 投稿メタの「凍結」：予約時・即時投稿時に今のUIから採取し、以後の記録はこれだけを使う ----
   // これにより「記録する瞬間に別アカウントのタブを開いていた」等でUI状態が混ざる事故を無くす。
   function captureWorkUrl_() {

@@ -2,6 +2,8 @@
  * quick-affi.js — アカウント帯「癒やし倉庫」の右の「即アフィ」ボタンとモーダル(Chami msg 1559417034813608007)。
  * 作品URLを入れたら、アフィリンク化→今のチャンネルのドメインで短縮リンク発行→アフィチェック表示までを1画面で済ませる。
  * 中身(アフィ化・短縮・転送先のaf_id照合)は bluesky.js の window.Go5IssueAffShort=AFIリンクタブの単体短縮と同じ芯。
+ * 発行後は定型文(⇩気になった方は…/新作N%OFF✨️ 等+短縮リンク)を丸ごとコピペできる欄にも出す(Chami msg 1559480072589803612)。
+ *   文面の正本は core/movie-attrs-core.js の affiPostText。割引と発売日は window.Go5FreshWorkInfo で取り直す。
  * bluesky.js を読まないページ(候補/分析)では、StockLists.html へ移って開き直す(sessionStorage の印で引き継ぐ)。
  *   index.html は前回のタブ復元で Stock/StockLists へ飛び直すことがあり、印を食ったまま離れるので行き先にしない。
  */
@@ -41,6 +43,10 @@
               '<button type="button" class="qa-mini" data-act="copy">コピー</button></div>' +
             '<div class="qa-dest"></div>' +
             '<div class="manual-aff-status" hidden></div>' +
+            '<label class="qa-label qa-post-label" for="qaPost">投稿文(まるごとコピー)</label>' +
+            '<textarea id="qaPost" class="qa-post" rows="4" readonly></textarea>' +
+            '<div class="qa-post-note"></div>' +
+            '<button type="button" class="qa-mini qa-post-copy" data-act="copyPost">投稿文をコピー</button>' +
           '</div>' +
         '</div>' +
       '</div>';
@@ -53,6 +59,9 @@
     els.status = modal.querySelector('.manual-aff-status');
     els.domain = modal.querySelector('.qa-domain');
     els.copy = modal.querySelector('[data-act="copy"]');
+    els.post = modal.querySelector('#qaPost');
+    els.postNote = modal.querySelector('.qa-post-note');
+    els.postCopy = modal.querySelector('[data-act="copyPost"]');
 
     modal.addEventListener('click', function (e) { if (e.target === modal) close_(); });
     modal.querySelector('.qa-x').addEventListener('click', close_);
@@ -70,19 +79,26 @@
         issue_(false);
       }, function () { els.url.focus(); });
     });
-    els.copy.addEventListener('click', function () {
-      var v = els.out.value;
-      if (!v) return;
-      var done = function () { els.copy.textContent = '✓ コピー'; setTimeout(function () { els.copy.textContent = 'コピー'; }, 1400); };
-      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(v).then(done, function () { legacyCopy_(v); done(); });
-      else { legacyCopy_(v); done(); }
-    });
+    els.copy.addEventListener('click', function () { copy_(els.out, els.copy); });
+    els.postCopy.addEventListener('click', function () { copy_(els.post, els.postCopy); });
     document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && modal && !modal.hidden) close_(); });
   }
 
-  function legacyCopy_(v) {
-    els.out.focus(); els.out.select();
-    try { document.execCommand('copy'); } catch (e) {}
+  function copy_(field, button) {
+    var v = field.value, label = button.textContent;
+    if (!v) return;
+    var done = function () { button.textContent = '✓ コピー'; setTimeout(function () { button.textContent = label; }, 1400); };
+    var legacy = function () { field.focus(); field.select(); try { document.execCommand('copy'); } catch (e) {} done(); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(v).then(done, legacy);
+    else legacy();
+  }
+
+  // 定型文の2行目(新作/話題作・N%OFF)は作品情報しだい。取れなかった時は「話題作✨️」で出し、取れなかったことを添える。
+  function post_(link, info) {
+    var core = window.Go5MovieAttrsCore;
+    els.post.value = (link && core && core.affiPostText) ? core.affiPostText(info, link) : '';
+    els.postCopy.disabled = !els.post.value;
+    els.postNote.textContent = !link ? '' : (info ? '' : '作品情報(発売日/割引)を取れなかったので「話題作✨️」で出しています。');
   }
 
   function status_(kind, message) {
@@ -105,8 +121,10 @@
     busy = true;
     var label = els.go.textContent;
     els.go.disabled = true; els.go.textContent = '作成中…';
-    els.out.value = ''; els.dest.textContent = ''; status_('', '');
-    window.Go5IssueAffShort(url, '', true).then(function (r) {
+    els.out.value = ''; els.dest.textContent = ''; status_('', ''); post_('', null);
+    var infoP = window.Go5FreshWorkInfo ? window.Go5FreshWorkInfo(url).catch(function () { return null; }) : Promise.resolve(null);
+    Promise.all([window.Go5IssueAffShort(url, '', true), infoP]).then(function (got) {
+      var r = got[0];
       els.result.hidden = false;
       els.out.value = r.url || '';
       els.out.placeholder = r.url ? '' : '発行できませんでした';
@@ -114,6 +132,7 @@
       // 発行できなかった理由は欄の中に収まらないので、転送先の行に全文で出す。
       els.dest.textContent = (r.url ? '' : r.out + (r.dest ? ' / ' : '')) + (r.dest ? '転送先: ' + r.dest : '');
       if (r.aff) status_(r.aff, r.affMsg);
+      post_(r.url || '', got[1]);
       if (r.issued) lastIssued = url;
     }).then(function () {
       busy = false; els.go.disabled = false; els.go.textContent = label;

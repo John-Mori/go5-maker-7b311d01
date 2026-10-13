@@ -3109,15 +3109,16 @@
   //   ・Go5WorkInfo(取得済みキャッシュ)→ fanza_title_cache(スナップ) の順。取れなければ null(=Nのまま=誤値を貼らない)。
   // 手元の生キャッシュ(取得済みFANZA情報→スナップ)から価格/割引率だけを引く(ネット不使用)。取れなければ null。
   function livePriceInfo_(url) {
-    var price = null, pct = null;
-    try { var info = (url && window.Go5WorkInfo) ? window.Go5WorkInfo(url) : null; if (info) { if (info.price != null) price = info.price; if (info.discountPct != null) pct = info.discountPct; } } catch (e) {}
-    if (price == null || pct == null) {
+    var price = null, pct = null, rd = '';
+    try { var info = (url && window.Go5WorkInfo) ? window.Go5WorkInfo(url) : null; if (info) { if (info.price != null) price = info.price; if (info.discountPct != null) pct = info.discountPct; rd = info.releaseDate || info.date || ''; } } catch (e) {}
+    if (price == null || pct == null || !rd) {
       try {
         var fc = (JSON.parse(localStorage.getItem('fanza_title_cache') || '{}') || {})[url];
-        if (fc && fc.priceInfo) { if (price == null && fc.priceInfo.price != null) price = fc.priceInfo.price; if (pct == null && fc.priceInfo.discountPct != null) pct = fc.priceInfo.discountPct; }
+        if (fc && fc.priceInfo) { if (price == null && fc.priceInfo.price != null) price = fc.priceInfo.price; if (pct == null && fc.priceInfo.discountPct != null) pct = fc.priceInfo.discountPct; if (!rd) rd = fc.priceInfo.releaseDate || ''; }
       } catch (e) {}
     }
-    return { price: price, pct: pct };
+    // releaseDate=子投稿の定型文(新作/話題作)を、取り直せない時もドラフト時のスナップで決めるため。
+    return { price: price, pct: pct, releaseDate: rd };
   }
   function promoInfo_(meta) {
     var type = 'discount';
@@ -3414,8 +3415,13 @@
     if (!window.confirm('Blueskyへ親(画像+本文)を投稿し、3〜10秒あけて返信に作品リンクを投稿します。よろしいですか？')) return;
     btn.disabled = true; say('投稿中…(親→3〜10秒待機→返信)');
     var imgP = (_draftImg.id === meta.id && _draftImg.blob) ? Promise.resolve(_draftImg.blob) : resolveSrcImageBlob_(meta.id);
-    imgP.catch(function () { return null; }).then(function (blob) {
-      return window.Go5DraftBskyThread({ account: meta.account || 'acc1', parentText: parentText, workLink: aff, imageBlob: blob || null, draftId: meta.id, childText: String(($('draftXText') || {}).value || '') });
+    // 子(返信)の文=定型文「⇩気になった方は…/新作N%OFF✨️ 等」+作品リンク(Chami msg 1559480072589803612)。
+    //   割引と発売日は投稿の直前に取り直す(取れなければ手元キャッシュ→ドラフト時のスナップ)。定型文の芯が無い時だけX欄の文。
+    var infoP = window.Go5FreshWorkInfo ? window.Go5FreshWorkInfo(meta.workUrl || meta.affiliateUrl || '') : Promise.resolve(null);
+    Promise.all([imgP.catch(function () { return null; }), infoP.catch(function () { return null; })]).then(function (got) {
+      var blob = got[0], core = window.Go5MovieAttrsCore;
+      var childText = (core && core.affiPostText) ? core.affiPostText(got[1] || meta.priceInfo || null, '') : String(($('draftXText') || {}).value || '');
+      return window.Go5DraftBskyThread({ account: meta.account || 'acc1', parentText: parentText, workLink: aff, imageBlob: blob || null, draftId: meta.id, childText: childText });
     }).then(function (r) {
       mergeDraftPost_(meta.id, { bskyParentUrl: r.parentUrl, bskyReplyUrl: r.replyUrl, bskyWorkShortUrl: r.bskyWorkShortUrl, bskyParentShortUrl: r.parentShortUrl, bskyReplyShortUrl: r.replyShortUrl });
       if (_modalMeta === meta) { setDescUrlSlot_(r.replyShortUrl || r.replyUrl || r.parentShortUrl || r.parentUrl); saveDraftPost_(); }
