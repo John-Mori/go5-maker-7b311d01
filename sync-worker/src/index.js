@@ -22,6 +22,8 @@
  *   GET  /api/teian/latest       → 提案候補の当日JSONを配信（トークン必須）。R2 teian/latest.json。
  *   GET  /api/teian/:date        → 指定日(YYYY-MM-DD)の提案候補JSON。R2 teian/<date>.json。未配信は {empty:true}。
  *                                  ※書き込みは wrangler r2 object put（PC側=scripts/teian/publish_candidates.py）。
+ *   GET  /api/cand-inbox         → PCが集めた候補(Grok X検索→FANZA)の受け箱JSON（トークン必須）。R2 cand_inbox/latest.json。
+ *                                  未配信は {empty:true}。書き込みは scripts/grok_fanza/publish_cand_inbox.py(wrangler)。
  *
  * セキュリティ：
  *   ・/api/* は X-Sync-Token（env.SYNC_TOKEN）一致必須。Origin は env.ALLOWED_ORIGINS（"*"可）。
@@ -73,6 +75,15 @@ export default {
       if (request.method !== "GET" && request.method !== "HEAD") return json({ ok: false, error: "method_not_allowed" }, 405, cors);
       if (!authOk(request, env)) return json({ ok: false, error: "bad_token" }, 403, cors);
       return serveTeian(decodeURIComponent(path.slice("/api/teian/".length)), env, cors);
+    }
+
+    // 候補の受け箱 — PCのGrok候補パイプ(scripts/grok_fanza)が R2 cand_inbox/latest.json へ置いた
+    //   候補を、候補一覧(candidates.js)が取り込むための読み取り口。teian と同じく書き込みは wrangler、
+    //   読み取りはトークン必須。重複除け(cid)はフロント側=端末の一覧と墓標を見て行う。
+    if (path === "/api/cand-inbox") {
+      if (request.method !== "GET" && request.method !== "HEAD") return json({ ok: false, error: "method_not_allowed" }, 405, cors);
+      if (!authOk(request, env)) return json({ ok: false, error: "bad_token" }, 403, cors);
+      return serveCandInbox(env, cors);
     }
 
     // 人格ハブ アイコン追加の申告（POST /api/persona/enqueue）
@@ -229,6 +240,13 @@ async function serveTeian(name, env, cors) {
   else return json({ ok: true, empty: true, candidates: [] }, 200, cors);
   const obj = await env.SYNC_IMAGES.get(key);
   if (!obj) return json({ ok: true, empty: true, candidates: [] }, 200, cors);
+  const body = await obj.text();
+  return new Response(body, { status: 200, headers: Object.assign({ "Content-Type": "application/json", "Cache-Control": "no-store" }, cors || {}) });
+}
+async function serveCandInbox(env, cors) {
+  if (!env.SYNC_IMAGES) return json({ ok: false, error: "r2_unset" }, 500, cors);
+  const obj = await env.SYNC_IMAGES.get("cand_inbox/latest.json");
+  if (!obj) return json({ ok: true, empty: true, items: [] }, 200, cors);
   const body = await obj.text();
   return new Response(body, { status: 200, headers: Object.assign({ "Content-Type": "application/json", "Cache-Control": "no-store" }, cors || {}) });
 }

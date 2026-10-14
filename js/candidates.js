@@ -5245,6 +5245,63 @@
     ov.hidden = false;
   }
 
+  // PCが集めた候補(Grok X検索→FANZA)の受け箱を本命タブへ取り込む。読み口は sync-worker GET /api/cand-inbox
+  //   (同期設定=Go5Sync.getConfig・teianと同じトークン)。★cid重複は除く=どのタブの一覧に在る/削除済み(墓標)/一度取り込んだ
+  //   (cand_inbox_seen)cidは入れない。消した候補が受け箱から再び湧かないよう、取り込み済みは端末に覚える。
+  //   addedAt は PC の収集時刻を保つ=他端末の墓標(削除ts>=addedAt)との競合でも復活しない。
+  var CAND_INBOX_SEEN = 'cand_inbox_seen'; // localStorage('cand_inbox_seen')
+  var _candInboxAt = 0, _candInboxBusy = false;
+  function candInboxKnownCids_() {
+    var known = {};
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i) || '';
+        if (/^cand_items(__|$)/.test(k)) candItemsRead_(k).forEach(function (x) { if (x && x.cid) known[x.cid] = 1; });
+        else if (/^cand_del(__|$)/.test(k)) { var m = lsGet(k, '{}'); if (m && typeof m === 'object') Object.keys(m).forEach(function (c) { known[c] = 1; }); }
+      }
+    } catch (e) {}
+    candItemsRead_(K_ITEMS).forEach(function (x) { if (x && x.cid) known[x.cid] = 1; }); // LS失敗時のIDBミラー分
+    var seen = lsGet(CAND_INBOX_SEEN, '{}'); if (seen && typeof seen === 'object') Object.keys(seen).forEach(function (c) { known[c] = 1; });
+    return known;
+  }
+  function importCandInbox_(force) {
+    var now = new Date().getTime();
+    if (_candInboxBusy || (!force && now - _candInboxAt < 10 * 60 * 1000)) return Promise.resolve(null);
+    var c = null; try { c = window.Go5Sync && window.Go5Sync.getConfig && window.Go5Sync.getConfig(); } catch (e) {}
+    var url = (c && c.url) || '', token = (c && c.token) || '';
+    if (!/^https?:\/\//.test(url) || !token) return Promise.resolve(null);
+    _candInboxBusy = true; _candInboxAt = now;
+    return fetch(url + '/api/cand-inbox', { headers: { 'X-Sync-Token': token }, cache: 'no-store' }).then(function (r) {
+      return r.ok ? r.json() : null;
+    }).then(function (doc) {
+      var rows = (doc && Array.isArray(doc.items)) ? doc.items : [];
+      if (!rows.length) return { added: 0, dup: 0 };
+      var known = candInboxKnownCids_(), items = candItemsRead_(K_ITEMS), seen = lsGet(CAND_INBOX_SEEN, '{}');
+      if (!seen || typeof seen !== 'object' || Array.isArray(seen)) seen = {};
+      var added = 0, dup = 0, t = new Date().getTime();
+      rows.forEach(function (w) {
+        var cid = w && String(w.cid || '');
+        if (!cid || !/^[a-z0-9_]+$/.test(cid)) return;
+        if (known[cid]) { dup++; return; }
+        items.push({ url: w.url || '', cid: cid, title: w.title || '', author: w.author || '', thumb: w.thumb || '', listPrice: w.listPrice, price: w.price, discountPct: w.discountPct || 0, date: w.date || '', genres: w.genres || [], floor: w.floor || '', service: w.service || '', addedAt: Number(w.addedAt) || t, source: String(w.source || 'grok_fanza'), postVerified: w.postVerified !== false, sourcePost: w.sourcePost || '' });
+        known[cid] = 1; seen[cid] = t; added++;
+      });
+      if (!added) return { added: 0, dup: dup };
+      var lsOk = candItemsWrite_(K_ITEMS, items);
+      lsSet(CAND_INBOX_SEEN, seen);
+      klog_('candidate_added', 'work', 'grok_inbox', { added: added, dup: dup });
+      return confirmCandDurable_(K_ITEMS, String(items[items.length - 1].cid || ''), lsOk).then(function (durable) {
+        if (durable !== 'fail') flushSync_();
+        if (_activeTab === 'main' && $('candList')) {
+          showCandAddNotice_(null, '📥 自動収集の候補を' + added + '件追加しました' + (dup ? '(重複' + dup + '件除外)' : ''));
+          renderCandList('main');
+        }
+        return { added: added, dup: dup, durable: durable };
+      });
+    }).catch(function () { return null; }).then(function (res) { _candInboxBusy = false; return res; });
+  }
+  try { window.Go5CandInbox = { importNow: function () { return importCandInbox_(true); } }; } catch (e) {}
+
   function renderMain(tabId) {
     tabId = tabId || 'main';
     var body = $('candBody');
@@ -5297,6 +5354,7 @@
     }
     wirePaste_(body);
     renderCandList(tabId);
+    if (isMain) importCandInbox_(false);
   }
   // Twitter(X)のURLを判定・正規化。status付き→cid=tw_<id>、それ以外のx/twitterURLも許容。
   function parseTwitterUrl_(raw) {
@@ -6336,7 +6394,8 @@
     if (it.date) sub.push('発売 ' + esc(fmtDate(it.date)));
     if (it.addedAt) sub.push('<span class="cand-added">追加 ' + esc(fmtTs(it.addedAt)) + '</span>');
     var ws = deriveWorkState_(it.date);
-    var badgesHtml = (ws ? stateBadgeHtml_(ws) : '') + ((!it.isTwitter && it.url) ? workKindBadgeHtml_(it.url) : '') + (isAiWork_(it.genres, it.floor, it.ai) ? '<span class="fp-kind fp-kind-ai">AI</span>' : '');
+    var badgesHtml = (ws ? stateBadgeHtml_(ws) : '') + ((!it.isTwitter && it.url) ? workKindBadgeHtml_(it.url) : '') + (isAiWork_(it.genres, it.floor, it.ai) ? '<span class="fp-kind fp-kind-ai">AI</span>' : '')
+      + (it.postVerified === false ? '<span class="fp-kind fp-kind-unv" title="自動収集で、元ポストを確かめられなかった候補(作品自体はFANZAで実在確認済み)">⚠出所未確認</span>' : '');
     var genresHtml = (it.genres && it.genres.length)
       ? '<div class="fz-genres" style="margin-top:4px;">' + it.genres.slice(0, 5).map(function (g) { return '<span class="fz-genre">' + esc(g) + '</span>'; }).join('') + '</div>'
       : '';

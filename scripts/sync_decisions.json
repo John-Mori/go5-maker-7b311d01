@@ -10,6 +10,7 @@
     "cand_price_max": { "decision": "sync", "why": "候補の価格上限フィルタ=どの端末でも同じ絞り込み(Chami核2026-08-04。旧localから昇格)" },
     "cand_posted_off": { "decision": "sync", "why": "候補「このchで投稿していない」手動宣言{acc:{cid:ts}}=全端末で同じ投稿済み判定。sync.jsがper-cid newer-ts unionで統合(Chami核2026-08-04。旧localから昇格)" },
     "cand_posted_on": { "decision": "sync", "why": "候補「このchで投稿した」手動宣言{acc:{cid:ts}}=全端末で同じ投稿済み判定。sync.jsがper-cid newer-ts unionで統合(Chami核2026-08-04。旧localから昇格)" },
+    "cand_inbox_seen": { "decision": "local", "why": "自動収集の受け箱(/api/cand-inbox)から取り込み済みのcid{cid:ts}=この端末で同じcidを二度入れない覚え。端末間の重複除けはcid unionと墓標(cand_del)が担う" },
     "cand_pool_hash": { "decision": "local", "why": "候補プールの差分検知ハッシュ=キャッシュ" },
     "cand_pool_hash_at": { "decision": "local", "why": "候補プールD1同期の最後に成功した時刻=端末ごとの生存タイマー(12h STALE判定用)。端末別なので同期しない" },
     "cand_catalog_seed_hash": { "decision": "local", "why": "全候補カタログへ送ったサークル/端末候補集合の差分検知ハッシュ=端末別通信キャッシュ" },
