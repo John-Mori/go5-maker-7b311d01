@@ -5271,7 +5271,12 @@
     var url = (c && c.url) || '', token = (c && c.token) || '';
     if (!/^https?:\/\//.test(url) || !token) return Promise.resolve(null);
     _candInboxBusy = true; _candInboxAt = now;
-    return fetch(url + '/api/cand-inbox', { headers: { 'X-Sync-Token': token }, cache: 'no-store' }).then(function (r) {
+    var inboxCtrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    var inboxTimer = inboxCtrl ? setTimeout(function () { try { inboxCtrl.abort(); } catch (e) {} }, 12000) : null;
+    var inboxOpts = { headers: { 'X-Sync-Token': token }, cache: 'no-store' };
+    if (inboxCtrl) inboxOpts.signal = inboxCtrl.signal;
+    return fetch(url + '/api/cand-inbox', inboxOpts).then(function (r) {
+      if (inboxTimer) clearTimeout(inboxTimer);
       return r.ok ? r.json() : null;
     }).then(function (doc) {
       var rows = (doc && Array.isArray(doc.items)) ? doc.items : [];
@@ -5298,7 +5303,7 @@
         }
         return { added: added, dup: dup, durable: durable };
       });
-    }).catch(function () { return null; }).then(function (res) { _candInboxBusy = false; return res; });
+    }).catch(function () { if (inboxTimer) clearTimeout(inboxTimer); return null; }).then(function (res) { _candInboxBusy = false; return res; });
   }
   try { window.Go5CandInbox = { importNow: function () { return importCandInbox_(true); } }; } catch (e) {}
 
