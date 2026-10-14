@@ -907,7 +907,7 @@ html[data-account="acc3"] .acct-cta{background:var(--cta-to);color:var(--cta-ink
 .cand-acct-pill.posted{cursor:pointer;}
 .cand-acct-pill.posted.cand-acct-acc1{background:rgba(138,111,184,.18);border-color:#a98fd0;color:#7a5aa8;}
 .cand-acct-pill.posted.cand-acct-acc2{background:rgba(176,64,95,.16);border-color:#cf6f8f;color:#b0405f;}
-.cand-acct-pill.posted.cand-acct-acc3{background:rgba(217,169,28,.2);border-color:#d9a91c;color:#8a6200;}
+.cand-acct-pill.posted.cand-acct-acc3{background:#c9960f;border-color:#c9960f;color:#fff;} /* 癒し=投稿済みは濃色(✔なし・月/桜と同じ型) */
 .cand-acct-pill.retired{opacity:.35;}
 .cand-acct-pill.posted.short.cand-acct-acc1{background:#7a5aa8;border-color:#7a5aa8;color:#fff;} /* 月=投稿済みは濃色 */
 .cand-acct-pill.posted.short.cand-acct-acc2{background:#b0405f;border-color:#b0405f;color:#fff;} /* 桜=投稿済みは濃色 */

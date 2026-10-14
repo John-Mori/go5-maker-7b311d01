@@ -2889,6 +2889,8 @@
   var _ACCTS_RETIRED = { acc1: 1, acc2: 1 };
   // 投稿を止めたchは1文字の略称で並べる(未投稿=淡色/投稿済み=濃色・Chami 2026-10-14)
   var _ACCT_SHORT = { acc1: '月', acc2: '桜' };
+  // 候補のpillに出す表記。癒やし倉庫は「癒し」(Chami 2026-10-14)。✔は投稿日チップで分かるので付けない。
+  var _ACCT_LABEL = { acc3: '癒し', acc1: '月', acc2: '桜' };
   // ── 投稿履歴の cid→item 索引(チャンネル別・メモ化) ──
   //   候補cidは buildAffiliateLink(normalizeWorkUrl(raw)) の出力。履歴側も同じ正規化→解析で
   //   cidを求めないと、アフィリンク付きURL(al.fanza.co.jp/?lurl=…)や計測パラメータ付きURLが
@@ -3099,7 +3101,7 @@
       if (m) {
         return '<span class="cand-acct-pill cand-acct-' + a[0] + ' posted' + (_ACCT_SHORT[a[0]] ? ' short' : '') + '" role="button" tabindex="0" ' +
           'data-posted-acct="' + a[0] + '" data-posted-cid="' + esc(m.key) + '" title="' + esc(a[1]) + 'で投稿済み(タップで投稿内容)">' +
-          (_ACCT_SHORT[a[0]] ? esc(_ACCT_SHORT[a[0]]) : esc(a[1]) + ' <b>✔</b>') + '</span>';
+          esc(_ACCT_LABEL[a[0]] || a[1]) + '</span>';
       }
       if (_ACCTS_RETIRED[a[0]]) {
         return '<span class="cand-acct-pill cand-acct-' + a[0] + ' notposted retired" title="' + esc(a[1]) + '(未投稿)">' + esc(_ACCT_SHORT[a[0]]) + '</span>';
@@ -3107,7 +3109,7 @@
       // 未投稿pill。タップで「実は投稿済み」を手動宣言できる(✔が付かない偽陰性の救済・data-poston-*)。
       var onCid = (candCidsOf_(it) || [])[0] || '';
       return '<span class="cand-acct-pill cand-acct-' + a[0] + ' notposted" role="button" tabindex="0" ' +
-        'data-poston-acct="' + a[0] + '" data-poston-cid="' + esc(onCid) + '" title="' + esc(a[1]) + '(未投稿・タップで手動で投稿済みにできる)">' + esc(a[1]) + '</span>';
+        'data-poston-acct="' + a[0] + '" data-poston-cid="' + esc(onCid) + '" title="' + esc(a[1]) + '(未投稿・タップで手動で投稿済みにできる)">' + esc(_ACCT_LABEL[a[0]] || a[1]) + '</span>';
     }).join('');
   }
   // 投稿履歴アイテムから投稿日時(ms)を頑健に取り出す。ts欠落時も背骨ID(videoId=acc-YYYYMMDD-HHMM-)から復元
@@ -3130,7 +3132,7 @@
       if (!ts) return ''; // 日時が全経路で取れない稀ケースのみ非表示
       var d = new Date(ts);
       var ds = d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate();
-      return '<span class="cand-posted-date cand-acct-' + a[0] + '" title="' + esc(a[1]) + 'で ' + esc(ds) + ' に投稿済み">' + esc(ds) + ' ✔</span>';
+      return '<span class="cand-posted-date cand-acct-' + a[0] + '" title="' + esc(a[1]) + 'で ' + esc(ds) + ' に投稿済み">' + esc(ds) + '</span>';
     }).join('');
   }
   // Bluesky公開APIから、その投稿に添付された画像URL配列を取得。(未認証・CORS)cb。(images[]|null)
