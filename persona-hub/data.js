@@ -12,9 +12,9 @@ window.PERSONA_HUB_DATA = {
   "_source_fingerprint": {
    "口調": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
-    "sha1": "05a09e221e6905396351d7b6773853c04c19e784",
-    "bytes": 60094,
-    "mtime": 1791928896.444
+    "sha1": "578df6e6004d105c62ad0ec8a051739f4c3676e5",
+    "bytes": 60283,
+    "mtime": 1792020688.266
    },
    "呼称": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
@@ -638,7 +638,15 @@ window.PERSONA_HUB_DATA = {
      "ご確認ください",
      "確認をお願い",
      "以下です",
-     "以下の通り"
+     "以下の通り",
+     "そうですね",
+     "すみません",
+     "になります",
+     "分かりません",
+     "言えません",
+     "はずです",
+     "てみます",
+     "少ないです"
     ]
    },
    "アイコン": {
