@@ -847,16 +847,20 @@
     var u = w.WORKER_URL.replace(/\/+$/, '') + '/api/list?secret=' + encodeURIComponent(w.SHARED_SECRET);
     _clicksP = fetch(u).then(function (r) { return r.json(); }).then(function (j) {
       if (!j || !j.ok || !j.links) { _health.r2 = false; renderHealth_(); return false; }
+      // 日別窓はWorkerのD1日次表(JST・1クリック毎に加算)由来。1件も窓を返さない応答=日次表の読み取り失敗なので、
+      //   全コードを0で上書きせず前回値を保つ(0の偽表示を作らない)。窓が返る応答で欠けたコード=直近7日クリック無し=0。
+      var hasWin = j.links.some(function (l) { return l && l.today != null; });
+      if (hasWin) treeClickWindowsCache = {};
       j.links.forEach(function (l) {
         if (!l || !l.code) return;
         clicksCache[l.code] = l.clicks || 0;
-        treeClickWindowsCache[l.code] = {
+        if (hasWin) treeClickWindowsCache[l.code] = {
           today: Number(l.today) || 0,
           yesterday: Number(l.yesterday) || 0,
           week: Number(l.week) || 0
         };
       });
-      clicksPersist_(); treeClickWindowsPersist_();
+      clicksPersist_(); if (hasWin) treeClickWindowsPersist_();
       _health.r2 = true; renderHealth_();                 // ★既存の取得結果を記録するだけ=追加通信ゼロ
       return true;
     }).catch(function () { _health.r2 = false; renderHealth_(); return false; });
@@ -891,7 +895,10 @@
 
   // ── 今日/昨日/直近1週間の再生・クリック増加(GASが毎時サーバー側で記録した差分)──
   // localStorageに前回値を保持し、開いた瞬間に即表示→GAS取得で最新化。
-  var deltaCache = (function () { try { return JSON.parse(localStorage.getItem('delta_cache') || '{}') || {}; } catch (e) { return {}; } })(); // vid -> {tv,yv,wv,tc,yc,wc}
+  // ★deltaは「取得した日」基準の今日/昨日。日を跨いだ前日分を今日として出すと、昨日投稿の動画が
+  //   今日=累計・昨日=未 に化ける(Chami報告2026-10-15 iPhoneで開きっぱなし)。取得日を刻み、日付が違えば捨てる。
+  function localDay_(ms) { var d = new Date(ms || Date.now()); return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate(); }
+  var deltaCache = (function () { try { if (localStorage.getItem('delta_cache_day') !== localDay_()) return {}; return JSON.parse(localStorage.getItem('delta_cache') || '{}') || {}; } catch (e) { return {}; } })(); // vid -> {tv,yv,wv,tc,yc,wc}
   var peakCache = (function () { try { return JSON.parse(localStorage.getItem('peak_cache') || '{}') || {}; } catch (e) { return {}; } })(); // vid -> {vRate,vWin,cRate,cWin,wRate,wWin} ★wRate/wWin=導線2ピンクのピーク(2026-08-11)
   var tpCache = (function () { try { return JSON.parse(localStorage.getItem('tp_cache') || '{}') || {}; } catch (e) { return {}; } })(); // vid -> {b30:{v,c,age},..} GASサーバー時点記録(公開起点・端末未起動でも記録)
   // ★負のデルタは無意味(期間内にクリック/再生が減ることは無い)。GASが短縮コード切替やaf_id変更で
@@ -909,7 +916,7 @@
     return dc;
   }
   sanitizeDeltas_(deltaCache); // 起動時にlocalStorageから読んだ旧キャッシュ内の負値も丸める
-  var _deltaFetched = false;
+  var _deltaFetched = false, _deltaFetchedAt = 0, DELTA_TTL_MS = 30 * 60 * 1000;
   function gasUrl_() { try { return (localStorage.getItem('bsky_gas_url') || '').trim(); } catch (e) { return ''; } }
   // JSONP。(GASのGETをCORS回避で読む。キャッシュバスターcb付き)
   //   失敗時は null ではなく {__jsonpFail:true, reason} を渡す(呼び出し側は !res||!res.ok の
@@ -936,11 +943,18 @@
     var d = new Date(Number(tsMs)), n = new Date();
     return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate();
   }
-  function fmtDelta_(d, tsMs, hasWork, prePost) {
+  function fmtDelta_(d, tsMs, hasWork, prePost, cUrls, wUrls) {
     // ★dが無くても「記録待ち」の文言は出さず、今日/昨日/週の枠を必ず出す(セルは–・Chami依頼2026-07-30)。
     //   サーバースナップが載れば refreshDeltas_ が数値へ差し替える。
     var pending = !d;
-    if (pending) d = {};
+    d = pending ? {} : Object.assign({}, d);
+    // 白/ピンクの日別クリックは、WorkerのD1日次表(クリック発生時刻のJST日で加算)を正とする(Chami依頼2026-10-15)。
+    //   GASの日次差分はスナップの基準行が無い日(投稿当日にYT URLがシート未反映 等)に「今日=累計・昨日=未」へ化けるため、
+    //   窓が揃う時はそちらで上書きし、揃わない時だけGAS差分を使う。今日投稿の「昨日」は従来どおり–。
+    var todayPosted0 = postedTodayOf_(tsMs);
+    var cw = cUrls ? clickWindowsOf_(cUrls) : null, ww = (hasWork && wUrls) ? clickWindowsOf_(wUrls) : null;
+    if (cw) { d.tc = cw.today; d.yc = todayPosted0 ? null : cw.yesterday; d.wc = cw.week; }
+    if (ww) { d.twc = ww.today; d.ywc = todayPosted0 ? null : ww.yesterday; d.wwc = ww.week; }
     var CI = '<img class="emico" src="assets/icons/ic-link.png" alt="">';         // 導線1(Bsky投稿クリック)
     var WI = '<img class="emico emico-cursor" src="assets/icons/ic-cursor-pink.png" alt="">'; // 導線2(作品クリック)
     var todayPosted = postedTodayOf_(tsMs);
@@ -973,12 +987,16 @@
     document.querySelectorAll('[data-delta-vid]').forEach(function (el) {
       var vid = el.getAttribute('data-delta-vid');
       var tree = el.querySelector('.vrow-tree-list'), treeHtml = tree ? tree.outerHTML : '';
-      var deltaHtml = fmtDelta_(vid && deltaCache[vid], el.getAttribute('data-delta-ts'), el.getAttribute('data-delta-haswork') === '1', el.getAttribute('data-delta-prepost') === '1');
+      var cUrls = (el.getAttribute('data-delta-c1') || '').split(' ').filter(Boolean), wUrls = (el.getAttribute('data-delta-c2') || '').split(' ').filter(Boolean);
+      var deltaHtml = fmtDelta_(vid && deltaCache[vid], el.getAttribute('data-delta-ts'), el.getAttribute('data-delta-haswork') === '1', el.getAttribute('data-delta-prepost') === '1', cUrls, wUrls);
       if (deltaHtml) el.innerHTML = deltaHtml + treeHtml;
     });
   }
   function fetchDeltas_(force, cb) {
-    if (_deltaFetched && !force) { applyDeltas_(); if (cb) cb(); return; }
+    // 開きっぱなしの端末(iPhoneのタブ復帰)でも、日付が変わるか30分経てば取り直す。日付跨ぎは旧値を先に捨てる。
+    var sameDay = _deltaFetchedAt && localDay_(_deltaFetchedAt) === localDay_();
+    if (_deltaFetchedAt && !sameDay) { deltaCache = {}; _deltaFetched = false; }
+    if (_deltaFetched && !force && sameDay && (Date.now() - _deltaFetchedAt) < DELTA_TTL_MS) { applyDeltas_(); if (cb) cb(); return; }
     var url = gasUrl_(); if (!url) { applyDeltas_(); if (cb) cb(); return; }
     // ★記録GASは Apps Script のコールドスタート/一過性の遅延で1発落ちることがあり、そのたびに「応答なし(赤)」が
     //   出ていた(Chami「応答なしになりがち・何回言わせんの・恒久防止」2026-08-11)。恒久策=1発の失敗で赤にせず
@@ -988,8 +1006,8 @@
     (function tryOnce() {
       jsonp_(url, { action: 'deltas' }, function (res) {
         if (res && res.ok && res.deltas) {
-          deltaCache = sanitizeDeltas_(res.deltas); _deltaFetched = true; // GAS由来の負デルタも0下限へ
-          try { localStorage.setItem('delta_cache', JSON.stringify(deltaCache)); } catch (e) {}
+          deltaCache = sanitizeDeltas_(res.deltas); _deltaFetched = true; _deltaFetchedAt = Date.now(); // GAS由来の負デルタも0下限へ
+          try { localStorage.setItem('delta_cache', JSON.stringify(deltaCache)); localStorage.setItem('delta_cache_day', localDay_(_deltaFetchedAt)); } catch (e) {}
           if (res.peaks) { peakCache = res.peaks; try { localStorage.setItem('peak_cache', JSON.stringify(peakCache)); } catch (e) {} }
           if (res.timepoints) { tpCache = res.timepoints; try { localStorage.setItem('tp_cache', JSON.stringify(tpCache)); } catch (e) {} }
           _health.gas = true; _health.gasAt = new Date().getTime(); // 既存取得の結果を記録(追加通信ゼロ)
@@ -1046,9 +1064,25 @@
   // クリック数キャッシュは localStorage に永続化(リロード直後や取得失敗時に「…」のままに
   // ならず、前回値を即表示→取得成功で最新化。再生数等の yt_meta_cache と同方針)。
   var clicksCache = (function () { try { return JSON.parse(localStorage.getItem('clicks_cache') || '{}') || {}; } catch (e) { return {}; } })(); // code -> clicks
-  var treeClickWindowsCache = (function () { try { return JSON.parse(localStorage.getItem('tree_click_windows_cache') || '{}') || {}; } catch (e) { return {}; } })(); // code -> {today,yesterday,week}
+  // 日別窓も取得日を刻む(前日に取った「今日」を翌日に今日として出さない)。
+  var treeClickWindowsCache = (function () { try { var day = localStorage.getItem('tree_click_windows_day'); if (day && day !== localDay_()) return {}; return JSON.parse(localStorage.getItem('tree_click_windows_cache') || '{}') || {}; } catch (e) { return {}; } })(); // code -> {today,yesterday,week}
+  var _treeWinDay = (function () { try { return localStorage.getItem('tree_click_windows_day') || ''; } catch (e) { return ''; } })(); // 刻み無しの旧キャッシュは白/ピンク日別に使わない(初回取得まで待つ)
   function clicksPersist_() { try { localStorage.setItem('clicks_cache', JSON.stringify(clicksCache)); } catch (e) {} }
-  function treeClickWindowsPersist_() { try { localStorage.setItem('tree_click_windows_cache', JSON.stringify(treeClickWindowsCache)); } catch (e) {} }
+  function treeClickWindowsPersist_() { try { _treeWinDay = localDay_(); localStorage.setItem('tree_click_windows_cache', JSON.stringify(treeClickWindowsCache)); localStorage.setItem('tree_click_windows_day', _treeWinDay); } catch (e) {} }
+  // 白(導線1)/ピンク(導線2)の日別クリック = 対象コード群のWorker日別窓の合計。1コードでも窓が無い/日付が古い時は null(=GASの日次差分へ戻す)。
+  function clickWindowsOf_(urls) {
+    if (_treeWinDay !== localDay_()) return null;
+    var seen = {}, out = { today: 0, yesterday: 0, week: 0 }, any = false;
+    for (var i = 0; i < urls.length; i++) {
+      var c = codeOf(urls[i] || '');
+      if (!c || seen[c]) continue;
+      seen[c] = 1;
+      var w = treeClickWindowsCache[c];
+      if (!w) return null;
+      out.today += w.today || 0; out.yesterday += w.yesterday || 0; out.week += w.week || 0; any = true;
+    }
+    return any ? out : null;
+  }
   // 【恒久・供給一本化 2026-08-03】導線1/導線2のクリック数を「投稿履歴と全く同じ計算」で1関数へ寄せる。
   //   v=579 は材料(shortUrl)の供給を履歴とランキングで揃えたが、値の"計算式"は分裂したままだった=
   //   ランキングは clicksCache[code] を直読みするだけで ①合算URL(mergeUrls)の加算 ②GAS日次デルタ
@@ -2553,6 +2587,10 @@
       if (it.rebuild) tagsHtml += '<span class="vtag vtag-rebuild">🔁リビルド版</span>';
       if (it.remade) tagsHtml += '<span class="vtag vtag-remade">🔁被リビルド</span>';
       // ★この端末のローカル履歴には無く、記録シートから補った行。編集・削除はGAS経由で正本へ反映する。
+      // 日別クリック窓の対象URL群(postClicks_の累計と同じ集合=白:主short+clickUrls+mergeUrls / ピンク:作品short+workClickUrls)
+      var dCUrls = [it.shortUrl].concat(it.clickUrls || []).concat(it.mergeUrls || []).filter(function (u) { return u && !/\s/.test(u); });
+      var dWUrls = [it.workShortUrl].concat(it.workClickUrls || []).filter(function (u) { return u && !/\s/.test(u); });
+      var treeHtml_ = treeRowsHtml_(it, chForItem_(it));
       if (it._fromSheet) tagsHtml += '<span class="vtag vtag-sheet" title="この端末にはこの記録が無く、記録シートの内容を表示して補っています(編集・削除は記録シートへ反映)">☁️シート由来</span>';
       return '<div class="vrow' + (it.remade ? ' vrow-remade' : '') + '" data-hist-anchor="' + esc(k) + '" data-hist-usedkey="' + esc(pKey) + '" data-hist-refcid="' + esc(rImgCid) + '">' +
         '<div class="vrow-body">' +
@@ -2593,13 +2631,15 @@
         '</div>' : '') +
         // footは本文列(vrow-body)の外＝カード全幅の独立行。これで🗑がカードの一番右(画像の真下)まで届く
         '<div class="vrow-foot">' +
-          '<span class="vrow-delta"' + (vid ? ' data-delta-vid="' + esc(vid) + '" data-delta-ts="' + (deltaTs || 0) + '"' + ((wcode || it.workShortUrl) ? ' data-delta-haswork="1"' : '') + (prePostFlag ? ' data-delta-prepost="1"' : '') : '') + ' title="日別の増分。(30分毎のサーバー記録から)⚠=記録欠損。(追跡開始前/取得失敗)–は今日投稿の昨日/投稿前/スナップ前">' + (vid ? fmtDelta_(deltaCache[vid], deltaTs, !!(wcode || it.workShortUrl), prePostFlag) : '<span style="opacity:.55;">今日 ▶– 🖱–　(YT未連携=日別記録なし)</span>') + treeRowsHtml_(it, chForItem_(it)) + '</span>' +
+          '<span class="vrow-delta"' + (vid ? ' data-delta-vid="' + esc(vid) + '" data-delta-ts="' + (deltaTs || 0) + '"' + ((wcode || it.workShortUrl) ? ' data-delta-haswork="1"' : '') + (prePostFlag ? ' data-delta-prepost="1"' : '') + ' data-delta-c1="' + esc(dCUrls.join(' ')) + '" data-delta-c2="' + esc(dWUrls.join(' ')) + '"' : '') + ' title="日別の増分。再生はサーバー記録、クリックは短縮URLの日別計測から。⚠=記録欠損。(追跡開始前/取得失敗)–は今日投稿の昨日/投稿前/スナップ前">' + (vid ? fmtDelta_(deltaCache[vid], deltaTs, !!(wcode || it.workShortUrl), prePostFlag, dCUrls, dWUrls) : '<span style="opacity:.55;">今日 ▶– 🖱–　(YT未連携=日別記録なし)</span>') + '</span>' +
           '<div class="vrow-actcol">' +
             (!it.remade && it.videoId ? '<button class="vrebuild-from" type="button" data-rbvid="' + esc(it.videoId) + '" title="この投稿をリビルド元にして動画作成タブへ(同一作品ならBluesky投稿を引き継ぎ)">🔁 リビルド作成</button>' : '') +
             ((!it._fromSheet || it.videoId) ? '<button class="vremake' + (it.remade ? ' on' : '') + '" type="button" data-k="' + esc(k) + '" title="この投稿に被リビルドの印を付ける(削除ではなく記録として残す)">' + (it.remade ? '↩ 被リビルド取消' : '🔁 被リビルドへ') + '</button>' : '') +
           '</div>' +
           '<button class="vdel" type="button" data-k="' + esc(k) + '" title="この記録を消去">🗑</button>' +
         '</div>' +
+        // ツリー(Bluesky子)の日別クリックはfootの下にカード全幅の独立行で出す=ボタン列の下へ潜り込まない(Chami 2026-10-15)
+        (treeHtml_ ? '<div class="vrow-tree-wrap">' + treeHtml_ + '</div>' : '') +
         '</div>';
     }).join('') + pagerHtml; // 末尾にもページャ(長い一覧の下からでもページ移動できる)
     if (stableHistSearch_) {
@@ -4731,6 +4771,18 @@
   setTimeout(function () { retryPendingWorkShortMintsAtBoot_(); }, 2500);
   // 読み込み時点で既に投稿履歴タブを開いている場合も、取得＋自動生成＋当時割引/YT URLの復元／アカウント整理。(各1回)
   setTimeout(function () { var pv = $('pageVerify'); if (pv && !pv.hidden) { refresh(false, true); maybeAutoGen(); maybeRestorePromo_(); maybeRestoreYt_(); maybeSmartRepair_(); fetchDeltas_(); } }, 2500);
+  // iPhoneはタブを開いたまま日を跨ぐ=再読込されない。前面へ戻った時に日付跨ぎ/30分超なら日別の数字を取り直す(Chami 2026-10-15)。
+  var _lastVisDay = localDay_();
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState !== 'visible') return;
+    var pv = $('pageVerify'); if (!pv || pv.hidden) return;
+    var dayChanged = _lastVisDay !== localDay_(); _lastVisDay = localDay_();
+    if (dayChanged) { deltaCache = {}; _deltaFetched = false; try { applyDeltas_(); } catch (e) {} } // 前日の今日/昨日を先に消す
+    fetchDeltas_();
+    // クリック累計・日別窓(ツリー行含む)を取り直して描き直す(日跨ぎ以外は60秒TTL内なら通信なし)
+    if (!dayChanged && (Date.now() - _clicksAt) < CLICKS_TTL_MS) return;
+    fetchAllClicks_(dayChanged).then(function (ok) { if (ok) { try { renderWhenHistIdle_(); } catch (e) {} } });
+  });
 
   // 詳細設定タブの YouTube APIキー入力：端末内に保存・復元。(秘密扱い)
   var keyEl = $('ytApiKey');

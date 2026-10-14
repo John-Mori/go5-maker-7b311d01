@@ -1422,8 +1422,10 @@ button, select, .ctl-btn, .tab, .acct-btn, .photo-btn { touch-action: manipulati
 .vedit-tree-status[hidden]{display:none;}
 .vedit-tree-status.is-ok{color:#67d6bd;}
 .vedit-tree-status.is-ng{color:#ff7373;}
-.vrow-tree-list{display:flex;flex-direction:column;gap:3px;margin-top:5px;padding-top:4px;border-top:1px dashed var(--line);overflow-x:auto;}
-.vrow-tree-row{display:flex;align-items:center;gap:9px;flex-wrap:nowrap;white-space:nowrap;min-width:max-content;font-size:11px;line-height:1.35;}
+/* ツリー行はfootの下のカード全幅行(.vrow-tree-wrap)。狭い端末では項目単位で折り返し、ボタン列へ潜り込ませない(Chami 2026-10-15) */
+.vrow-tree-wrap{flex:0 0 100%;width:100%;min-width:0;}
+.vrow-tree-list{display:flex;flex-direction:column;gap:3px;margin-top:5px;padding-top:4px;border-top:1px dashed var(--line);}
+.vrow-tree-row{display:flex;align-items:center;column-gap:9px;row-gap:2px;flex-wrap:wrap;min-width:0;font-size:11px;line-height:1.35;}
 .vrow-tree-row a{color:#ff79b0;font-weight:800;text-decoration:none;}
 .vrow-tree-row a:hover{text-decoration:underline;}
 .vrow-tree-row span{display:inline-flex;align-items:center;color:var(--sub);white-space:nowrap;}
@@ -1534,3 +1536,10 @@ html[data-account="acc3"] .stk-row .stk-remake{background:var(--field-bg) !impor
 html[data-account="acc3"] .stk-row .stk-del{background:var(--field-bg) !important;border-color:#d9c48a !important;color:#9a8a6a !important;}
 html[data-account="acc3"] .stk-row .stk-arch-del{border-color:#d9a0a0 !important;color:#b04a4a !important;}
 html[data-account="acc3"] .stk-row button:disabled{opacity:.7;}
+/* 癒やし倉庫(acc3)：投稿履歴カードの作品名・日別ラベル・ツリー名が暗色テーマ用の淡色(#cbd5e1等)のままクリーム地に溶けていた(Chami 2026-10-15「タイトルの字が薄い」) */
+html[data-account="acc3"] .vrow .vrow-title{color:var(--ink);}
+html[data-account="acc3"] .vrow .fanza-name-row{color:#5a4a2e;font-weight:600;}
+html[data-account="acc3"] .vrow-delta{color:#6e5f43;}
+html[data-account="acc3"] .vrow-delta .dl-seg b{color:#4b3f2c;}
+html[data-account="acc3"] .vrow-tree-row span{color:#6e5f43;}
+html[data-account="acc3"] .vrow-tree-row a{color:#c8467f;}

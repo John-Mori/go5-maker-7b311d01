@@ -92,6 +92,8 @@
     "clicks_cache": { "decision": "local", "why": "クリック数キャッシュ" },
     "tree_click_windows_cache": { "decision": "local", "why": "短縮リンクの日別クリック表示キャッシュ。link-workerから再取得できる端末ローカル派生値" },
     "delta_cache": { "decision": "local", "why": "差分キャッシュ" },
+    "delta_cache_day": { "decision": "local", "why": "差分キャッシュを取った端末ローカル日付(日跨ぎで破棄)" },
+    "tree_click_windows_day": { "decision": "local", "why": "短縮URL日別窓キャッシュを取った端末ローカル日付(日跨ぎで破棄)" },
     "peak_cache": { "decision": "local", "why": "ピーク値キャッシュ" },
     "tp_cache": { "decision": "local", "why": "キャッシュ" },
     "fanza_title_cache": { "decision": "local", "why": "FANZAタイトルキャッシュ" },

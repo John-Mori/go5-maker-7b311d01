@@ -122,6 +122,62 @@ test.describe('投稿履歴のツリー設定', () => {
     await expect(page.locator('.vrow-tree-row').nth(1).locator('a')).toHaveCount(0);
   });
 
+  test('白/ピンクの日別クリックは短縮URLの日別計測を出し、前日に取った日別値は今日として出さない', async ({ page }) => {
+    const account = (await currentIdentity(page)).account;
+    await page.evaluate((acc) => {
+      // 履歴の正本は Go5Hist(localStorageだけ書き換えても読込時に戻る)。前日23時投稿にする
+      const key = 'short_hist__' + acc;
+      const hist = window.Go5Hist ? window.Go5Hist.read(key) : JSON.parse(localStorage.getItem(key) || '[]');
+      const y = new Date(); y.setDate(y.getDate() - 1); y.setHours(23, 0, 0, 0);
+      hist[0].ts = y.getTime();
+      if (window.Go5Hist) window.Go5Hist.write(key, hist); else localStorage.setItem(key, JSON.stringify(hist));
+    }, account);
+    await page.evaluate(() => {
+      // 前日に取得した日別値(今日=累計・昨日=空)が残っている状況
+      localStorage.setItem('delta_cache', JSON.stringify({ AbCdEfGhI12: { tv: 180, yv: null, wv: 180, tc: 5, yc: null, wc: 5, twc: 7, ywc: null, wwc: 7 } }));
+      localStorage.setItem('delta_cache_day', '2000-1-1');
+    });
+    await page.unroute('**/api/list**');
+    await page.route('**/api/list**', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, links: [
+        { code: 'parent1', clicks: 12, today: 3, yesterday: 9, week: 12 }, { code: 'work01', clicks: 6, today: 1, yesterday: 5, week: 6 }, { code: 'tree01', clicks: 17, today: 8, yesterday: 5, week: 13 }
+      ] }) });
+    });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    const segs = page.locator('.vrow').first().locator('.vrow-delta .dl-seg');
+    await expect(segs.nth(0)).toHaveText(/今日\s*▶未\s*3\s*1/);
+    await expect(segs.nth(1)).toHaveText(/昨日\s*▶未\s*9\s*5/);
+    await expect(segs.nth(2)).toHaveText(/週\s*▶未\s*12\s*6/);
+  });
+
+  for (const width of [360, 375, 390, 414, 430]) {
+    test(`癒やし倉庫の履歴カードは${width}px幅でツリー行がボタンへ重ならず、作品名が地に溶けない`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 844 });
+      await page.evaluate(() => {
+        const account = window.Go5Acct.current();
+        localStorage.setItem('go5_tree_links_v1', JSON.stringify({ [account + '|v:' + account + '-20260827-1200-tree1']: { trees: [{ name: 'Bluesky子', postUrl: 'https://bsky.app/profile/x/post/abc', shortUrl: 'https://e2e-short.example/tree01' }] } }));
+      });
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.evaluate(() => { document.documentElement.setAttribute('data-account', 'acc3'); });
+      const card = page.locator('.vrow').first();
+      await expect(card.locator('.vrow-tree-row')).toContainText('今週');
+      const m = await card.evaluate((el) => {
+        const r = (s) => { const n = el.querySelector(s); return n ? n.getBoundingClientRect() : null; };
+        const box = el.getBoundingClientRect();
+        const foot = r('.vrow-foot'), tree = r('.vrow-tree-wrap');
+        const outside = [...el.querySelectorAll('.vrow-foot *, .vrow-tree-wrap *, .vmetrics > *')]
+          .filter((n) => { const b = n.getBoundingClientRect(); return b.width > 0 && b.right > box.right - 1; })
+          .map((n) => n.className || n.tagName);
+        const name = el.querySelector('.fanza-name-row');
+        if (name) { name.style.display = ''; name.textContent = '作品名テスト'; }
+        return { treeBelowFoot: tree.top >= foot.bottom - 1, outside, nameColor: name ? getComputedStyle(name).color : '' };
+      });
+      expect(m.treeBelowFoot, JSON.stringify(m)).toBeTruthy();
+      expect(m.outside, JSON.stringify(m)).toEqual([]);
+      expect(m.nameColor).not.toBe('rgb(203, 213, 225)');
+    });
+  }
+
   test('iPhone幅でも返信URLと貼り付けを同列にし、作品URL欄は同じ高さにする', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.locator('.vedit-btn').first().click();
