@@ -324,7 +324,7 @@
     if (changed) savePend_(a, pm);
   }
   // 起動時に両チャンネルの保持を復元(リロードを越えて編集を生かす)。acctは明示指定=呼び出し時のタブに依存しない。
-  ['acc1', 'acc2'].forEach(function (a) { var p = loadPend_(a); if (p && Object.keys(p).length) _pendingSheetEdits[a] = p; });
+  ['acc1', 'acc2', 'acc3'].forEach(function (a) { var p = loadPend_(a); if (p && Object.keys(p).length) _pendingSheetEdits[a] = p; });
   // 短縮URLのドメインからチャンネルを判定(月詠み=5mgl.com/acc1・宵桜艶帖=yoz2.com/acc2)。
   //   短縮リンクは投稿時にチャンネル別ドメインで払い出される(bluesky.js URL_BY_ACCT)ので、
   //   postUri/背骨IDの無い手動・ドラフト由来行でも所属を確定できる唯一の権威シグナル。
@@ -383,7 +383,7 @@
       //   → シート由来行は postUri×DID台帳/↩️固定で「別chと積極的に確定」できた時だけ隠す=fail-open。
       //   (このガードが本来狙うのは「同一題名がローカル両ストアに居る」ケース＝下のローカル行側で継続)。
       if (it._fromSheet) {
-        if ((it._ownerPin === 'acc1' || it._ownerPin === 'acc2') && it._ownerPin !== cur) return false;
+        if (/^acc[123]$/.test(String(it._ownerPin || '')) && it._ownerPin !== cur) return false;
         var R = window.Go5AccountRepair;
         if (it.postUri && R && R.ledgerFresh && R.ledgerFresh() && R.didReady && R.didReady() && R.classifyByPost) {
           var byPost = R.classifyByPost(it) || '';
@@ -1955,7 +1955,7 @@
   // 1行につき1起動1回だけ実行し、内部3回の試行後も失敗した場合は次回起動へ持ち越す。
   var _workShortMintAttempted = {};
   function attemptPendingWorkShortMint_(it, account) {
-    account = account === 'acc2' ? 'acc2' : 'acc1';
+    account = (account === 'acc2' || account === 'acc3') ? account : 'acc1';
     if (!it || it.workShortMintPending !== true || it.workShortNone || it.workShortUrl) return false;
     if (typeof window.Go5MakeShort !== 'function') return false;
     var expectedId = String(it.id || '');
@@ -1989,7 +1989,7 @@
     return true;
   }
 
-  var _workShortMintBootScanned = { acc1: false, acc2: false };
+  var _workShortMintBootScanned = { acc1: false, acc2: false, acc3: false };
   function workShortMintStoreReady_(account) {
     if (!window.Go5Hist || typeof window.Go5Hist.state !== 'function') return true;
     var state = window.Go5Hist.state('verify_manual__' + account);
@@ -1997,9 +1997,9 @@
   }
   function retryPendingWorkShortMintsAtBoot_(onlyAccount) {
     if (typeof window.Go5MakeShort !== 'function') return;
-    var accounts = onlyAccount ? [onlyAccount] : ['acc1', 'acc2'];
+    var accounts = onlyAccount ? [onlyAccount] : ['acc1', 'acc2', 'acc3'];
     accounts.forEach(function (account) {
-      if (account !== 'acc1' && account !== 'acc2') return;
+      if (!/^acc[123]$/.test(account)) return;
       if (_workShortMintBootScanned[account] || !workShortMintStoreReady_(account)) return;
       _workShortMintBootScanned[account] = true;
       loadArrFor_('verify_manual', account).forEach(function (row) {
@@ -2012,7 +2012,9 @@
   // 投稿日時を上書きしないよう postUrl は送らない。(既存行のカテゴリ列だけ更新する用途)
   // T5: シートへ送るchannelは背骨ID(videoId)接頭辞を優先。(現UIではなく作品の所属)
   //   混入アイテムを現アカウントのタブへ薄行として転写する『感染プリンタ』を止める。
-  function chOfVid_(videoId, fallback) { var m = String(videoId || '').match(/^(acc\d+)-/); return m ? m[1] : (fallback || acct()); }
+  // ★所属は IdGen.accOfId を正本にする(癒やし倉庫なのに acc1-… で発番された 2026-10-10〜15 の旧IDを acc3 シートへ送る・Chami msg 1559887734418702349)。
+  function accOfVid_(videoId) { return (window.IdGen && window.IdGen.accOfId) ? window.IdGen.accOfId(videoId) : ((String(videoId || '').match(/^(?:test-)?(acc[123])-/) || [])[1] || ''); }
+  function chOfVid_(videoId, fallback) { var a = accOfVid_(videoId); if (a) return a; var m = String(videoId || '').match(/^(acc\d+)-/); return m ? m[1] : (fallback || acct()); }
   function chForItem_(it) { return chOfVid_(it && it.videoId, acct()); }
   function pushItemToGas_(it) {
     var gasUrl = '';
@@ -3313,7 +3315,7 @@
   function recentPublishedCached_(options) {
     var opts = options || {}, cutoff = Number(opts.fromMs) || 0, todayStart = Number(opts.todayStart) || 0;
     var out = [], seen = {};
-    ['acc1', 'acc2'].forEach(function (a) {
+    ['acc1', 'acc2', 'acc3'].forEach(function (a) {
       var ymap = loadYtMapFor_(a), rawPublished = {};
       loadSheetRaw_(a).forEach(function (row) {
         var rawVid = ytIdOf((row && (row.youtubeUrl || row.ytUrl)) || '');
@@ -3563,7 +3565,7 @@
       }
       // ローカル全体を索引。(両アカウント×short_hist/verify_manual)各アイテムの全キーを登録。
       var idx = {};
-      ['acc1', 'acc2'].forEach(function (a) {
+      ['acc1', 'acc2', 'acc3'].forEach(function (a) {
         ['short_hist', 'verify_manual'].forEach(function (base) {
           var ym = loadYtMapFor_(a);
           arrOf(base, a).forEach(function (it) { var kk = itemKey(it); var loc = { a: a, base: base, key: kk }; keysFor(it, ym[kk]).forEach(function (kx) { if (!idx[kx]) idx[kx] = loc; }); });
@@ -3576,8 +3578,8 @@
         if (!sheetKeys.length) { skipped++; return; } // 識別子が全く無い空行はスキップ
         // P4: 背骨IDの接頭辞が現アカウントと矛盾する行は取り込まない。
         //   シート側の誤タブ行(例: 宵桜タブに紛れた acc1-… の行)を復元経由でローカルへ「再感染」させない。
-        var pm = String(si.videoId || '').match(/^(acc[12])-/);
-        if (pm && pm[1] !== to) { skipped++; return; }
+        var pm = accOfVid_(si.videoId);
+        if (pm && pm !== to) { skipped++; return; }
         var loc = null, matchedKey = ''; for (var i = 0; i < sheetKeys.length && !loc; i++) { if (idx[sheetKeys[i]]) { loc = idx[sheetKeys[i]]; matchedKey = sheetKeys[i]; } }
         if (loc) {
           if (loc.a !== to) { // 誤って別アカウントに入っている→現アカウントへ戻す(ローカルのみ・シートは触らない)
@@ -4090,7 +4092,7 @@
     }).filter(function (r) { return r.videoId; });
     // T5: 接頭辞が現アカウントと矛盾するアイテム(混入品)は現タブへ同期しない＝シートを汚さない。
     var total0 = items.length;
-    items = items.filter(function (r) { var m = String(r.videoId).match(/^(acc[12])-/); return !m || m[1] === acct(); });
+    items = items.filter(function (r) { var m = accOfVid_(r.videoId); return !m || m === acct(); });
     var excluded = total0 - items.length;
     if (!items.length) { setStatus('同期する履歴がありません' + (excluded ? '(別アカウント所属の' + excluded + '件は除外)' : '')); if (btn) btn.disabled = false; return; }
     setStatus('スプレッドシートへ同期中… (' + items.length + '件' + (excluded ? '・別アカウント所属の' + excluded + '件は除外' : '') + ')');
@@ -4473,7 +4475,7 @@
   // 現状を人が読める形にまとめる。(iPhoneでも状況が分かる診断表示用)
   function diagnoseYt_() {
     var lines = [];
-    ['acc1', 'acc2'].forEach(function (a) {
+    ['acc1', 'acc2', 'acc3'].forEach(function (a) {
       var items = loadArrFor_('short_hist', a).concat(loadArrFor_('verify_manual', a));
       var map = loadYtMapFor_(a), withYt = 0, vids = {}, keys = {};
       items.forEach(function (it) { var k = itemKey(it); keys[k] = 1; var v = ytIdOf(itemYt_(map, it) || it.ytUrl || ''); if (v) { withYt++; vids[v] = 1; } });
@@ -5448,7 +5450,7 @@
     //   していた(月詠みは出たが宵桜が出ない)。→ acc1/acc2 両方を fetchSheetForRank_ で明示取得する。
     //   TTL内の同期コールでは at が変わらない→再描画しない=ループ防止。
     (function ensureRankSheets_() {
-      ['acc1', 'acc2'].forEach(function (a0) {
+      ['acc1', 'acc2', 'acc3'].forEach(function (a0) {
         var before = (_rankSheetCache[a0] && _rankSheetCache[a0].at) || 0;
         fetchSheetForRank_(a0, function () {
           var nowAt = (_rankSheetCache[a0] && _rankSheetCache[a0].at) || 0;
@@ -5459,7 +5461,7 @@
 
     // 両アカウントからアイテムとYouTube URLを収集
     var combined = [];
-    ['acc1', 'acc2'].forEach(function (a) {
+    ['acc1', 'acc2', 'acc3'].forEach(function (a) {
       var ymap;
       try { ymap = JSON.parse(localStorage.getItem('verify_yt__' + a) || '{}') || {}; } catch (e) { ymap = {}; }
       // 【恒久・供給一本化 2026-08-03】投稿履歴(displayItems_)とランキングの材料を channelItemsFor_ で1本化。
@@ -5493,7 +5495,7 @@
       return;
     }
 
-    var ACCT_NAME = { acc1: '月詠み', acc2: '宵桜' };
+    var ACCT_NAME = { acc1: '月詠み', acc2: '宵桜', acc3: '癒やし倉庫' };
     function fmtTsFull(ts) {
       if (!ts) return '';
       try {

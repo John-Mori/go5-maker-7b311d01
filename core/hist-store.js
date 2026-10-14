@@ -15,7 +15,7 @@
  *   4. 200件slice上限と「先頭が最新・溢れは最古を落とす」(INC-131)を ARRAY 系で全層維持。
  *   5. IDB available()=false / タイムアウト端末では従来どおり LS だけで動く(degrade するが壊れない)。
  *
- * 【キー分類(レジストリ)】acc は ['acc1','acc2'] 固定・両方を起動時に全ハイドレート。
+ * 【キー分類(レジストリ)】acc は ['acc1','acc2','acc3'] 固定・両方を起動時に全ハイドレート。
  *   - ARRAY: short_hist__acc*, verify_manual__acc* … ミラー正本＋IDB＋LS後追いコピー(200件)。LSキー永久保持
  *   - MAP  : verify_yt__acc*                       … 同上(map union)。LSキー永久保持
  *   - CACHE: sheet_hist_raw__acc*                  … IDB専属。初回移行後にLSキー削除(quota解放)。喪失してもGAS再取得可
@@ -36,7 +36,7 @@
   function lsDel(k) { try { if (hasLS) localStorage.removeItem(k); } catch (e) {} }
 
   var REVS_KEY = "go5_hist_revs";
-  var ACCTS = ["acc1", "acc2"];
+  var ACCTS = ["acc1", "acc2", "acc3"]; // ★acc3=癒やし倉庫(2026-10-10から唯一の投稿先)も起動時にハイドレートする(Chami msg 1559887734418702349)
   var BASES = ["short_hist", "verify_manual", "verify_yt", "sheet_hist_raw"];
 
   // ── キー分類 ─────────────────────────────────────────────────────────

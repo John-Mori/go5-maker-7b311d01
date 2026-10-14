@@ -320,7 +320,7 @@
     document.addEventListener('go5-hist-hydrated', function (ev) {
       var page = document.getElementById('pageReserve');
       var key = ev && ev.detail && ev.detail.key ? String(ev.detail.key) : '';
-      if (!page || page.hidden || !/^(?:short_hist|verify_manual|sheet_hist_raw|verify_yt)__acc[12]$/.test(key)) return;
+      if (!page || page.hidden || !/^(?:short_hist|verify_manual|sheet_hist_raw|verify_yt)__acc[123]$/.test(key)) return;
       clearTimeout(recentHydrateTimer);
       recentHydrateTimer = setTimeout(function () {
         var y = window.scrollY || 0;

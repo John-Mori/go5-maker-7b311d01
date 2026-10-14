@@ -603,7 +603,7 @@
   // この作品を最後に投稿した時刻(両ch横断の最大ts)。未投稿/時刻不明は0。
   function lastPostedTsAnyCh_(it) {
     var best = 0;
-    ['acc1', 'acc2'].forEach(function (a) {
+    ['acc1', 'acc2', 'acc3'].forEach(function (a) {
       var m = postedMatchForCand_(it, a);
       if (m && m.item) { var t = postedTsOf_(m.item); if (t > best) best = t; }
     });
@@ -615,7 +615,7 @@
   var RECENT_POSTED_COUNT = 10;
   function recentPostedTopItems_(n) {
     var seen = [], out = [];
-    ['acc1', 'acc2'].forEach(function (a) {
+    ['acc1', 'acc2', 'acc3'].forEach(function (a) {
       var idx = postedIndexFor_(a);
       for (var k in idx) {
         if (!idx.hasOwnProperty(k)) continue;
@@ -2883,7 +2883,10 @@
     return imgs;
   }
 
-  var _ACCTS = [['acc1', '月詠み'], ['acc2', '宵桜艶帖']];
+  // ★癒やし倉庫(acc3)を追加(Chami msg 1559887734418702349「候補に癒しを追加して癒し判定に」)。2026-10-10から投稿先は acc3 だけ。
+  //   月詠み/宵桜艶帖は過去の実投稿があるので✔は出すが、未投稿pillは出さない(_ACCTS_RETIRED)。
+  var _ACCTS = [['acc3', '癒やし倉庫'], ['acc1', '月詠み'], ['acc2', '宵桜艶帖']];
+  var _ACCTS_RETIRED = { acc1: 1, acc2: 1 };
   // ── 投稿履歴の cid→item 索引(チャンネル別・メモ化) ──
   //   候補cidは buildAffiliateLink(normalizeWorkUrl(raw)) の出力。履歴側も同じ正規化→解析で
   //   cidを求めないと、アフィリンク付きURL(al.fanza.co.jp/?lurl=…)や計測パラメータ付きURLが
@@ -2961,16 +2964,20 @@
     }
     // ローカルアイテムを索引へ。所有ガード(videoId prefix / account欄)は fail-open(prefix/account無しは数える)。
     function addLocal(it, requireFresh) {
-      var owner = String((it && it.videoId) || '').match(/^(acc[12])-/);
-      if (owner && owner[1] !== account) return; // 背骨IDが別ch=このchでは数えない
+      // 背骨IDの所属は IdGen.accOfId が正本(acc3と、acc3なのに acc1-… で発番された旧ID窓の読み替えを含む)。
+      var vidS = String((it && it.videoId) || '');
+      var owner = (typeof window !== 'undefined' && window.IdGen && window.IdGen.accOfId) ? window.IdGen.accOfId(vidS) : ((vidS.match(/^(acc[123])-/) || [])[1] || '');
       var explicitAcct = String((it && it.account) || '');
-      if ((explicitAcct === 'acc1' || explicitAcct === 'acc2') && explicitAcct !== account) return; // account欄が別ch
+      var explicitOk = /^acc[123]$/.test(explicitAcct);
+      // account欄が明示されていればそれを優先(acc3のドラフトが acc1-… IDで記録された行を月詠みに数えない)。
+      if (explicitOk && explicitAcct !== account) return; // account欄が別ch
+      if (!explicitOk && owner && owner !== account) return; // 背骨IDが別ch=このchでは数えない
       if (requireFresh) {
         // 権威が生きている時は無印(所有スタンプ無し)を数えない(fail-closed)。
         //   採用条件: ①ts>fetchedAt(直近投稿=権威に未反映でも即載せる) ②所有スタンプ陽性一致(account一致 or videoId prefix一致)。
         var fresh = (it && it.ts && it.ts > fa);
         var ownedByAcct = (explicitAcct === account);
-        var ownedByPrefix = !!(owner && owner[1] === account);
+        var ownedByPrefix = !!(owner && owner === account);
         if (!fresh && !ownedByAcct && !ownedByPrefix) return;
       }
       var keys = localKeys(it);
@@ -2997,7 +3004,7 @@
     for (var key in map) { if (map.hasOwnProperty(key) && off[key] != null) delete map[key]; }
     return map;
   }
-  // 権威キャッシュ(GASシート由来)を読む。{fetchedAt, acc1, acc2} or null。
+  // 権威キャッシュ(GASシート由来)を読む。{fetchedAt, acc1, acc2, acc3} or null。
   function postedAuthorityCache_() {
     try { var v = JSON.parse(localStorage.getItem('posted_sheet_v1') || 'null'); return (v && typeof v === 'object') ? v : null; } catch (e) { return null; }
   }
@@ -3017,7 +3024,7 @@
       _postedAuthorityInflight = false;
       if (!data || data.ok !== true) return; // 失敗はキャッシュ据え置き(フォールバック)
       try {
-        localStorage.setItem('posted_sheet_v1', JSON.stringify({ fetchedAt: Date.now(), acc1: data.acc1 || [], acc2: data.acc2 || [] }));
+        localStorage.setItem('posted_sheet_v1', JSON.stringify({ fetchedAt: Date.now(), acc1: data.acc1 || [], acc2: data.acc2 || [], acc3: data.acc3 || [] }));
       } catch (e) { return; }
       invalidatePostedIndex_();
       try { if (_activeTab === 'main') render(); else if (typeof renderMaker === 'function') renderMaker(_activeTab); } catch (e) {}
@@ -3028,7 +3035,8 @@
     if (typeof window.Go5PostedItems !== 'function') return {};
     var items = window.Go5PostedItems(account) || [];
     var cache = postedAuthorityCache_();
-    var authorityItems = cache ? (account === 'acc2' ? cache.acc2 : cache.acc1) : null;
+    // ★acc3(癒やし倉庫)を acc1 に倒さない。acc3 を持たない旧キャッシュは権威なし扱い(ローカル判定)→10分TTLで取り直す。
+    var authorityItems = (cache && Array.isArray(cache[account])) ? cache[account] : null;
     var fetchedAt = (cache && cache.fetchedAt) || 0;
     // sig にキャッシュの fetchedAt を混ぜる＝権威が更新されたら索引を作り直す。
     var sig = items.length + ':' + ((items[0] && items[0].ts) || '') + ':' + ((items[items.length - 1] && items[items.length - 1].ts) || '') +
@@ -3091,6 +3099,7 @@
           'data-posted-acct="' + a[0] + '" data-posted-cid="' + esc(m.key) + '" title="' + esc(a[1]) + 'で投稿済み(タップで投稿内容)">' +
           esc(a[1]) + ' <b>✔</b></span>';
       }
+      if (_ACCTS_RETIRED[a[0]]) return ''; // 投稿を止めたchの未投稿pillは出さない(並びを癒やし倉庫だけにする)
       // 未投稿pill。タップで「実は投稿済み」を手動宣言できる(✔が付かない偽陰性の救済・data-poston-*)。
       var onCid = (candCidsOf_(it) || [])[0] || '';
       return '<span class="cand-acct-pill cand-acct-' + a[0] + ' notposted" role="button" tabindex="0" ' +
@@ -6355,7 +6364,9 @@
     // メモ(コメントの上・水色)とコメント(🙈/🗑と同じ管理行の左)は下の return 内で直接組み立てる。
     // 投稿済み作品はカード大枠をチャンネルのイメージカラーで太線囲み。両channel投稿は月詠み(外)＋宵桜(内)の二重。
     var _pAcc1 = !!postedMatchForCand_(it, 'acc1'), _pAcc2 = !!postedMatchForCand_(it, 'acc2');
-    var _postCls = (_pAcc1 && _pAcc2) ? ' cand-posted-both' : (_pAcc1 ? ' cand-posted-acc1' : (_pAcc2 ? ' cand-posted-acc2' : ''));
+    // 癒やし倉庫(acc3)の✔を最優先で枠色にする(現行の投稿先=acc3だけ・Chami msg 1559887734418702349)。
+    var _pAcc3 = !!postedMatchForCand_(it, 'acc3');
+    var _postCls = _pAcc3 ? ' cand-posted-acc3' : ((_pAcc1 && _pAcc2) ? ' cand-posted-both' : (_pAcc1 ? ' cand-posted-acc1' : (_pAcc2 ? ' cand-posted-acc2' : '')));
     var _noComment = !refCmt && !refMemo; // コメント/メモ無し＝非表示/🗑を作品リンク行に統合し余白を縮小
     if (_noComment) _postCls += ' cand-nocomment';
     // 作品リンク群。(作品↗ / X↗ / X2↗ / 投稿編集 / 🦋)無コメント時は全幅行で非表示/🗑と同列に置くため変数化。

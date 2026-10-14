@@ -57,9 +57,9 @@
       var arch = JSON.parse(localStorage.getItem('go5_stock_archive') || '[]');
       if (arch && arch.length) out = out.concat(arch.filter(function (m) {
         if (!m) return false;
-        if (m.account === 'acc1' || m.account === 'acc2') return m.account === acc; // 所属明示=そのchだけ
-        var pf = String(m.videoId || '').match(/^(acc[12])-/);
-        if (pf) return pf[1] === acc;                                                // 所属欄が空でも背骨IDのprefixで判定
+        if (/^acc[123]$/.test(String(m.account || ''))) return m.account === acc;  // 所属明示=そのchだけ(acc3=癒やし倉庫を含む)
+        var pf = (window.IdGen && window.IdGen.accOfId) ? window.IdGen.accOfId(m.videoId) : ((String(m.videoId || '').match(/^(acc[123])-/) || [])[1] || '');
+        if (pf) return pf === acc;                                                   // 所属欄が空でも背骨IDのprefixで判定(IdGen.accOfId=旧acc3誤ID窓の読み替え込み)
         return false; // 所属不明は含めない=別chを誤って「投稿済み」にしない(片ch誤判定の再発防止)
       }));
     } catch (e) {}
