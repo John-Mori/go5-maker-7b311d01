@@ -83,7 +83,8 @@
   }
 
   // 作品紹介の定型文(即アフィのコピペ欄・Blueskyドラフトの子投稿)。唯一の正本(Chami msg 1559480072589803612)。
-  //   2行目: 新作=割引ありで「新作N%OFF✨️」・なしで「新作✨️」/ 準新作=「準新作N%OFF✨️」「準新作✨️」
+  //   2行目: 新作=割引ありで「新作N%OFF✨️」・なし(定価)で「話題の新作✨️」/ 準新作=「準新作N%OFF✨️」「話題の準新作✨️」
+  //   (定価は「話題の」を付ける・Chami msg 1559935014261620787)
   //   (準新作を新作と出さない・Chami msg 1559676496841539657)/ 旧作(発売日不明も)=「N%OFFの話題作✨️」「話題作✨️」。
   //   info は FANZA作品情報(releaseDate|date・discountPct・price・listPrice)。割引は定価>売価が分かる時はそれも満たす時だけ。
   var AFFI_POST_HEAD = '⇩気になった方はコチラから💕 #PR #漫画';
@@ -94,7 +95,7 @@
     if (pct > 0 && info.listPrice && info.price != null && !(Number(info.price) < Number(info.listPrice))) pct = 0;
     var fresh = (ws === '新作' || ws === '準新作');
     if (pct > 0) return fresh ? ws + pct + '%OFF✨️' : pct + '%OFFの話題作✨️';
-    return fresh ? ws + '✨️' : '話題作✨️';
+    return fresh ? '話題の' + ws + '✨️' : '話題作✨️';
   }
   function affiPostText(info, link, nowMs) {
     var t = AFFI_POST_HEAD + '\n' + affiStatusLine(info, nowMs);
@@ -103,7 +104,7 @@
   // ドラフトの「子の文(返信)」=投稿本文(固定文)由来の文へ、見出し行の直後に2行目(新作/準新作/話題作)を差し込む。
   //   既に2行目があれば今の作品情報で置き換える。見出し行が無い文は触らない(null=差し込めなかった)。
   //   (Chami msg 1559679396363636736「ドラフトの子の文にも反映して」)
-  var AFFI_STATUS_RE = /^(?:(?:新作|準新作)(?:\d+%OFF)?|(?:\d+%OFFの)?話題作)✨️?$/;
+  var AFFI_STATUS_RE = /^(?:(?:話題の)?(?:新作|準新作)(?:\d+%OFF)?|(?:\d+%OFFの)?話題作)✨️?$/;
   function withAffiStatusLine(text, info, nowMs) {
     var lines = String(text == null ? '' : text).replace(/\r\n?/g, '\n').split('\n');
     for (var i = 0; i < lines.length; i++) {
