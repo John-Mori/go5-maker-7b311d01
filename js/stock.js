@@ -2997,6 +2997,19 @@
       if (clr) clr.style.display = 'none';
     }
   }
+  // 他のドラフトが既に選んでいる公開枠(同じ投稿先ch)を題名つきで集める=ピッカーで被りを見せる(Chami依頼2026-10-15)。
+  function takenSlots_(acc) {
+    var out = [];
+    var selfId = _modalMeta && _modalMeta.id;
+    loadMeta().forEach(function (m) {
+      if (!m || !m.id || m.id === selfId) return;
+      if ((m.account || 'acc1') !== acc) return;
+      var p = loadDraftPost_(m.id), ps = p.pubSlot;
+      if (!ps || !ps.date) return;
+      out.push({ id: ps.id || '', date: ps.date, time: ps.time || '', title: String(p.ytTitle || m.title || '(題名なし)').slice(0, 60) });
+    });
+    return out;
+  }
   // カレンダーを上から降ろす。schedule/ を pick=1 で埋め込み、枠タップ→slot-picked を受ける。
   function openSlotPicker_() {
     // ドラフトの投稿先チャンネルを渡す=ピッカーはそのchの枠だけを表示する(Chami依頼2026-08-05)。
@@ -3021,11 +3034,11 @@
       $('draftPickerClose').addEventListener('click', closeSlotPicker_);
     }
     var f = $('draftPickerFrame');
-    if (f && !f.getAttribute('src')) f.setAttribute('src', 'schedule/index.html?pick=1&acc=' + acc + '&v=38');
+    if (f && !f.getAttribute('src')) f.setAttribute('src', 'schedule/index.html?pick=1&acc=' + acc + '&v=39');
     // 表示→次フレームでスライドイン。iframe読込後に enter-pick を送る(未読込なら onload で)。
     pk.style.display = 'flex';
     requestAnimationFrame(function () { pk.style.transform = 'translateY(0)'; });
-    var send = function () { try { f.contentWindow.postMessage({ target: 'sch-calendar', type: 'enter-pick', acc: acc }, '*'); } catch (e) {} };
+    var send = function () { try { f.contentWindow.postMessage({ target: 'sch-calendar', type: 'enter-pick', acc: acc, taken: takenSlots_(acc) }, '*'); } catch (e) {} };
     if (f.contentWindow && f.dataset.loaded === '1') send();
     else { f.addEventListener('load', function () { f.dataset.loaded = '1'; send(); }, { once: true }); }
   }

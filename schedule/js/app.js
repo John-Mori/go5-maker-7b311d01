@@ -32,6 +32,8 @@ window.SCH = window.SCH || {};
   let pickMode = (function () { try { return /[?&]pick=1(?:&|$)/.test(location.search); } catch (e) { return false; } })();
   // ピック対象チャンネル：ドラフトの投稿先(acc◯)。指定時はそのchの枠だけを表示する(Chami依頼2026-08-05)。
   let pickAcc = (function () { try { var m = /[?&]acc=(acc\d+)/.exec(location.search); return m ? m[1] : null; } catch (e) { return null; } })();
+  // 他のドラフトが選択済みの枠 [{id,date,time,title}]。enter-pick で親から受け、該当行に題名を出す(Chami依頼2026-10-15)。
+  let pickTaken = [];
   if (pickMode && typeof document !== "undefined" && document.body) { try { document.body.classList.add("pick-mode"); } catch (e) {} }
 
   // 現在チャンネルを取得（localStorage から）。ピックモードでは投稿先ch(pickAcc)を優先。
@@ -290,11 +292,25 @@ window.SCH = window.SCH || {};
       return chanCell(chan.info(id).short, addMin(base, acctOffAt(config, id, base)), st, id);
     }).join("");
     if (allDone) el.classList.add("cleared"); // 全ch済＝行ごと沈める
+    // ピックモード：他のドラフトが選択済みの枠に題名を出す。枠IDが一致するか、同じ日付・時刻なら同じ枠とみなす。
+    let takenNote = "";
+    if (pickMode && pickTaken.length) {
+      const ps = (ctx.byAcc[ids[0]] || {})[s1.id] || s1;
+      const hits = pickTaken.filter(function (t) {
+        return t && ((t.id && t.id === ps.id) || (t.date === ps.date && t.time && t.time === ps.time));
+      });
+      if (hits.length) {
+        el.classList.add("taken");
+        const names = hits.map(function (t) { return String(t.title || "(題名なし)"); }).join(" / ");
+        takenNote = `<span class="taken-note" title="${escapeAttr(names)}">選択済み：${escapeHtml(names)}</span>`;
+      }
+    }
     el.innerHTML =
       `<span class="bar"></span>` +
       cells +
       `<span class="prio">${pri === 1 ? '<span class="star"></span>本命' : "優先度" + pri}` +
-      ((s1 && s1.needs_review) ? ' <span class="slot-review" title="要確認">!</span>' : "") + `</span>`;
+      ((s1 && s1.needs_review) ? ' <span class="slot-review" title="要確認">!</span>' : "") + `</span>` +
+      takenNote;
     // セルを押した ch の枠を開く。複数ch同時表示でも押したchの投稿履歴が出る(Chami2026-08-10)。
     el.querySelectorAll(".cell[data-acc]").forEach(function (cellEl) {
       cellEl.addEventListener("click", function (ev) {
@@ -582,6 +598,7 @@ window.SCH = window.SCH || {};
     if (d.type === "enter-pick") {
       pickMode = true;
       if (chan.isAcc(d.acc)) pickAcc = d.acc;   // 投稿先chを受け取り、その列だけに絞る
+      pickTaken = Array.isArray(d.taken) ? d.taken : [];
       try { document.body.classList.add("pick-mode"); } catch (e) {}
       if (editingId) closeEditor();
       recomputeAndRender();                                        // ch絞り込みを反映して再描画
