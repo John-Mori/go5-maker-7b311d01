@@ -249,10 +249,15 @@
       return;
     }
     save('movie_auto_attrs_cid', cid);
-    // aiUnknown=同人(d_)でAIが未確定(明示フラグ無し&検証未済)＝壁で読めていない可能性。AIチェックは外さない。
+    // aiUnknown=同人(d_)でAIが未確定(明示フラグ無し&今の規則で検証未済)＝壁で読めていない/旧規則の判定。AIチェックは外さない。
+    //   ★旧規則の確定false(aiRule<2)も未確定扱い=開示文を書かないAI作品のチェックを外していた(2026-10-15 Chami①)。
+    //   ★候補が同じ作品をAIと示していた(_aiHintCid)なら、後着の情報でAIを外さない(候補の判定を正とする)。
+    var core = window.Go5MovieAttrsCore;
+    var verifiedFalse = core && core.aiVerifiedFalse ? core.aiVerifiedFalse(info) : (!info.ai && !!info.aiChecked);
     applyAttrsInput_({ genres: info.genres || [], floor: info.floor, service: info.service, title: info.title, ai: info.ai,
-      aiUnknown: /^d_/i.test(cid) && !info.ai && !info.aiChecked });
+      aiUnknown: (/^d_/i.test(cid) && !verifiedFalse) || _aiHintCid === cid });
   }
+  var _aiHintCid = '';
   // 候補タブ/ウィザードから使う公開口。reset=全カテゴリOFF(新規作成の起点)、applyGenres=候補の持つジャンルでの即時チェック。
   //   ★applyGenres は「暫定チェック」に徹し、cidガード(movie_auto_attrs_cid)は張らない。
   //   候補が持つのはジャンルのみで floor(コミック・AI 等)を持たないため、ここでガードを張ると
@@ -260,7 +265,7 @@
   //   フロア名でしか分からないカテゴリが永久に自動チェックされない(再発した不具合)。ガードは
   //   floor込みで判定する autoApplyAttrsFromInfo_ 側に一本化し、そちらが1回だけ正式適用する。
   try { window.Go5MovieAttrs = {
-    reset: function () { save('movie_auto_attrs_cid', ''); save('movie_ws_manual_cid', ''); save('movie_ws_manual_val', ''); movieCatList_().forEach(function (c) { var el = $(window.Go5Cats.elId(c.key)); if (el) el.checked = false; }); },
+    reset: function () { _aiHintCid = ''; save('movie_auto_attrs_cid', ''); save('movie_ws_manual_cid', ''); save('movie_ws_manual_val', ''); movieCatList_().forEach(function (c) { var el = $(window.Go5Cats.elId(c.key)); if (el) el.checked = false; }); },
     // ★title も判定に混ぜる：総集編は「総集編」ジャンルタグが無く作品名にだけ載る作品が多く、
     //   ジャンルだけだと総集編カテゴリに自動チェックが入らない(Chami依頼2026-08-06「作品名に総集編と記載があったら総集編にもチェック」)。
     //   候補は作品名を即座に持つため、FANZA再取得を待たずここで作品名も走査する。
@@ -271,7 +276,9 @@
     //   (実測 d_748630=ジャンルは巨乳/制服…、floorは「同人」)、workerがページのFANZA必須開示文から立てた
     //   it.ai を最優先で見ないとAIカテゴリが永久に空振りする(Chami報告2026-08-12「カテゴリのAIにチェック入らない」)。
     applyGenres: function (genres, cid, title, floor, service, ai) {
-      applyAttrsInput_({ genres: genres || [], title: title, floor: floor, service: service, ai: ai });
+      var input = { genres: genres || [], title: title, floor: floor, service: service, ai: ai };
+      _aiHintCid = (cid && window.Go5MovieAttrsCore && window.Go5MovieAttrsCore.aiHint(input)) ? String(cid) : '';
+      applyAttrsInput_(input);
     }
   }; } catch (e) {}
   // 新規作成の起点(候補から/ウィザード開始)で呼ぶ一括リセット: カテゴリ+狙い+コメント型+リビルド+2行モード。

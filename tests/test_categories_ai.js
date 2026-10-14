@@ -60,7 +60,7 @@ check('2経路一致(明示フラグ 同人AI)', jump(dojinAi.genres, dojinAi.ti
 //   かつ古い分岐(setMovieAttrsFromTexts_ の直呼び)が残っていないことを固定する。
 var bsky = fs.readFileSync(path.join(__dirname, '..', 'js', 'bluesky.js'), 'utf8');
 check('bluesky.js が Go5MovieAttrsCore を参照', bsky.indexOf('Go5MovieAttrsCore') >= 0);
-check('applyGenres が applyAttrsInput_ を通る', /applyGenres:\s*function[\s\S]{0,220}applyAttrsInput_\(/.test(bsky));
+check('applyGenres が applyAttrsInput_ を通る', /applyGenres:\s*function[\s\S]{0,420}applyAttrsInput_\(/.test(bsky));
 check('autoApplyAttrsFromInfo_ が applyAttrsInput_ を通る', /function autoApplyAttrsFromInfo_[\s\S]{0,900}applyAttrsInput_\(/.test(bsky));
 check('旧 setMovieAttrsFromTexts_ の直呼びが無い', bsky.indexOf('setMovieAttrsFromTexts_(') < 0);
 
@@ -69,9 +69,34 @@ check('旧 setMovieAttrsFromTexts_ の直呼びが無い', bsky.indexOf('setMovi
 //   誤認して既にAIチェック済みの作品の AI を外し恒久凍結する再発を封じる。DOM操作のため判定式ではなく
 //   applyAttrsInput_ の非チェック保持ロジックを持つ=配線で固定する(この節が消えたら再発の穴が空く)。
 check('applyAttrsInput_ が aiUnknown でAIを外さない', /function applyAttrsInput_[\s\S]{0,700}aiUnknown[\s\S]{0,60}el\.checked[\s\S]{0,20}return;/.test(bsky));
-check('autoApplyAttrsFromInfo_ が aiUnknown を渡す', /function autoApplyAttrsFromInfo_[\s\S]{0,900}aiUnknown:/.test(bsky));
+check('autoApplyAttrsFromInfo_ が aiUnknown を渡す', /function autoApplyAttrsFromInfo_[\s\S]{0,1600}aiUnknown:/.test(bsky));
 // 遅着AI判定(壁で最初は未判定→後からtrue)を、cidガード後でもAIだけ後追いチェックする配線。
 check('autoApplyAttrsFromInfo_ が遅着AIを後追いチェック', /movie_auto_attrs_cid'\) === cid\)\s*\{[\s\S]{0,220}aiEl\.checked = true/.test(bsky));
 
+// ── 5) 判定規則の版(aiRule): 旧規則の確定falseを「非AI」と見なさない(2026-10-15 Chami報告①) ──
+//   旧worker は開示文「AI生成」だけで判定し、開示文を書かないAI作品(実測 d_709161)を ai:false/aiChecked:true で
+//   確定していた。その古い false でAIチェックを外す/候補を凍結する穴を版で封じる。
+check('今の規則の確定false → 非AI確定', Core.aiVerifiedFalse({ ai: false, aiChecked: true, aiRule: Core.AI_RULE }) === true);
+check('旧規則(aiRule無し)の確定false → 未確認', Core.aiVerifiedFalse({ ai: false, aiChecked: true }) === false);
+check('旧規則(aiRule=1)の確定false → 未確認', Core.aiVerifiedFalse({ ai: false, aiChecked: true, aiRule: 1 }) === false);
+check('未検証 → 未確認', Core.aiVerifiedFalse({ ai: false, aiChecked: false, aiRule: Core.AI_RULE }) === false);
+check('AI → 非AI確定ではない', Core.aiVerifiedFalse({ ai: true, aiChecked: true, aiRule: Core.AI_RULE }) === false);
+var cands = fs.readFileSync(path.join(__dirname, '..', 'js', 'candidates.js'), 'utf8');
+check('autoApplyAttrsFromInfo_ が aiVerifiedFalse で未確認を判定', /function autoApplyAttrsFromInfo_[\s\S]{0,1400}aiVerifiedFalse/.test(bsky));
+check('候補のAI再確認が旧規則の確定を再確認する', /function aiRecheck_[\s\S]{0,900}aiVerifiedFalse_\(it\)/.test(cands));
+// worker の判定規則の版がフロントの版と一致している(ずれると全件が永久に未確認扱い/旧falseを信じる)
+var worker = fs.readFileSync(path.join(__dirname, '..', 'fanza-worker', 'src', 'index.js'), 'utf8');
+var wm = worker.match(/const AI_RULE = (\d+);/);
+check('worker AI_RULE とフロント AI_RULE が一致', !!wm && Number(wm[1]) === Core.AI_RULE);
+// worker の本物の aiFromHtml_ を取り出して叩く(実測ページの信号を模した最小HTML)。
+var fsrc = worker.match(/function aiFromHtml_\([\s\S]*?\n\}/);
+var aiFromHtml = fsrc ? new Function(fsrc[0] + '\nreturn aiFromHtml_;')() : function () { return null; };
+var nav = new Array(44 + 1).join('<a href="/x">コミック・AI</a>');
+check('worker: 開示文「AI生成」→ AI', aiFromHtml('<p>本作品はAI生成画像を使用</p>', true) === true);
+check('worker: 開示文なし+AI棚リンク多数(d_709161型)→ AI', aiFromHtml('<div>' + nav + '</div>', true) === true);
+check('worker: exclude_ai=0 → AI', aiFromHtml('<a href="/list/?exclude_ai=0">', true) === true);
+check('worker: 通常同人(信号なし)→ 非AI', aiFromHtml('<a>コミック</a><a>CG</a>', true) === false);
+check('worker: 一般書籍は構造信号を見ない', aiFromHtml('<div>' + nav + '</div>', false) === false);
+
 if (fails) { console.log('\nFAIL: ' + fails + '件'); process.exit(1); }
-console.log('\nALL PASS (' + '19 checks' + ')');
+console.log('\nALL PASS (' + '32 checks' + ')');

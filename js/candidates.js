@@ -1105,6 +1105,11 @@
     } catch (e) {}
   }
 
+  // 「今の判定規則で非AIと確定済み」か(core/movie-attrs-core.js が正本)。旧規則の確定falseは未確認扱い。
+  function aiVerifiedFalse_(x) {
+    var core = window.Go5MovieAttrsCore;
+    return core && core.aiVerifiedFalse ? core.aiVerifiedFalse(x) : !!(x && !x.ai && x.aiChecked);
+  }
   // 壁で未判定のまま aiChecked が付かない候補のハンマリング防止(cid→最終試行ms・10分TTL)。
   var _aiTried = {}, AI_TRY_TTL_MS = 10 * 60 * 1000;
   // 同人候補のAI生成判定を「一度だけ」確定する。★AIはジャンルタグにも floor 名にも載らず、FANZAの
@@ -1119,7 +1124,8 @@
     // ★未検証(壁でworkerが読めず aiChecked が付かない)候補は次回リロードで再挑戦できるよう it.aiChecked を立てない。
     //   ただし毎描画で叩き続けると壁作品にハンマリングするため、_aiTried で10分間は同cidを再叩きしない。
     var targets = (items || []).filter(function (it) {
-      return isSalesTarget_(it) && it.title && it.title !== '(タイトル未取得)' && !it.ai && !it.aiChecked
+      // ★旧規則(aiRule<2=開示文だけ)で確定済みの候補も再確認する=開示文を書かないAI作品を非AIで凍結していた(2026-10-15 Chami①)。
+      return isSalesTarget_(it) && it.title && it.title !== '(タイトル未取得)' && !it.ai && !aiVerifiedFalse_(it)
         && (!_aiTried[it.cid] || (now - _aiTried[it.cid]) >= AI_TRY_TTL_MS);
     }).slice(0, 12);
     if (!targets.length) { cb(false); return; }
@@ -1128,7 +1134,7 @@
       _aiTried[it.cid] = now;
       fetchInfoShared_(it.cid, cfg, it.url, { checkAi: true }).then(function (info) {
         // verified=判定が確定した時だけ(AI開示ヒット or 検証済みfalse)。壁で未判定(!ai && !aiChecked)は凍結しない。
-        if (info && info.title) updates[it.cid] = { ai: !!info.ai, verified: !!(info.ai || info.aiChecked) };
+        if (info && info.title) updates[it.cid] = { ai: !!info.ai, verified: !!(info.ai || aiVerifiedFalse_(info)), aiRule: info.aiRule };
         if (--pending === 0) finish();
       }).catch(function () { if (--pending === 0) finish(); });
     });
@@ -1139,7 +1145,8 @@
       cur.forEach(function (it) {
         if (!it || it.cid == null || !(it.cid in updates)) return;
         if (updates[it.cid].ai && !it.ai) { it.ai = true; changed = true; }
-        if (updates[it.cid].verified && !it.aiChecked) { it.aiChecked = true; changed = true; } // 検証済みの時だけ確定(未確認は次回リトライ可)
+        // 検証済みの時だけ確定(未確認は次回リトライ可)。規則の版も残す=規則が変わったら再確認できる
+        if (updates[it.cid].verified && !(it.aiChecked && it.aiRule === updates[it.cid].aiRule)) { it.aiChecked = true; it.aiRule = updates[it.cid].aiRule; changed = true; }
       });
       if (changed) candItemsWrite_(key, cur);
       cb(changed);
@@ -5689,7 +5696,7 @@
           if (info.genres && info.genres.length) it.genres = info.genres;
           if (info.floor) it.floor = info.floor; if (info.service) it.service = info.service; // AI判定用(floor名でしか分からない作品)
           if (info.ai) it.ai = true;
-          if (info.ai || info.aiChecked) it.aiChecked = true; // 🔁でも検証済み(AI開示ヒット or 確定false)の時だけ確定。壁で未判定なら次回リトライ可のまま
+          if (info.ai || aiVerifiedFalse_(info)) { it.aiChecked = true; it.aiRule = info.aiRule; } // 🔁でも検証済み(AI開示ヒット or 今の規則の確定false)の時だけ確定。壁で未判定なら次回リトライ可のまま
           if (info.thumb || info.thumbSmall) it.thumb = info.thumb || info.thumbSmall;
           if (info.samples && info.samples.length) it.samples = info.samples;
           if (info.reviewCount != null) it.reviewCount = info.reviewCount;

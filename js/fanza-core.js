@@ -55,6 +55,7 @@ function parseFanzaItem(item) {
     title: item.title || '',
     ai: !!item.ai,             // AI生成作品(workerがページのFANZA必須開示文から判定。ジャンルタグに載らない同人AI用)
     aiChecked: !!item.aiChecked, // AI判定が検証済みか(作品ページ全文を実読 or PC日本IPで確定)。falseは「未確認」=非AIと同一視しない
+    aiRule: Number(item.aiRule) || 0, // 確定に使った判定規則の版(2=開示文+構造信号)。古い版の確定falseは「未確認」扱い
     partial: !!item.partial,   // 画像のみの部分情報(API未収録＋ページ取得不能の作品)
     author: author,
     authorId: authorId,

@@ -18,7 +18,8 @@ check('新作+割引 → 新作N%OFF✨️', line({ releaseDate: '2026-10-01 10:
 check('新作・割引なし → 話題の新作✨️', line({ releaseDate: '2026-10-01 10:00:00', discountPct: 0, price: 1000, listPrice: 1000 }) === '話題の新作✨️');
 check('準新作+割引 → 準新作N%OFF✨️(新作と出さない)', line({ releaseDate: '2026-08-20', discountPct: 50 }) === '準新作50%OFF✨️');
 check('準新作・割引なし → 話題の準新作✨️', line({ releaseDate: '2026-08-20' }) === '話題の準新作✨️');
-check('新作の境目(30日)を過ぎた31日目は準新作', line({ releaseDate: '2026-09-12' }) === '話題の準新作✨️');
+check('新作の境目(14日)を過ぎた15日目は準新作', line({ releaseDate: '2026-09-28' }) === '話題の準新作✨️');
+check('31日目も準新作', line({ releaseDate: '2026-09-12' }) === '話題の準新作✨️');
 check('旧作・割引なし → 話題作✨️', line({ releaseDate: '2025-01-01' }) === '話題作✨️');
 check('旧作+割引 → N%OFFの話題作✨️', line({ releaseDate: '2025-01-01', discountPct: 20, price: 800, listPrice: 1000 }) === '20%OFFの話題作✨️');
 check('ドラフトのスナップ形(pct) も読む', line({ releaseDate: '2025-01-01', pct: 15 }) === '15%OFFの話題作✨️');

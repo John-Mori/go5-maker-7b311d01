@@ -41,6 +41,15 @@
     return !!input.ai || looseAiFromGenres(input.genres) || /AI/i.test(toHalfWidth(input.floor));
   }
 
+  // 「AIではない」と言い切れるか。workerの判定規則の版(aiRule)が今の版の確定falseだけを非AIとみなす。
+  //   旧版(開示文「AI生成」だけ)は開示文を書かないAI作品(実測 d_709161)を非AIと確定していた=
+  //   その古い false でAIチェックを外したり、候補を確認済みに凍結したりしない(2026-10-15 Chami報告①)。
+  var AI_RULE = 2;
+  function aiVerifiedFalse(info) {
+    info = info || {};
+    return !info.ai && !!info.aiChecked && Number(info.aiRule) === AI_RULE;
+  }
+
   // カテゴリ判定に流す文字列群(ジャンル ∪ 作品名 ∪ フロア名 ∪ サービス名)。空文字は落とす。
   //   ★作品名も混ぜる=総集編は「総集編」タグが無く作品名にだけ載る作品が多いため(Chami依頼2026-08-06)。
   function composeTexts(input) {
@@ -125,6 +134,8 @@
     toHalfWidth: toHalfWidth,
     looseAiFromGenres: looseAiFromGenres,
     aiHint: aiHint,
+    AI_RULE: AI_RULE,
+    aiVerifiedFalse: aiVerifiedFalse,
     composeTexts: composeTexts,
     resolve: resolve,
     deriveWorkState: deriveWorkState

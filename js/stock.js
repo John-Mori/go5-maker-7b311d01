@@ -2515,6 +2515,8 @@
         if (st) st.textContent = '⚠ 元画像を安全に復元できなかったため、元のドラフトは残しました。もう一度「再作成」をお試しください。';
         return;
       }
+      // 先に試した復元元が読めずに出た「画像を読み込めませんでした」は、後ろの元で戻せたので消す(紛らわしい誤報を残さない)。
+      try { var st2 = $('status'); if (st2 && /画像を読み込めませんでした/.test(st2.textContent || '')) st2.textContent = ''; } catch (e) {}
       // ②再作成したらこのドラフトはドラフト一覧から外す(Chami依頼2026-08-06②)。作り直しの起点なので
       //   元の下書きは残さない=消し忘れによる二重ドラフトを防ぐ(墓標で他端末のドラフトからも消える)。
       try { deleteStock_(meta.id); render(); } catch (e) {}
@@ -2525,32 +2527,49 @@
   function restoreRemakeForeground_(meta) {
     var store = idb();
     if (!store || !meta || !meta.id || !window.Go5SetForegroundFile) return Promise.resolve();
+    var name = (meta.title || 'photo').replace(/[\\/:"*?<>|]/g, '_') + '.jpg';
+    // ★Blobは一度バイト列へ読み出してから File を作り直す。iOS Safari は IDB に入れた Blob を「在るのに読めない」
+    //   形で返すことがあり(WebKit既知・app.js photoRecordBlob_ と同型)、そのまま渡すと前景の decode が失敗して
+    //   「再作成しても画像が出ない」になっていた(2026-10-15 Chami報告②)。読めなければ次の復元元へ回す。
     var setFg = function (blob) {
-      if (!blob) return Promise.resolve({ ok: false, primary: false, reason: 'missing' });
-      try {
-        var name = (meta.title || 'photo').replace(/[\\/:"*?<>|]/g, '_') + '.jpg';
-        var f = (blob instanceof File) ? blob : new File([blob], name, { type: blob.type || 'image/jpeg' });
+      if (!blob || !blob.size) return Promise.resolve({ ok: false, primary: false, reason: 'missing' });
+      var type = blob.type || 'image/jpeg';
+      var read = (typeof blob.arrayBuffer === 'function') ? blob.arrayBuffer() : Promise.resolve(blob);
+      return Promise.resolve(read).then(function (bytes) {
+        if (bytes && bytes.byteLength === 0) return { ok: false, primary: false, reason: 'unreadable' };
+        var f = new File([bytes], name, { type: type });
         if (window.Go5SetForegroundFileReady) return window.Go5SetForegroundFileReady(f, null, { origin: 'remake' });
         var ok = window.Go5SetForegroundFile(f, null, { origin: 'remake' });
-        return Promise.resolve({ ok: !!ok, durable: !!ok, primary: !!ok, reason: ok ? '' : 'rejected' });
-      } catch (e) { return Promise.resolve({ ok: false, primary: false, reason: 'file' }); }
+        return { ok: !!ok, durable: !!ok, primary: !!ok, reason: ok ? '' : 'rejected' };
+      }).catch(function () { return { ok: false, primary: false, reason: 'unreadable' }; });
     };
-    return Promise.all([
-      store.get('stock_img_' + meta.id).catch(function () { return null; }),
-      store.get('stock:imgs:' + meta.id).catch(function () { return null; })
-    ]).then(function (r) {
-      var img = r[0], mirror = r[1] || {};
-      if (img) return setFg(img);
-      if (mirror.src) return durlToBlob_(mirror.src).then(setFg); // サブ端末で作った=同期ミラーから戻す
-      // ★手元IDBにも同期ミラーにも無い(iOSがIDBを退避した等)=作成直後にR2へ控えた元画像 go5src:<id> から
-      //   最後の復元(2026-08-17③)。これが無いと「再作成で画像が消える」が残る。
-      if (window.Go5Sync && Go5Sync.fetchBlobR2At) {
-        return Go5Sync.fetchBlobR2At('go5src:' + meta.id).then(function (b) {
-          return b && b.size ? setFg(b) : { ok: false, primary: false, reason: 'missing' };
-        }).catch(function () { return { ok: false, primary: false, reason: 'r2' }; });
-      }
-      return { ok: false, primary: false, reason: 'missing' };
-    }).catch(function () { return { ok: false, primary: false, reason: 'restore' }; });
+    // 復元元を順に試す: 手元IDB(stock_img_) → 同期ミラー(stock:imgs:.src・サブ端末で作った) → R2控え(go5src:<id>)。
+    //   ★以前は「最初に見つかった元」だけで決め打ちし、それが読めない/decode失敗だと後ろの元を試さずに失敗していた。
+    //   失敗receiptなら次の元へ進む。stale(後から別の前景が入った)はユーザー操作を優先してそこで止める。
+    var sources = [
+      function () { return store.get('stock_img_' + meta.id); },
+      function () {
+        return store.get('stock:imgs:' + meta.id).then(function (mirror) {
+          return mirror && mirror.src ? durlToBlob_(mirror.src) : null;
+        });
+      },
+      // ★手元IDBにも同期ミラーにも無い(iOSがIDBを退避した等)=作成直後にR2へ控えた元画像から最後の復元(2026-08-17③)。
+      function () { return window.Go5Sync && Go5Sync.fetchBlobR2At ? Go5Sync.fetchBlobR2At('go5src:' + meta.id) : null; }
+    ];
+    var last = { ok: false, primary: false, reason: 'missing' };
+    var tryAt = function (i) {
+      if (i >= sources.length) return Promise.resolve(last);
+      return Promise.resolve().then(sources[i]).catch(function () { return null; }).then(function (blob) {
+        if (!blob) return tryAt(i + 1);
+        return setFg(blob).then(function (receipt) {
+          if (receipt && receipt.ok && receipt.primary) return receipt;
+          if (receipt && receipt.reason === 'stale') return receipt;
+          last = receipt || last;
+          return tryAt(i + 1);
+        });
+      });
+    };
+    return tryAt(0).catch(function () { return { ok: false, primary: false, reason: 'restore' }; });
   }
 
   // ── レンダリング ──

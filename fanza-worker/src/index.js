@@ -157,6 +157,8 @@ export default {
       //    ★三値判定=「AI開示文ヒット=確定true(aiChecked)」「og:titleあり+壁マーカー無し=本物のページを読めた=確定false(aiChecked)」
       //      「壁(age_check/ログイン)で読めない=未判定(aiChecked付けない)」。壁で読めなかったHTMLから ai:false を配ると、
       //      フロントが「未確認」を「非AI」と誤認して既存のAIチェックを外し恒久凍結する(REQ-3babd19ddb の真因)。
+      //    ★旧規則(aiRule<2)で確定したfalseは信用しない=開示文の無いAI作品を非AIに凍結していた(2026-10-15)。
+      if (item && item.title && body.checkAi === true && /^d_/i.test(cid) && !item.ai && item.aiChecked && item.aiRule !== AI_RULE) item.aiChecked = false;
       if (item && item.title && body.checkAi === true && /^d_/i.test(cid) && !item.aiChecked) {
         if (item.ai) {
           item.aiChecked = true; // 既にAI確定(scrape/override由来)なら全文判定済み=検証済み扱い
@@ -167,8 +169,8 @@ export default {
               const aiHtml = await aiRes.text();
               const hasOg = aiHtml.includes("og:title");
               const walled = !hasOg && (aiHtml.includes("age_check") || /ログイン/.test(aiHtml)); // scrapeFanzaItem L877 と同一基準+ログイン
-              if (aiFromHtml_(aiHtml)) { item.ai = true; item.aiChecked = true; }       // AI開示文=確定true
-              else if (hasOg && !walled) item.aiChecked = true;                          // 本物のページを読めた=確定false
+              if (aiFromHtml_(aiHtml, true)) { item.ai = true; item.aiChecked = true; item.aiRule = AI_RULE; } // AI開示文/AI構造信号=確定true
+              else if (hasOg && !walled) { item.aiChecked = true; item.aiRule = AI_RULE; }                     // 本物のページを読めた=確定false
               // それ以外(壁)は aiChecked を付けない=未判定のまま(下でoverride引き当て/PC取得依頼へ)
             }
           } catch (e) { /* best-effort: 判定できなくても本体情報は返す */ }
@@ -179,7 +181,7 @@ export default {
       if (item && item.title && body.checkAi === true && /^d_/i.test(cid) && !item.aiChecked) {
         try {
           const ov = await stGetOverride(env, cid);
-          if (ov && ov.aiChecked) { item.ai = !!ov.ai; item.aiChecked = true; }
+          if (ov && ov.aiChecked && (ov.ai || ov.aiRule === AI_RULE)) { item.ai = !!ov.ai; item.aiChecked = true; item.aiRule = ov.aiRule || AI_RULE; }
           else await stQueueInfoPut(env, cid, srcUrl);
         } catch (e) {}
       }
@@ -1282,7 +1284,19 @@ async function fetchDmmPage(url, trace) {
 //   (実測 d_748630=ジャンルは巨乳/制服/中出し等でAI無し・説明に「＊本作品はAI生成で作成しています」)。
 //   カテゴリchrome(コミック・AI / CG・AI / ボイス・一部AI)は全ページ共通で紛れるが、素の「AI生成」
 //   「生成AI」は非AI作品4件の実測でpage全体0件＝作品固有の信号として使える(誤検知しない)。
-function aiFromHtml_(html) { return /AI生成|生成AI/.test(String(html || "")); }
+// ★AI_RULE=2(2026-10-15): 開示文を書かないAI作品がある(実測 d_709161/d_729171=FANZAのAI一覧に載るが
+//   「AI生成」「生成AI」の文字が0件)。同人ページはAI作品の時だけ、サークルリンクに exclude_ai=0 が付き、
+//   左ナビにAIフロア(コミック・AI 等)が数十件出る(AI作品6件=44〜52件・非AI作品13件=全て0件)。
+//   この構造信号も確定trueに使う。旧ルールで確定falseにした判定は aiRule が古い=再判定の対象にする。
+const AI_RULE = 2;
+function aiFromHtml_(html, isDoujin) {
+  const s = String(html || "");
+  if (/AI生成|生成AI/.test(s)) return true;
+  if (!isDoujin) return false; // Books等は構造が違う=開示文だけで判定(誤検知を作らない)
+  if (s.includes("exclude_ai=0")) return true;
+  const nav = s.match(/(?:コミック|CG|ボイス|ゲーム|動画)・(?:一部)?AI/g);
+  return !!(nav && nav.length >= 5);
+}
 async function scrapeFanzaItem(cid, srcUrl) {
   // srcUrl（FANZA Books等の実ページURL・呼び出し元で許可ドメイン検証済み）があればそちらを優先。
   const isBook = /book\.dmm\./.test(srcUrl); // FANZAブックス判定（同人ページとは価格の出方が異なる＝下記価格ブロックで分岐）
@@ -1442,8 +1456,9 @@ async function scrapeFanzaItem(cid, srcUrl) {
 
   return {
     content_id: cid,
-    ai:         aiFromHtml_(html),   // ページ由来のAI生成判定(ジャンルタグに載らない同人AI作品を拾う)
+    ai:         aiFromHtml_(html, !isBook && /^d_/i.test(cid)),   // ページ由来のAI生成判定(ジャンルタグに載らない同人AI作品を拾う)
     aiChecked:  true,                // 作品ページ全文を実読して判定した=検証済み(壁ならこの関数はnullを返す=ここに来ない)
+    aiRule:     AI_RULE,             // どの判定規則で確定したか(古い規則のfalseは再判定する)
     title:      title,
     date:       dateStr,
     service_name: isBook ? "FANZAブックス" : "同人",
@@ -1832,6 +1847,7 @@ function sanitizeOverride(raw) {
     //   (これが無いと ai/aiChecked がsanitizeで消え、検証済みフラグが override に永久保存されない)。
     ai: !!raw.ai,
     aiChecked: !!raw.aiChecked,
+    aiRule: Number(raw.aiRule) || 0,
     date: String(raw.date || "").slice(0, 32),
     service_name: String(raw.service_name || "同人").slice(0, 32),
     floor_name: String(raw.floor_name || "同人").slice(0, 32),
