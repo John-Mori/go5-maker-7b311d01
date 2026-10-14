@@ -769,8 +769,8 @@
         '<label class="cand-filter-today-label"><input id="candFilterToday" type="checkbox"' + (_filterToday ? ' checked' : '') + '><span>今日</span></label>' +
       '</div>' +
       '<span class="cand-kind-posted-spacer"></span>' +
-      '<button id="candHidePosted1" type="button" aria-pressed="' + (!!_hidePosted.acc1) + '" class="cand-hidep-toggle' + (_hidePosted.acc1 ? ' active' : '') + '" title="どちらかのchへ投稿して3日以内の作品(クールタイム中)と、動画生成用の画像が2枚未満で複数画像がなく投稿できない作品を一覧から隠す。クールタイムは3日経つと再表示され、もう片方のchへ回せます">' + esc(_ACCTS[0][1]) + '<span class="cand-hide-check" aria-hidden="true">✓</span>非表示</button>' +
-      '<button id="candHidePosted2" type="button" aria-pressed="' + (!!_hidePosted.acc2) + '" class="cand-hidep-toggle' + (_hidePosted.acc2 ? ' active' : '') + '" title="どちらかのchへ投稿して3日以内の作品(クールタイム中)と、動画生成用の画像が2枚未満で複数画像がなく投稿できない作品を一覧から隠す。クールタイムは3日経つと再表示され、もう片方のchへ回せます">' + esc(_ACCTS[1][1]) + '<span class="cand-hide-check" aria-hidden="true">✓</span>非表示</button>' +
+      '<button id="candHidePosted1" type="button" aria-pressed="' + (!!_hidePosted.acc1) + '" class="cand-hidep-toggle' + (_hidePosted.acc1 ? ' active' : '') + '" title="どちらかのchへ投稿して3日以内の作品(クールタイム中)と、動画生成用の画像が2枚未満で複数画像がなく投稿できない作品を一覧から隠す。クールタイムは3日経つと再表示され、もう片方のchへ回せます">' + esc('月詠み') + '<span class="cand-hide-check" aria-hidden="true">✓</span>非表示</button>' +
+      '<button id="candHidePosted2" type="button" aria-pressed="' + (!!_hidePosted.acc2) + '" class="cand-hidep-toggle' + (_hidePosted.acc2 ? ' active' : '') + '" title="どちらかのchへ投稿して3日以内の作品(クールタイム中)と、動画生成用の画像が2枚未満で複数画像がなく投稿できない作品を一覧から隠す。クールタイムは3日経つと再表示され、もう片方のchへ回せます">' + esc('宵桜艶帖') + '<span class="cand-hide-check" aria-hidden="true">✓</span>非表示</button>' +
     '</div>' +
     '<div class="cand-hide-all-row" role="group" aria-label="チャンネル別の投稿済み作品を完全非表示">' +
       '<button id="candHideAll1" type="button" aria-pressed="' + (!!_hidePosted.allAcc1) + '" class="cand-hidep-toggle cand-hideall-toggle' + (_hidePosted.allAcc1 ? ' active' : '') + '" title="月詠みで一度でも投稿した作品を、投稿日に関係なく一覧から隠す"><span class="cand-hide-check" aria-hidden="true">✓</span>月詠み完全非表示</button>' +
@@ -2884,9 +2884,11 @@
   }
 
   // ★癒やし倉庫(acc3)を追加(Chami msg 1559887734418702349「候補に癒しを追加して癒し判定に」)。2026-10-10から投稿先は acc3 だけ。
-  //   月詠み/宵桜艶帖は過去の実投稿があるので✔は出すが、未投稿pillは出さない(_ACCTS_RETIRED)。
+  //   月詠み/宵桜艶帖は「月」「桜」の1文字で、未投稿=淡色・投稿済み=濃色(_ACCTS_RETIRED/_ACCT_SHORT)。
   var _ACCTS = [['acc3', '癒やし倉庫'], ['acc1', '月詠み'], ['acc2', '宵桜艶帖']];
   var _ACCTS_RETIRED = { acc1: 1, acc2: 1 };
+  // 投稿を止めたchは1文字の略称で並べる(未投稿=淡色/投稿済み=濃色・Chami 2026-10-14)
+  var _ACCT_SHORT = { acc1: '月', acc2: '桜' };
   // ── 投稿履歴の cid→item 索引(チャンネル別・メモ化) ──
   //   候補cidは buildAffiliateLink(normalizeWorkUrl(raw)) の出力。履歴側も同じ正規化→解析で
   //   cidを求めないと、アフィリンク付きURL(al.fanza.co.jp/?lurl=…)や計測パラメータ付きURLが
@@ -3095,11 +3097,13 @@
     return _ACCTS.map(function (a) {
       var m = postedMatchForCand_(it, a[0]);
       if (m) {
-        return '<span class="cand-acct-pill cand-acct-' + a[0] + ' posted" role="button" tabindex="0" ' +
+        return '<span class="cand-acct-pill cand-acct-' + a[0] + ' posted' + (_ACCT_SHORT[a[0]] ? ' short' : '') + '" role="button" tabindex="0" ' +
           'data-posted-acct="' + a[0] + '" data-posted-cid="' + esc(m.key) + '" title="' + esc(a[1]) + 'で投稿済み(タップで投稿内容)">' +
-          esc(a[1]) + ' <b>✔</b></span>';
+          (_ACCT_SHORT[a[0]] ? esc(_ACCT_SHORT[a[0]]) : esc(a[1]) + ' <b>✔</b>') + '</span>';
       }
-      if (_ACCTS_RETIRED[a[0]]) return ''; // 投稿を止めたchの未投稿pillは出さない(並びを癒やし倉庫だけにする)
+      if (_ACCTS_RETIRED[a[0]]) {
+        return '<span class="cand-acct-pill cand-acct-' + a[0] + ' notposted retired" title="' + esc(a[1]) + '(未投稿)">' + esc(_ACCT_SHORT[a[0]]) + '</span>';
+      }
       // 未投稿pill。タップで「実は投稿済み」を手動宣言できる(✔が付かない偽陰性の救済・data-poston-*)。
       var onCid = (candCidsOf_(it) || [])[0] || '';
       return '<span class="cand-acct-pill cand-acct-' + a[0] + ' notposted" role="button" tabindex="0" ' +
