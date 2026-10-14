@@ -283,7 +283,7 @@
     var t = Date.parse(String(dateStr).replace(' ', 'T'));
     if (isNaN(t)) return '';
     var days = (new Date().getTime() - t) / 86400000;
-    if (days <= 30) return '新作';
+    if (days <= 14) return '新作';
     if (days <= 90) return '準新作';
     return '旧作';
   }

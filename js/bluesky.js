@@ -130,7 +130,7 @@
     if (jun) { try { jun.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) {} }
     renderPreview();
   }
-  // 発売日→作品状態(新作=30日以内/準新作=90日以内/旧作)。判定は core/movie-attrs-core.js に一本化(2026-08-13・C-038)。
+  // 発売日→作品状態(新作=14日以内/準新作=90日以内/旧作・FANZA表示に合わせる)。判定は core/movie-attrs-core.js に一本化(2026-08-13・C-038)。
   //   ★以前この版だけ日付パースが new Date(str.replace('/','-')) で、FANZA APIの "YYYY-MM-DD HH:mm:ss"
   //   (スペース区切り・T無し)を iOS Safari が Invalid Date にし、新作でも discountNew2 が立たなかった。
   //   core が未ロードの時のフォールバックも candidates.js/yt-clicks.js と同じ正しいパース(.replace(' ','T'))に揃える。
@@ -140,7 +140,7 @@
     var t = Date.parse(String(dateStr).replace(' ', 'T'));
     if (isNaN(t)) return '';
     var days = (new Date().getTime() - t) / 86400000;
-    if (days <= 30) return '新作';
+    if (days <= 14) return '新作';
     if (days <= 90) return '準新作';
     return '旧作';
   }

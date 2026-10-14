@@ -61,7 +61,8 @@
     return hits;
   }
 
-  // 発売日 → 作品状態(新作=30日以内 / 準新作=90日以内 / 旧作)。唯一の正本。
+  // 発売日 → 作品状態(新作=14日以内 / 準新作=90日以内 / 旧作)。唯一の正本。
+  //   ★境目はFANZAの表示に合わせる=「新作 販売から14日以内 / 準新作 販売から15〜90日以内」(以前は30日で、FANZAが準新作と出す作品を新作と書いていた・Chami msg 1559935692459606080)。
   //   ★源を1本化(2026-08-13・C-038・Chami報告「新作判定が漏れる」)。以前 bluesky.js / candidates.js /
   //   yt-clicks.js に別実装があり、新作チェック(discountNew2)を実際に立てる bluesky.js版だけ日付パースが
   //     new Date(String(dateStr).replace(/\//g,'-'))  ← スラッシュ→ハイフンのみ・スペース区切りはそのまま
@@ -77,7 +78,7 @@
     if (isNaN(t)) t = new Date(s.replace(/\//g, '-')).getTime(); // 保険:スラッシュ表記("YYYY/MM/DD")
     if (isNaN(t)) return '';
     var days = ((nowMs == null ? Date.now() : nowMs) - t) / 86400000;
-    if (days <= 30) return '新作';
+    if (days <= 14) return '新作';
     if (days <= 90) return '準新作';
     return '旧作';
   }
