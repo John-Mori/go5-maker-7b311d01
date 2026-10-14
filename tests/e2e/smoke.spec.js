@@ -975,6 +975,64 @@ test.describe('ドラフト軽量ページ', () => {
     await page.locator('#tabStock').click();
     await expect(page).toHaveURL(/\/Stock\.html$/);
   });
+
+  // 柱分け(acc3)の子の文欄(見出し行の2行目=新作/準新作/話題作)が、表示とBluesky子投稿で食い違わないことの回帰ガード。
+  //   表示側=openPostModal_、送信側=postDraftBsky_ がそれぞれ別タイミングでwithAffiStatusLineを通すため、
+  //   どちらかが古い値/別の口(affiPostText)を使うと「見た目は準新作だが送信は話題作」等のずれが無言で起きる
+  //   (Chami msg 1559679396363636736「ドラフトの子の文にも反映して」)。
+  //   外側(送信/取得)だけ止め、withAffiStatusLine/pillarSplitOn_自体は本物を通す。
+  test('ドラフト投稿モード(柱分け)の子の文欄の定型文2行目とBluesky子投稿の文が一致する', async ({ page }) => {
+    const draftId = 'stk_e2e_pillar_childtext';
+    const heading = '⇩気になった方はコチラから💕 #PR #漫画';
+    const seededBody = heading + '\n\nhttps://xdgh3.com/e2e-child';
+    const releaseDate = new Date(Date.now() - 60 * 86400000).toISOString().slice(0, 10); // 60日前=準新作(31〜90日)
+    const priceInfo = { releaseDate, pct: 30 };
+    const expectedStatusLine = '準新作30%OFF✨️';
+
+    await page.goto('Stock.html', { waitUntil: 'domcontentloaded' });
+    await page.evaluate(({ draftId, seededBody, priceInfo }) => {
+      // acc3(癒やし倉庫)だけ柱分けON(PILLAR_SPLIT)。表示中chも合わせないとカード自体が一覧に出ない(render()のaccフィルタ)。
+      localStorage.setItem('current_account', 'acc3');
+      localStorage.setItem('go5_stock_meta', JSON.stringify([{
+        id: draftId, ts: Date.now(), addedAt: Date.now(), account: 'acc3',
+        label: '柱分け子の文一致回帰', title: '柱分け子の文一致回帰', author: 'test',
+        bskyText: seededBody, affiliateUrl: '', workUrl: '', videoName: 'test.mp4',
+        videoId: 'vid_e2e_pillar_childtext', attrs: {}, priceInfo: priceInfo,
+      }]));
+    }, { draftId, seededBody, priceInfo });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+
+    // 境界(ネット/実送信)だけ止める。判定(withAffiStatusLine/pillarSplitOn_)は本物のまま。
+    await page.evaluate((priceInfo) => {
+      window.__e2eBskyCalls = [];
+      window.Go5DraftBskyThread = function (args) {
+        window.__e2eBskyCalls.push(args);
+        return Promise.resolve({ parentUrl: 'https://bsky.example/post/parent', replyUrl: 'https://bsky.example/post/reply' });
+      };
+      window.Go5FreshWorkInfo = function () { return Promise.resolve(priceInfo); };
+      if (window.Go5Sync) window.Go5Sync.fetchBlobR2At = function () { return Promise.resolve(null); };
+    }, priceInfo);
+
+    await page.locator('.stk-mode[data-id="' + draftId + '"]').click();
+    await expect(page.locator('#draftPostModal')).toBeVisible();
+    await expect(page.locator('#draftBskyPost')).toBeVisible(); // 柱分けUIが出ている(bw表示)
+
+    // ①表示側: 見出し行の直下に定型文2行目(準新作30%OFF✨️)が出る。
+    await expect.poll(async () => {
+      const v = await page.locator('#draftXText').inputValue();
+      const lines = v.split('\n');
+      const hi = lines.indexOf(heading);
+      return hi >= 0 ? lines[hi + 1] : null;
+    }).toBe(expectedStatusLine);
+    const shownText = await page.locator('#draftXText').inputValue();
+
+    // ②送信側: Bluesky子投稿へ渡る childText が、今まさに表示中の#draftXTextの値と完全一致する。
+    page.on('dialog', (dialog) => dialog.accept());
+    await page.locator('#draftBskyPost').click();
+    await expect.poll(() => page.evaluate(() => window.__e2eBskyCalls.length)).toBe(1);
+    const call = await page.evaluate(() => window.__e2eBskyCalls[0]);
+    expect(call.childText, '送信直前の#draftXTextと食い違う子の文が投稿された').toBe(shownText);
+  });
 });
 
 test.describe('ドラフト投稿モードの短縮URL置換', () => {
