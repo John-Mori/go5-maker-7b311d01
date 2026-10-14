@@ -43,13 +43,15 @@ const unavailableKv = {
 };
 const env = { SYNC_IMAGES: r2, SYNC: unavailableKv, SYNC_TOKEN: "test-token", ALLOWED_ORIGINS: "*" };
 
-// R2がまだ空でKV上限中でも、pullを失敗させずローカル状態の初回pushを許可する。
+// 移行元KVを読めない時は、未作成と誤認して古い端末の初回pushを受け付けない。
 let response = await worker.fetch(req("/api/pull"), env, {});
 let body = await bodyOf(response);
-assert.equal(response.status, 200);
-assert.equal(body.ok, true);
-assert.equal(body.empty, true);
-assert.equal(body.degraded, "kv_unavailable");
+assert.equal(response.status, 503);
+assert.equal(body.ok, false);
+assert.equal(body.error, "state_unavailable");
+
+// 移行元が無い新規環境ならR2を作れる。確定後はKV上限の影響を受けない。
+env.SYNC = null;
 
 const firstBlob = JSON.stringify({ fmt: 2, ls: { cand_items: { t: 1, v: '[{"cid":"pc-new"}]' } }, idb: {} });
 response = await worker.fetch(req("/api/push", {
@@ -61,6 +63,7 @@ assert.equal(body.ok, true);
 assert.equal(body.version, 1);
 assert.ok(r2.values.has("state/sync-v1.json"));
 assert.equal(kvPuts, 0, "new state must never write KV");
+env.SYNC = unavailableKv;
 
 // R2正本ができた後はpullでもKVへ触れず、即座に同じ候補状態を返す。
 kvGets = 0;

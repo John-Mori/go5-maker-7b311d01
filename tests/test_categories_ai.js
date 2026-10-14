@@ -9,11 +9,12 @@
 'use strict';
 var fs = require('fs');
 var path = require('path');
+var vm = require('vm');
 var Cats = require('../core/categories.js');
 var Core = require('../core/movie-attrs-core.js'); // ★本物の判定口(runtime と同一)
 
-var fails = 0;
-function check(name, cond) { if (cond) { console.log('  ok  ' + name); } else { console.log('  NG  ' + name); fails++; } }
+var fails = 0, checks = 0;
+function check(name, cond) { checks++; if (cond) { console.log('  ok  ' + name); } else { console.log('  NG  ' + name); fails++; } }
 
 // 候補→作成(bluesky.js applyGenres が組む input)を本物の resolve に通す。
 function jump(genres, title, floor, service, ai) {
@@ -64,14 +65,49 @@ check('applyGenres が applyAttrsInput_ を通る', /applyGenres:\s*function[\s\
 check('autoApplyAttrsFromInfo_ が applyAttrsInput_ を通る', /function autoApplyAttrsFromInfo_[\s\S]{0,900}applyAttrsInput_\(/.test(bsky));
 check('旧 setMovieAttrsFromTexts_ の直呼びが無い', bsky.indexOf('setMovieAttrsFromTexts_(') < 0);
 
-// ── 4) verified-ai: 壁で未確認(aiUnknown)ならAIチェックを外さない配線を固定する(REQ-3babd19ddb) ──
-//   worker が壁で作品ページを読めず ai:false/aiChecked無し を返した時、フロントが「未確認」を「非AI」と
-//   誤認して既にAIチェック済みの作品の AI を外し恒久凍結する再発を封じる。DOM操作のため判定式ではなく
-//   applyAttrsInput_ の非チェック保持ロジックを持つ=配線で固定する(この節が消えたら再発の穴が空く)。
-check('applyAttrsInput_ が aiUnknown でAIを外さない', /function applyAttrsInput_[\s\S]{0,700}aiUnknown[\s\S]{0,60}el\.checked[\s\S]{0,20}return;/.test(bsky));
-check('autoApplyAttrsFromInfo_ が aiUnknown を渡す', /function autoApplyAttrsFromInfo_[\s\S]{0,1600}aiUnknown:/.test(bsky));
-// 遅着AI判定(壁で最初は未判定→後からtrue)を、cidガード後でもAIだけ後追いチェックする配線。
-check('autoApplyAttrsFromInfo_ が遅着AIを後追いチェック', /movie_auto_attrs_cid'\) === cid\)\s*\{[\s\S]{0,220}aiEl\.checked = true/.test(bsky));
+// ── 4) 実際の適用コードを実行する(REQ-3babd19ddb / 2026-10-15 タグ消失) ──
+// 旧版は正規表現で「AIだけ保護する分岐」の存在を見ていた。他タグの消失/別タブの空振りは検出できない。
+// 判定・適用は本物を実行し、DOMとlocalStorageだけを置き換える。実画面の確認はe2e/draft-sync-tagsも担う。
+var attrsSource = bsky.slice(bsky.indexOf('  function resolveAttrs_('), bsky.indexOf('  // 新規作成の起点('));
+var sharedStorage = {};
+function tab() {
+  var els = {}, listeners = {};
+  Cats.visible().forEach(function (c) { els[Cats.elId(c.key)] = { checked: false }; });
+  var sandbox = {
+    window: { Go5Cats: Cats, Go5MovieAttrsCore: Core },
+    document: { addEventListener: function (name, cb) { listeners[name] = cb; } },
+    $: function (id) { return els[id]; }, movieCatList_: function () { return Cats.visible(); },
+    save: function (k, v) { sharedStorage[k] = v; }, load: function (k) { return sharedStorage[k] || ''; }
+  };
+  vm.runInNewContext(attrsSource + '\nglobalThis.applyInfo = autoApplyAttrsFromInfo_;', sandbox);
+  return { api: sandbox.window.Go5MovieAttrs, info: sandbox.applyInfo,
+    checked: function (key) { return els[Cats.elId(key)].checked; },
+    manual: function (key, value) {
+      els[Cats.elId(key)].checked = value;
+      listeners.change({ target: { checked: value, getAttribute: function () { return key; } } });
+    },
+    repaint: function () { listeners['go5-categories-rendered'](); }
+  };
+}
+var first = tab(), second = tab();
+first.api.applyGenres(['ハーレム'], 'd_tags', '総集編', '', '', true);
+first.info({ cid: 'd_tags', title: '部分情報', genres: [], ai: false, partial: true });
+check('部分情報でも候補のAI/ハーレム/総集編を保持', first.checked('ai') && first.checked('harem') && first.checked('soshu'));
+first.info({ cid: 'd_tags', ai: false, aiChecked: true, aiRule: 1 });
+check('旧規則の確定falseでも既知のAIを消さない', first.checked('ai'));
+second.info({ cid: 'd_tags', genres: ['ハーレム'] });
+check('他タブが同じcidを適用していてもチェックする', second.checked('harem'));
+second.info({ cid: 'd_tags', ai: true });
+check('遅着AIの肯定情報を取り込む', second.checked('ai'));
+second.manual('ai', false);
+second.info({ cid: 'd_tags', ai: true });
+second.repaint();
+check('後着情報/再描画でも手動OFFを保持', !second.checked('ai'));
+second.info({ cid: 'd_next', genres: ['異世界'] });
+check('別作品には前のタグと手動指定を引き継がない', !second.checked('harem') && !second.checked('ai') && second.checked('isekai'));
+second.api.restore({ harem: true, ai: false }, 'd_restore');
+second.info({ cid: 'd_restore', ai: true });
+check('再作成は保存されたタグ選択を保持', second.checked('harem') && !second.checked('ai'));
 
 // ── 5) 判定規則の版(aiRule): 旧規則の確定falseを「非AI」と見なさない(2026-10-15 Chami報告①) ──
 //   旧worker は開示文「AI生成」だけで判定し、開示文を書かないAI作品(実測 d_709161)を ai:false/aiChecked:true で
@@ -82,7 +118,6 @@ check('旧規則(aiRule=1)の確定false → 未確認', Core.aiVerifiedFalse({ 
 check('未検証 → 未確認', Core.aiVerifiedFalse({ ai: false, aiChecked: false, aiRule: Core.AI_RULE }) === false);
 check('AI → 非AI確定ではない', Core.aiVerifiedFalse({ ai: true, aiChecked: true, aiRule: Core.AI_RULE }) === false);
 var cands = fs.readFileSync(path.join(__dirname, '..', 'js', 'candidates.js'), 'utf8');
-check('autoApplyAttrsFromInfo_ が aiVerifiedFalse で未確認を判定', /function autoApplyAttrsFromInfo_[\s\S]{0,1400}aiVerifiedFalse/.test(bsky));
 check('候補のAI再確認が旧規則の確定を再確認する', /function aiRecheck_[\s\S]{0,900}aiVerifiedFalse_\(it\)/.test(cands));
 // worker の判定規則の版がフロントの版と一致している(ずれると全件が永久に未確認扱い/旧falseを信じる)
 var worker = fs.readFileSync(path.join(__dirname, '..', 'fanza-worker', 'src', 'index.js'), 'utf8');
@@ -99,4 +134,4 @@ check('worker: 通常同人(信号なし)→ 非AI', aiFromHtml('<a>コミック
 check('worker: 一般書籍は構造信号を見ない', aiFromHtml('<div>' + nav + '</div>', false) === false);
 
 if (fails) { console.log('\nFAIL: ' + fails + '件'); process.exit(1); }
-console.log('\nALL PASS (' + '32 checks' + ')');
+console.log('\nALL PASS (' + checks + ' checks)');

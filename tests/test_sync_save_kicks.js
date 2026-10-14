@@ -58,8 +58,8 @@ function makeDevice(server) {
   root.localStorage.setItem("sync2_url", "https://sync.example"); root.localStorage.setItem("sync2_token", "t");
   vm.runInContext(keysSrc, ctx);
   vm.runInContext(src, ctx);
-  // 予約された同期(見張りの5分タイマーは除く)
-  function kicks() { return timers.filter(function (t) { return t.ms < 60000; }); }
+  // 保存の予約は3〜10秒。通信timeoutやドラフトの45秒見張りを予約本数に数えない。
+  function kicks() { return timers.filter(function (t) { return t.ms >= 3000 && t.ms <= 10000; }); }
   return {
     ls: root.localStorage, S: root.Go5Sync, kicks: kicks,
     save: function (k, v) { root.localStorage.setItem(k, v); },

@@ -140,20 +140,20 @@ function preflight(origin, env) {
 
 // ── 状態(JSON) ─────────────────────────────────────────────
 // R2を正本にする。旧KV(state:doc/state:meta)はR2が空の時だけ移行元として読む。
-// KVの日次上限に達して読み出せなくても empty として開始し、次のpushでR2へ着地させる。
+// R2の読取失敗を「未作成」と扱わない。旧KVへ戻すと古い台帳で全端末を上書きしてしまう。
 const STATE_R2_KEY = "state/sync-v1.json";
 async function readStateBundle(env) {
   if (env.SYNC_IMAGES) {
-    try {
       const obj = await env.SYNC_IMAGES.get(STATE_R2_KEY);
       if (obj) {
         const saved = parseJson(await obj.text());
         if (saved && typeof saved.blob === "string") return {
           empty: false, blob: saved.blob, version: Number(saved.version || 0),
-          updatedAt: String(saved.updatedAt || ""), device: String(saved.device || ""), source: "r2"
+          updatedAt: String(saved.updatedAt || ""), device: String(saved.device || ""), source: "r2",
+          etag: obj.etag || String(obj.httpEtag || "").replace(/^"|"$/g, "")
         };
+        throw new Error("invalid_state");
       }
-    } catch (e) {}
   }
   if (env.SYNC) {
     try {
@@ -162,23 +162,25 @@ async function readStateBundle(env) {
         const meta = parseJson(await env.SYNC.get("state:meta")) || {};
         return { empty: false, blob, version: Number(meta.version || 0), updatedAt: String(meta.updatedAt || ""), device: String(meta.device || ""), source: "kv" };
       }
-    } catch (e) {
-      return { empty: true, version: 0, degraded: "kv_unavailable" };
-    }
+    } catch (e) { throw new Error("state_unavailable"); }
   }
   return { empty: true, version: 0 };
 }
 async function statePull(env, cors) {
   if (!env.SYNC_IMAGES && !env.SYNC) return json({ ok: false, error: "storage_unset" }, 500, cors);
-  const state = await readStateBundle(env);
+  let state;
+  try { state = await readStateBundle(env); }
+  catch (e) { return json({ ok: false, error: "state_unavailable" }, 503, cors); }
   if (state.empty) return json({ ok: true, empty: true, version: 0, degraded: state.degraded || "" }, 200, cors);
   // 旧KVから読めた時点でR2へ一度だけ移行。以後のpull/pushはKVを消費しない。
   if (state.source === "kv" && env.SYNC_IMAGES) {
     try {
-      await env.SYNC_IMAGES.put(STATE_R2_KEY, JSON.stringify({ blob: state.blob, version: state.version, updatedAt: state.updatedAt, device: state.device }), {
+      const saved = await env.SYNC_IMAGES.put(STATE_R2_KEY, JSON.stringify({ blob: state.blob, version: state.version, updatedAt: state.updatedAt, device: state.device }), {
+        onlyIf: { etagDoesNotMatch: "*" },
         httpMetadata: { contentType: "application/json", cacheControl: "no-store" }
       });
-    } catch (e) {}
+      if (!saved) state = await readStateBundle(env); // 同時pushが先着したら、その新しい正本を返す。
+    } catch (e) { return json({ ok: false, error: "state_unavailable" }, 503, cors); }
   }
   return json({ ok: true, blob: state.blob, version: state.version, updatedAt: state.updatedAt, device: state.device }, 200, cors);
 }
@@ -186,17 +188,27 @@ async function statePush(request, env, cors) {
   if (!env.SYNC_IMAGES && !env.SYNC) return json({ ok: false, error: "storage_unset" }, 500, cors);
   const body = parseJson(await request.text());
   if (!body || typeof body.blob !== "string") return json({ ok: false, error: "bad_body" }, 400, cors);
-  if (body.blob.length > 8 * 1024 * 1024) return json({ ok: false, error: "too_large" }, 413, cors);
-  const current = await readStateBundle(env);
+  if (new TextEncoder().encode(body.blob).byteLength > 8 * 1024 * 1024) return json({ ok: false, error: "too_large" }, 413, cors);
+  let current;
+  try { current = await readStateBundle(env); }
+  catch (e) { return json({ ok: false, error: "state_unavailable" }, 503, cors); }
   const cur = Number(current.version || 0), base = Number(body.baseVersion || 0);
-  if (!current.empty && cur !== 0 && base !== cur) {
+  if (base !== cur) {
     return json({ ok: false, conflict: true, version: cur, blob: current.blob, updatedAt: current.updatedAt || "", device: current.device || "" }, 200, cors);
   }
   const nextMeta = { blob: body.blob, version: cur + 1, updatedAt: body.updatedAt || new Date().toISOString(), device: String(body.device || "") };
   if (env.SYNC_IMAGES) {
-    await env.SYNC_IMAGES.put(STATE_R2_KEY, JSON.stringify(nextMeta), {
-      httpMetadata: { contentType: "application/json", cacheControl: "no-store" }
-    });
+    // versionの確認とPUTは別操作。R2の条件付きPUTで、その間の他端末の書込みも検出する。
+    try {
+      const saved = await env.SYNC_IMAGES.put(STATE_R2_KEY, JSON.stringify(nextMeta), {
+        onlyIf: current.source === "r2" ? { etagMatches: current.etag } : { etagDoesNotMatch: "*" },
+        httpMetadata: { contentType: "application/json", cacheControl: "no-store" }
+      });
+      if (!saved) {
+        const latest = await readStateBundle(env);
+        return json({ ok: false, conflict: true, version: latest.version, blob: latest.blob }, 200, cors);
+      }
+    } catch (e) { return json({ ok: false, error: "state_unavailable" }, 503, cors); }
   } else {
     // R2未設定環境だけの後方互換。通常運用では通らない。
     await env.SYNC.put("state:doc", body.blob);

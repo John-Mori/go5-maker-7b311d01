@@ -155,6 +155,7 @@
     if (code === "rate_limited") return "同期の一日上限に達しました。時間を置いて再試行してください";
     if (code === "kv_unset" || code === "storage_unset") return "同期Workerの保存先が未設定です";
     if (code === "too_large") return "同期データが上限を超えています";
+    if (code === "state_unavailable") return "同期の保存先を読めません。データを保持して次回再試行します";
     return "同期Workerでエラーが発生しました(" + ((r && r.status) || code || "unknown") + ")";
   }
   function readApiJson(r, allowConflict) {
@@ -273,7 +274,9 @@
     var oSet = proto.setItem, oRem = proto.removeItem, oGet = proto.getItem;
     proto.setItem = function (k, v) {
       var watch = this === LS, prev = watch ? oGet.call(this, k) : null;
-      var r = oSet.apply(this, arguments);
+      // 配列の保存時刻ではなく、実際に変えたドラフトの時刻を残す。別作品の保存で古い行を勝たせない。
+      if (watch && !_sysWrite && (isStockArrayKey(k) || isStockArchiveKey(k))) v = stampDraftRows_(v, prev, Date.now());
+      var r = oSet.call(this, k, v);
       if (watch && prev !== String(v)) noteEdit_(String(k), oSet);
       return r;
     };
@@ -331,7 +334,7 @@
   //   どちらも0の同期(=タブ復帰の空振り等)では再描画させない。
   //   無条件反応による画面の白フラッシュを避けるため、変化の種類を分けて通知する。
   function fireSynced(pulled, pulledImg, pulledCand, pulledImgKeys) { try { if (root.document) root.document.dispatchEvent(new root.CustomEvent("go5-synced", { detail: { pulled: pulled, pulledImg: pulledImg || 0, pulledCand: pulledCand || 0, pulledImgKeys: (pulledImgKeys || []).slice() } })); } catch (e) {} }
-  function status() { return { configured: configured(), busy: _busy, version: getVer(), lastError: _lastErr, lastAt: _lastAt, device: deviceName(), prog: _prog }; }
+  function status() { return { configured: configured(), busy: _busy || !!_draftJob, version: getVer(), lastError: _draftErr || _lastErr, lastAt: _lastAt, device: deviceName(), prog: _prog }; }
 
   // per-key マージ。(t 大きい方を採用)
   function mergeMaps(local, rem) {
@@ -877,7 +880,173 @@
     };
   }
 
+  // ドラフトの小さい台帳は画像走査と独立して運ぶ。通常同期と同じWorkerの版/CASを使い、
+  // meta/archive・投稿編集・墓標を1回のpushへまとめる。同期キーは従来のまま=旧端末とも読める。
+  function isDraftKey_(k) {
+    return isStockArrayKey(k) || isStockArchiveKey(k) || isStockDelKey(k) || isArchDelKey(k) || /^go5_draft_post_/.test(k);
+  }
+  function draftRows_(s) { var a = JSON.parse(s || "[]"); if (!Array.isArray(a)) throw new Error("invalid_draft_rows"); return a; }
+  function draftRowValue_(m) {
+    var out = {};
+    Object.keys(m || {}).forEach(function (k) { if (k !== "thumbDataUrl" && k !== "_syncAt") out[k] = m[k]; });
+    return stableCandidateJson_(out);
+  }
+  function stampDraftRows_(value, prev, now) {
+    try {
+      var old = {}, rows = draftRows_(value);
+      draftRows_(prev).forEach(function (m) { if (m && m.id) old[m.id] = m; });
+      rows.forEach(function (m) {
+        if (!m || !m.id) return;
+        var p = old[m.id];
+        m._syncAt = p && draftRowValue_(p) === draftRowValue_(m)
+          ? Number(p._syncAt || p.completedTs || p.addedAt || p.ts) || now
+          : Math.max(now, Number(p && p._syncAt) + 1 || 0, Number(m._syncAt) + 1 || 0);
+      });
+      return JSON.stringify(rows);
+    } catch (e) { return value; }
+  }
+  function draftWireValue_(k, v) {
+    if (!isStockArrayKey(k) && !isStockArchiveKey(k)) return v;
+    return JSON.stringify(draftRows_(v).map(function (m) {
+      var out = Object.assign({}, m); delete out.thumbDataUrl; return out;
+    }));
+  }
+  function mergeDraftRows_(a, b) {
+    var byId = {}, order = [];
+    [a, b].forEach(function (entry) {
+      if (!entry || entry.d) return;
+      draftRows_(entry.v).forEach(function (m) {
+        if (!m || !m.id) return;
+        var key = "id:" + m.id, old = byId[key];
+        var t = Number(m._syncAt) || Number(entry.t) || Number(m.completedTs || m.addedAt || m.ts) || 0;
+        if (!old) order.push(key);
+        // 旧版の行にも初回の時刻を固定する。次の別作品の編集で配列時刻を借り直さない。
+        if (!old || t > old.t || (t === old.t && stableCandidateJson_(m) > stableCandidateJson_(old.v))) byId[key] = { t: t, v: Object.assign({}, m, { _syncAt: t }) };
+      });
+    });
+    return JSON.stringify(order.sort().map(function (k) { return byId[k].v; }));
+  }
+  function draftSnap_() {
+    try { var saved = JSON.parse(LS.getItem("sync2_draft_snap") || "null"); if (saved && saved.ls && saved.ts) return saved; } catch (e) {}
+    // 初回移行は全同期が持っていた保存時刻を引き継ぐ。移行しただけで古い値を最新にしない。
+    var snap = loadSnap().ls || {}, ts = loadTs(), out = { ls: {}, ts: {}, del: {} };
+    Object.keys(snap).forEach(function (k) { if (isDraftKey_(k)) { out.ls[k] = draftWireValue_(k, snap[k]); out.ts[k] = ts["ls:" + k] || 0; } });
+    return out;
+  }
+  function mergeDraftState_(remote, saved, now) {
+    var rls = remote.ls || {}, ls = gatherLs(), edit = loadEditAt(), keys = {}, local = {}, out = Object.assign({}, rls);
+    [rls, ls, saved.ls, saved.del || {}].forEach(function (map) { Object.keys(map).forEach(function (k) { if (isDraftKey_(k)) keys[k] = 1; }); });
+    Object.keys(keys).forEach(function (k) {
+      if (ls[k] != null) {
+        var v = draftWireValue_(k, ls[k]);
+        var changed = saved.ls[k] !== v;
+        var et = Number(edit[k]) || 0;
+        var seen = Number(saved.ts[k]) || 0;
+        // 時計が遅い端末でも、受信済みの値を編集したらその時刻より進める。
+        var t = changed ? Math.max(et >= seen && et ? et : now, seen + 1) : seen;
+        local[k] = { t: t, v: v };
+        // 初回参加の未編集キーは雲の保存を優先(投稿編集のみ)。配列/墓標は必ずunion。
+        if (!saved.ts[k] && !edit[k] && /^go5_draft_post_/.test(k) && rls[k]) delete local[k];
+      } else if (/^go5_draft_post_/.test(k) && (saved.ls[k] != null || (saved.del || {})[k])) {
+        local[k] = { t: (saved.del || {})[k] || Math.max(Number(edit[k]) || now, (Number(saved.ts[k]) || 0) + 1), d: 1 };
+      }
+      var a = local[k], b = rls[k];
+      if (isStockArrayKey(k) || isStockArchiveKey(k)) {
+        if (a || b) out[k] = { t: Math.max(a && a.t || 0, b && b.t || 0), v: mergeDraftRows_(a, b) };
+      } else if (isStockDelKey(k) || isArchDelKey(k)) {
+        out[k] = { t: Math.max(a && a.t || 0, b && b.t || 0), v: mergeDelMap(a && !a.d ? a.v : "{}", b && !b.d ? b.v : "{}") };
+      } else if (a && b) {
+        out[k] = (b.t > a.t || (b.t === a.t && stableCandidateJson_(b) > stableCandidateJson_(a))) ? b : a;
+      } else if (a || b) out[k] = a || b;
+    });
+    ["go5_stock_meta", "go5_stock_archive"].forEach(function (k) {
+      if (!out[k] || out[k].d) return;
+      var dk = k === "go5_stock_meta" ? "go5_stock_del" : "go5_stock_arch_del";
+      var tomb = out[dk] && !out[dk].d ? parseDelMap(out[dk].v) : {};
+      // 旧ドラフトのaddedAt欠落は、表示側(loadMeta)と同じく作成tsへ戻す。
+      var rows = draftRows_(out[k].v).filter(function (m) { return !tomb[m.id] || Number(k === "go5_stock_meta" ? m.addedAt || m.ts : m.completedTs) > tomb[m.id]; });
+      out[k] = { t: out[k].t, v: draftWireValue_(k, JSON.stringify(rows)) };
+    });
+    return { ls: out, keys: Object.keys(keys) };
+  }
+  var _draftJob = null, _draftAgain = false, _draftErr = "", _draftGen = 0, _draftCancel = null;
+  function syncDraftsNow() {
+    if (!configured()) return Promise.resolve({ ok: false, skipped: true });
+    if (_draftJob) { _draftAgain = true; return _draftJob; }
+    var gen = ++_draftGen, timer;
+    var timeout = new Promise(function (resolve) {
+      _draftCancel = function () {
+        if (gen !== _draftGen) return;
+        _draftGen++; _draftJob = null; _draftAgain = false;
+        _draftErr = "ドラフト同期を時間切れで打ち切りました。次回同期で再試行します";
+        root.clearTimeout(timer);
+        resolve({ ok: false, error: _draftErr });
+      };
+      timer = root.setTimeout(_draftCancel, 45000);
+    });
+    function run(attempt) {
+      return pullState().then(function (res) {
+        if (gen !== _draftGen) return { ok: false, stale: true };
+        var remote = res.empty ? {} : JSON.parse(res.blob); // 壊れたstateを空にして上書きしない。
+        var saved = draftSnap_(), merged = mergeDraftState_(remote, saved, Date.now());
+        var pulled = 0, failed = false, next = { ls: {}, ts: {}, del: {} };
+        merged.keys.forEach(function (k) {
+          var e = merged.ls[k]; if (!e) return;
+          var value = e.d ? null : e.v;
+          try {
+            // inlineサムネは端末だけに温存。通信と同期snapは文字メタだけにする(画像は既存R2経路)。
+            var current = LS.getItem(k), display = value;
+            if (value != null && (isStockArrayKey(k) || isStockArchiveKey(k))) {
+              var thumbs = {};
+              draftRows_(current).forEach(function (m) { if (m && m.thumbDataUrl) thumbs[m.id] = m.thumbDataUrl; });
+              display = JSON.stringify(draftRows_(value).map(function (m) { return thumbs[m.id] ? Object.assign({}, m, { thumbDataUrl: thumbs[m.id] }) : m; }));
+            }
+            if (current !== display) {
+              if (e.d) sysRemove(k);
+              else { try { sysSet(k, display); } catch (quota) { sysSet(k, value); } }
+              pulled++;
+            }
+            if (e.d) next.del[k] = e.t;
+            else next.ls[k] = value;
+            next.ts[k] = e.t;
+          } catch (e) {
+            failed = true;
+            if (saved.ls[k] != null) next.ls[k] = saved.ls[k];
+            if (saved.ts[k]) next.ts[k] = saved.ts[k];
+          }
+        });
+        // これは「ローカルで観測した値と時刻」の控え。送信失敗時も同じ時刻で再送する。
+        // 受信に失敗したキーは控えを進めず、次回のpullで再度書き込む。
+        LS.setItem("sync2_draft_snap", JSON.stringify(next));
+        if (pulled) fireSynced(pulled, 0, 0, []);
+        if (failed) throw new Error("ドラフトをこの端末へ保存できません(容量不足)。次回同期で再試行します");
+        var changed = JSON.stringify(stripT(merged.ls)) !== JSON.stringify(stripT(remote.ls || {}));
+        if (!changed) return { ok: true, noChange: true, pulled: pulled };
+        var state = Object.assign({}, remote, { fmt: remote.fmt || 2, ls: merged.ls, idb: remote.idb || {} });
+        return pushState(state, res.version || 0).then(function (p) {
+          if (p.ok) return { ok: true, version: p.version, pulled: pulled };
+          if (p.conflict && attempt < 3) return run(attempt + 1);
+          throw new Error("ドラフト同期が競合しました。次回同期で再試行します");
+        });
+      });
+    }
+    _draftJob = Promise.race([run(0), timeout]).then(function (r) { if (gen === _draftGen && r.ok) _draftErr = ""; return r; }, function (e) {
+      if (gen !== _draftGen) return { ok: false, stale: true };
+      _draftErr = String(e && e.message || e); return { ok: false, error: _draftErr };
+    }).then(function (r) {
+      if (gen !== _draftGen) return r;
+      root.clearTimeout(timer); _draftCancel = null;
+      _draftJob = null;
+      if (_draftAgain && r.ok) { _draftAgain = false; return syncDraftsNow(); }
+      _draftAgain = false;
+      return r;
+    });
+    return _draftJob;
+  }
+
   function syncOnce(retry) {
+    // 全同期が画像待ちでbusyでも、ドラフト台帳のpull/pushは進める。
+    var draftStep = syncDraftsNow();
     if (!configured() || (_busy && !retry)) return Promise.resolve({ ok: false, skipped: true });
     var c = cfg(); _busy = true;
     var gen = ++_gen;
@@ -887,6 +1056,7 @@
     var watchdog = root.setTimeout(function () {
       if (!live() || !_busy) return;
       _gen++; _busy = false; setProg("", 0, 0);
+      if (_draftCancel) _draftCancel();
       _lastErr = "同期が5分で終わらないため打ち切りました(次の同期でやり直します)";
       try { root.console && root.console.warn("[go5 sync] watchdog: 同期を打ち切り"); } catch (x) {}
     }, SYNC_WATCHDOG_MS);
@@ -896,6 +1066,7 @@
     //   候補は union で両立、この端末だけが持つキーは push する。＝新規端末が正しい設定を上書きするのを防ぐ。
     var firstSync = getVer() === 0;
     var curLs = gatherLs();
+    Object.keys(curLs).forEach(function (k) { if (isDraftKey_(k)) delete curLs[k]; });
     var secInfo = { entries: {}, plain: {}, skip: true };
     var newSecPlain = {};                 // push成功時に保存する {key:平文}(remote勝ちは復号後に追記)
     // 鍵をキー単位で暗号化して curLs へ。(sec:<key>)pass無しなら付けない。
@@ -980,10 +1151,11 @@
       }).then(toRef);
     });
 
-    return Promise.all([secStep, candMirrorStep, idbStep]).then(function () {
+    return Promise.all([secStep, candMirrorStep, idbStep, draftStep]).then(function (steps) {
+      if (steps[3] && steps[3].error) throw new Error(steps[3].error);
       // pass無し(skip)の端末は、雲側の sec: キーを消さない。(削除判定から除外)
-      var snapLsStamp = snapLs;
-      if (secInfo.skip) { snapLsStamp = {}; Object.keys(snapLs).forEach(function (k) { if (k.indexOf(SEC_PREFIX) !== 0) snapLsStamp[k] = snapLs[k]; }); }
+      var snapLsStamp = {};
+      Object.keys(snapLs).forEach(function (k) { if (!isDraftKey_(k) && (!secInfo.skip || k.indexOf(SEC_PREFIX) !== 0)) snapLsStamp[k] = snapLs[k]; });
       // 変更/削除→タイムスタンプ更新。
       // 変化の t は「実際に保存した時刻」。記録が無い/前回の t 以前(記録外の書き込み)の時だけ従来どおり同期時刻。
       var editAt = loadEditAt();
@@ -1125,6 +1297,7 @@
         var pulledLsReal = 0;   // 実際にLSへ「中身が変わった設定」を書き込んだ件数=pulled合図の真値(画像側 pulledImgReal と対)
         var pulledCandReal = 0; // 候補配列の文字情報(URL/題名等)だけが変わった時の候補ページ再描画合図
         Object.keys(mls).forEach(function (k) {
+          if (isDraftKey_(k)) return; // このレールはremoteのドラフトをそのまま運ぶ。適用は専用レールだけ。
           var e = mls[k];
           var isSec = k.indexOf(SEC_PREFIX) === 0, sk = isSec ? k.slice(SEC_PREFIX.length) : null;
           if (e.d) {
@@ -1496,6 +1669,7 @@
   //   同期中(_busy)は今の同期の完了を待てないので、短い再同期だけ予約して取りこぼしを防ぐ。
   function flushSync() {
     if (!configured()) return Promise.resolve({ ok: false, skipped: true });
+    syncDraftsNow();
     if (_reqTimer) { try { root.clearTimeout(_reqTimer); } catch (e) {} _reqTimer = null; }
     if (_busy) { requestSync(); return Promise.resolve({ ok: false, busy: true }); }
     return syncOnce(false);
@@ -1580,7 +1754,7 @@
   }
 
   root.Go5Sync = {
-    configured: configured, syncNow: function () { return syncOnce(false); }, requestSync: requestSync, flushSync: flushSync, syncCandidatesNow: syncCandidatesNow, syncImageManifestNow: syncCandidatesNow, status: status, startAuto: startAuto,
+    configured: configured, syncNow: function () { return syncOnce(false); }, syncDraftsNow: syncDraftsNow, requestSync: requestSync, flushSync: flushSync, syncCandidatesNow: syncCandidatesNow, syncImageManifestNow: syncCandidatesNow, status: status, startAuto: startAuto,
     putBlobR2: putBlobR2, fetchBlobR2: fetchBlobR2, putBlobR2At: putBlobR2At, fetchBlobR2At: fetchBlobR2At, hasBlobR2At: hasBlobR2At,
     setConfig: function (o) {
       try {

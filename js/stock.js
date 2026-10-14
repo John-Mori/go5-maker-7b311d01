@@ -7,7 +7,6 @@
 (function () {
   'use strict';
 
-  var MAX = 20;
   var META_KEY = 'go5_stock_meta';
   // 作成履歴=投稿完了(③作成完了)でドラフト本体から外した項目を、復元できるように残す退避先(Chami指示④
   //   「消えてしまうのが怖いので作成履歴に残して復元できるように」)。動画/サムネのidb blobは消さず残すので
@@ -196,7 +195,8 @@
   //   IDBからも引ける。枠が溢れたら古い順に thumbDataUrl を剥がして必ず書き切る(非破壊=サムネはIDBから復元)。
   //   ★元の meta オブジェクトは壊さず、localStorage へ落とす直列化用の複製だけを痩せさせる。
   function writeMetaResilient_(arr) {
-    var full = (arr || []).slice(0, MAX);
+    // 端末間unionは20件を超え得る。保存のたびに先頭20件へ切ると、古い端末との往復で消失/復活を繰り返す。
+    var full = (arr || []).slice();
     try { localStorage.setItem(META_KEY, JSON.stringify(full)); return true; } catch (e) {}
     var lean = full.map(function (m) { return m; }); // 永続化用の別列(要素は共有=剥がす時だけ複製へ差し替える)
     for (var i = lean.length - 1; i >= 0; i--) {      // 古い順(末尾から)にthumbDataUrlを剥がす=最新の今作ったドラフトは最後まで残す
@@ -208,10 +208,7 @@
         try { localStorage.setItem(META_KEY, JSON.stringify(lean)); return true; } catch (e2) {}
       }
     }
-    while (lean.length > 1) {                          // 全thumbを剥がしても入らない=古い件から件数を削り、最新は必ず残す
-      lean.pop();
-      try { localStorage.setItem(META_KEY, JSON.stringify(lean)); return true; } catch (e3) {}
-    }
+    // 文字メタも入らなければ失敗を返す。容量都合で既存ドラフト自体を黙って切り捨てない。
     return false;
   }
   // ★localStorage逼迫で「最新1件のlean metaすら入らない」時、再取得可能なキャッシュ(Go5Keys.isPurgeable)
@@ -336,7 +333,8 @@
     function write_() {
       try {
         var m = JSON.parse(localStorage.getItem('go5_stock_del') || '{}') || {};
-        m[id] = Date.now();
+        var row = loadMeta().filter(function (it) { return it.id === id; })[0];
+        m[id] = Math.max(Date.now(), Number(m[id]) + 1 || 0, Number(row && (row.addedAt || row.ts)) + 1 || 0);
         localStorage.setItem('go5_stock_del', JSON.stringify(m));
         var check = JSON.parse(localStorage.getItem('go5_stock_del') || '{}') || {};
         return Number(check[id] || 0) > 0;
@@ -1065,10 +1063,15 @@
   }
   // ── 削除 ──
   function deleteStock_(id) {
-    writeStockDel_(id); // 墓標＝他端末でも消す(復活防止)
-    saveMeta(loadMeta().filter(function (m) { return m.id !== id; }));
-    try { localStorage.removeItem('go5_draft_post_' + id); } catch (e) {} // 投稿編集も掃除(同期で削除が伝播)
-    delBlobs_(id);
+    var ok = false;
+    batchSync_(function () {
+      if (!writeStockDel_(id)) return; // 墓標を保存できなければ、本体と動画を保持する。
+      saveMeta(loadMeta().filter(function (m) { return m.id !== id; }));
+      try { localStorage.removeItem('go5_draft_post_' + id); } catch (e) {}
+      ok = true;
+    });
+    if (ok) delBlobs_(id);
+    return ok;
   }
 
   // ── 投稿履歴ミラー(product-scout daily_pick 用・2026-08-16) ──
@@ -1149,11 +1152,12 @@
     return true;
   }
 
-  // ④作成履歴からドラフト本体へ戻す。ドラフトが満杯なら溢れる最古の1件は作成履歴へ送り返す(=消さない)。
+  // ④作成履歴からドラフト本体へ戻す。復元先を保存できるまで作成履歴を残す。
   function restoreStock_(id) {
     var arch = loadArchive();
-    var meta = arch.filter(function (m) { return m.id === id; })[0];
-    if (!meta) return;
+    var source = arch.filter(function (m) { return m.id === id; })[0];
+    if (!source) return false;
+    var meta = Object.assign({}, source);
     delete meta.completedTs;
     var delAt = 0;
     try {
@@ -1164,13 +1168,9 @@
     arch = arch.filter(function (m) { return m.id !== id; });
     var metas = loadMeta().filter(function (m) { return m.id !== id; });
     metas.unshift(meta);
-    if (metas.length > MAX) {
-      var overflow = metas.slice(MAX); // ドラフト満杯で溢れる最古=消さずに作成履歴へ戻す
-      metas = metas.slice(0, MAX);
-      overflow.forEach(function (m) { if (!arch.some(function (a) { return a.id === m.id; })) arch.unshift(m); });
-    }
-    saveMeta(metas);
+    if (!saveMeta(metas)) return false;
     saveArchive(arch);
+    return true;
   }
 
   // 作成履歴から完全に削除(復元不可)。blob も消す。
@@ -2493,6 +2493,7 @@
     try {
       var attrs = meta.attrs || {};
       var cidm = String(meta.workUrl || '').match(/cid=([^/?&\s]+)/);
+      if (window.Go5MovieAttrs && window.Go5MovieAttrs.restore) window.Go5MovieAttrs.restore(attrs, cidm ? cidm[1] : '');
       if (cidm && cidm[1]) { try { localStorage.setItem('movie_auto_attrs_cid', cidm[1]); } catch (e) {} }
       var cats = (window.Go5Cats && window.Go5Cats.visible && window.Go5Cats.visible()) || [];
       cats.forEach(function (c) { var el = $(window.Go5Cats.elId(c.key)); if (el) el.checked = !!attrs[c.key]; });
@@ -4071,7 +4072,7 @@
           if (meta) remakeStock_(meta);
 
         } else if (btn.classList.contains('stk-restore')) {
-          restoreStock_(id);
+          if (!restoreStock_(id)) window.alert('ドラフトを復元できませんでした。端末の空き容量を確認してください');
           render();
 
         } else if (btn.classList.contains('stk-arch-del')) {
@@ -4081,7 +4082,7 @@
 
         } else if (btn.classList.contains('stk-del')) {
           if (!window.confirm('「' + (meta ? meta.label || '動画' : '動画') + '」をドラフトから削除しますか?')) return;
-          deleteStock_(id);
+          if (!deleteStock_(id)) window.alert('削除を保存できませんでした。ドラフトは残しています');
           render();
         }
       });

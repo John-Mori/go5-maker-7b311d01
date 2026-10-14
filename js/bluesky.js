@@ -210,7 +210,7 @@
   }
   // ---- カテゴリ自動チェック(FANZAジャンル名/フロア名→該当カテゴリ) ----
   // 作品が決まったら(候補から/作品URL入力/ウィザード)、取得済みジャンル名で該当カテゴリへ自動チェック。
-  // 全カテゴリを一旦外してから該当だけON＝前回のチェックを引き継がない。
+  // 作品が替わった時だけ全カテゴリを外す。同じ作品の取得結果は合流し、手動の選択を守る。
   //   ★判定式(matchText＋AI救済)は core/movie-attrs-core.js(Go5MovieAttrsCore.resolve)が唯一の正本。
   //   候補→作成(applyGenres)も 作品URLフェッチ(autoApplyAttrsFromInfo_)も 候補バッジ(candidates.js)も
   //   必ずこの resolve を通す=2経路が判定式を各自持って食い違い、片方でAIチェックが空振りする再発を封じる
@@ -221,51 +221,53 @@
     var texts = (input.genres || []).concat(input.title ? [input.title] : []).concat(input.floor ? [input.floor] : []).concat(input.service ? [input.service] : []);
     return (window.Go5Cats && window.Go5Cats.matchText(texts)) || {};
   }
-  // 判定結果をチェックボックスへ反映する唯一の適用口。候補→作成 も URLフェッチ も必ずここへ集約する。
-  function applyAttrsInput_(input) {
-    input = input || {};
-    var hits = resolveAttrs_(input);
+  // 適用状態はタブ内・作品単位で持つ。localStorageのcidは別タブにも見えるので適用済み判定に使わない。
+  // 同じ作品の候補/後着情報は検出したタグを合流。空ジャンルは「非該当」の証拠ではない。
+  var _attrsCid = '', _attrsHits = {}, _attrsManual = {};
+  function paintAttrs_() {
     movieCatList_().forEach(function (c) {
       var el = $(window.Go5Cats.elId(c.key)); if (!el) return;
-      // ★verified-ai: 壁でAI判定が確定できない(aiUnknown)作品は、既にAIチェック済みならAIだけは外さない。
-      //   workerが壁で読めず ai:false/aiChecked無し を返した時、それを「非AI」と誤認して既存のAIチェックを
-      //   外し恒久凍結する再発(REQ-3babd19ddb)を断つ。他カテゴリは従来どおり hits で上書きする。
-      if (c.key === 'ai' && input.aiUnknown && el.checked) return;
-      el.checked = !!hits[c.key];
+      el.checked = Object.prototype.hasOwnProperty.call(_attrsManual, c.key) ? _attrsManual[c.key] : !!_attrsHits[c.key];
     });
   }
-  // 同じ作品(cid)には1回だけ自動適用＝再描画・キャッシュヒットのたびに手動調整を上書きしない。(割引自動反映と同じ設計)
-  // リロードを跨いでも尊重できるよう localStorage に記録する。
+  function beginAttrs_(cid) {
+    cid = String(cid || '');
+    if (_attrsCid === cid) return;
+    _attrsCid = cid; _attrsHits = {}; _attrsManual = {}; paintAttrs_();
+  }
+  document.addEventListener('change', function (e) {
+    var el = e.target, key = el && el.getAttribute && el.getAttribute('data-cat-key');
+    if (key) _attrsManual[key] = !!el.checked;
+  });
+  document.addEventListener('go5-categories-rendered', paintAttrs_);
+  // 判定結果をチェックボックスへ反映する唯一の適用口。手動のON/OFFは後着情報より優先する。
+  function applyAttrsInput_(input, cid) {
+    input = input || {};
+    beginAttrs_(cid || _attrsCid);
+    var hits = resolveAttrs_(input);
+    Object.keys(hits).forEach(function (k) { if (hits[k]) _attrsHits[k] = true; });
+    paintAttrs_();
+  }
+  // 作品情報の到着ごとに判定する。cidだけで一度きりにすると部分取得後のジャンルが永久に届かない。
   //   ★AIはタグ(genre)に載らず「コミック・AI」等フロア名で示されるため、floor/service も判定に混ぜる(Chami依頼2026-08-02②)。
   //   ★info.ai=workerがページのFANZA開示文から立てた明示フラグ(同人AIは genre/floor に「AI」が載らない)。
   //   これも resolve が最優先で見る=applyGenres で一旦入れたAIチェックをこの正式適用が外してしまう穴を封じる。
   function autoApplyAttrsFromInfo_(info, cidHint) {
     if (!info) return;
     var cid = String(info.cid || cidHint || ''); if (!cid) return;
-    if (load('movie_auto_attrs_cid') === cid) {
-      // 既に本作品へ一度適用済み。ただしAI判定は壁で遅れて届くことがある(初回は未判定→PC/再取得で後からtrue)。
-      //   その遅着だけはAIチェックを後追いで入れる(他カテゴリの手動調整は温存＝全体再適用はしない)。
-      if (info.ai) { var aiEl = $(window.Go5Cats.elId('ai')); if (aiEl && !aiEl.checked) aiEl.checked = true; }
-      return;
-    }
-    save('movie_auto_attrs_cid', cid);
-    // aiUnknown=同人(d_)でAIが未確定(明示フラグ無し&今の規則で検証未済)＝壁で読めていない/旧規則の判定。AIチェックは外さない。
-    //   ★旧規則の確定false(aiRule<2)も未確定扱い=開示文を書かないAI作品のチェックを外していた(2026-10-15 Chami①)。
-    //   ★候補が同じ作品をAIと示していた(_aiHintCid)なら、後着の情報でAIを外さない(候補の判定を正とする)。
-    var core = window.Go5MovieAttrsCore;
-    var verifiedFalse = core && core.aiVerifiedFalse ? core.aiVerifiedFalse(info) : (!info.ai && !!info.aiChecked);
-    applyAttrsInput_({ genres: info.genres || [], floor: info.floor, service: info.service, title: info.title, ai: info.ai,
-      aiUnknown: (/^d_/i.test(cid) && !verifiedFalse) || _aiHintCid === cid });
+    save('movie_auto_attrs_cid', cid); // 旧版との互換用の控え。現行の適用可否には使わない。
+    // AIも他タグと同じく肯定情報を保持する。未確認/旧規則のfalseで候補の判定を消さず、遅着のtrueも拾う。
+    applyAttrsInput_({ genres: info.genres || [], floor: info.floor, service: info.service, title: info.title, ai: info.ai }, cid);
   }
-  var _aiHintCid = '';
   // 候補タブ/ウィザードから使う公開口。reset=全カテゴリOFF(新規作成の起点)、applyGenres=候補の持つジャンルでの即時チェック。
-  //   ★applyGenres は「暫定チェック」に徹し、cidガード(movie_auto_attrs_cid)は張らない。
-  //   候補が持つのはジャンルのみで floor(コミック・AI 等)を持たないため、ここでガードを張ると
-  //   後続の作品URLフェッチ(floor込みで判定する autoApplyAttrsFromInfo_)が抑止され、AI等の
-  //   フロア名でしか分からないカテゴリが永久に自動チェックされない(再発した不具合)。ガードは
-  //   floor込みで判定する autoApplyAttrsFromInfo_ 側に一本化し、そちらが1回だけ正式適用する。
+  //   どちらの取得経路も同じタブ内の状態へ合流。cidだけの「適用済み」ガードは置かない。
   try { window.Go5MovieAttrs = {
-    reset: function () { _aiHintCid = ''; save('movie_auto_attrs_cid', ''); save('movie_ws_manual_cid', ''); save('movie_ws_manual_val', ''); movieCatList_().forEach(function (c) { var el = $(window.Go5Cats.elId(c.key)); if (el) el.checked = false; }); },
+    reset: function () { _attrsCid = ''; _attrsHits = {}; _attrsManual = {}; paintAttrs_(); save('movie_auto_attrs_cid', ''); save('movie_ws_manual_cid', ''); save('movie_ws_manual_val', ''); },
+    restore: function (attrs, cid) {
+      beginAttrs_(cid); _attrsHits = {}; _attrsManual = {};
+      movieCatList_().forEach(function (c) { _attrsManual[c.key] = !!(attrs && attrs[c.key]); });
+      paintAttrs_();
+    },
     // ★title も判定に混ぜる：総集編は「総集編」ジャンルタグが無く作品名にだけ載る作品が多く、
     //   ジャンルだけだと総集編カテゴリに自動チェックが入らない(Chami依頼2026-08-06「作品名に総集編と記載があったら総集編にもチェック」)。
     //   候補は作品名を即座に持つため、FANZA再取得を待たずここで作品名も走査する。
@@ -277,8 +279,7 @@
     //   it.ai を最優先で見ないとAIカテゴリが永久に空振りする(Chami報告2026-08-12「カテゴリのAIにチェック入らない」)。
     applyGenres: function (genres, cid, title, floor, service, ai) {
       var input = { genres: genres || [], title: title, floor: floor, service: service, ai: ai };
-      _aiHintCid = (cid && window.Go5MovieAttrsCore && window.Go5MovieAttrsCore.aiHint(input)) ? String(cid) : '';
-      applyAttrsInput_(input);
+      applyAttrsInput_(input, cid);
     }
   }; } catch (e) {}
   // 新規作成の起点(候補から/ウィザード開始)で呼ぶ一括リセット: カテゴリ+狙い+コメント型+リビルド+2行モード。
@@ -1255,12 +1256,8 @@
   })();
 
   // ---- 初期化(移行→applyAccount の順) ----
-  // ★リロードのたびに『今作っている作品』のジャンルを出し直す(Chami依頼2026-08-11①)。
-  //   カテゴリのチェック状態は persist-fields で保存しなくなった=リロード直後は全部OFF。
-  //   autoApplyAttrsFromInfo_ は同一cidを1回だけに絞る cid ガード(movie_auto_attrs_cid)を持ち、
-  //   これが localStorage でリロードを跨いで残るため、そのままだと復元した作品URLからの自動チェックが
-  //   抑止されOFFのままになる。ページ読み込みごとに1回だけガードを解いて、applyAccount() が復元する
-  //   作品URLからの自動チェックを効かせる=前回作成の作品ではなく今の作品のジャンルが入る。
+  // タブ内の適用状態は起動時に空。applyAccount() が復元する今の作品URLからタグを出し直す。
+  // 旧版との互換用の控えも空にするが、このキーは自動チェックの抑止には使わない。
   try { save('movie_auto_attrs_cid', ''); } catch (e) {}
   applyAccount();
 
@@ -2758,7 +2755,7 @@
     el.innerHTML = lines.join('');
     autoApplyDiscountFromInfo_(info); // 現在の割引率を投稿文へ自動反映(取得できない時だけ手動ドロップダウンが効く)
     autoApplyWorkStateFromInfo_(info); // 発売日→新作/準新作を自動チェック＋本文へ(割引行の後=「の新作」が付くように)
-    autoApplyAttrsFromInfo_(info); // ジャンル→カテゴリ自動チェック(同一cidは1回だけ＝手動調整を尊重)
+    autoApplyAttrsFromInfo_(info); // ジャンルを合流。手動調整はタブ内の状態で保持する。
     try { if (window.Go5PromoLabel) window.Go5PromoLabel.notify(info); } catch (e) {} // 販促ラベル(今なら◯%OFF)を元写真へ焼き込み
   }
   // 作品URLから取得できた「現在の割引率」を投稿文へ自動反映する。取得できなかった/セール無しの
@@ -2796,7 +2793,7 @@
     try { secret = localStorage.getItem('fanza_shared_secret') || ''; } catch (e) {}
     if (!workerUrl || typeof window.FanzaCore === 'undefined') { if (el) { el.style.color = 'var(--sub)'; el.textContent = ''; } return; }
     // キャッシュヒット(成功情報)はそのまま反映。
-    if (movieInfoCache[cid] && movieInfoCache[cid].title) { renderMovieInfo(movieInfoCache[cid]); autofillAuthor(movieInfoCache[cid].author); autoApplyAttrsFromInfo_(movieInfoCache[cid], cid); return; }
+    if (movieInfoCache[cid] && movieInfoCache[cid].title && !movieInfoCache[cid].partial) { renderMovieInfo(movieInfoCache[cid]); autofillAuthor(movieInfoCache[cid].author); autoApplyAttrsFromInfo_(movieInfoCache[cid], cid); return; }
     var seq = ++movieInfoSeq;
     renderMovieInfoLoading();
     // ★checkAi:true＝同人(d_)のAI生成をworkerがページ開示文から判定して info.ai を返す。
@@ -2811,7 +2808,7 @@
         // ★作品情報(floor/service込み)が確定した所でカテゴリ自動チェックを正式適用する。
         //   AIは genre に載らず「コミック・AI」等フロア名でしか判別できないため、
         //   floor を持つこの経路で確定させないと AI が永久に自動チェックされない(#5 再発の真因＝
-        //   autoApplyAttrsFromInfo_ がどこからも呼ばれていなかった)。cid guard で1作品1回に絞る。
+        //   autoApplyAttrsFromInfo_ がどこからも呼ばれていなかった)。候補の情報と同じ適用口へ合流する。
         autoApplyAttrsFromInfo_(info, cid);
         autoApplyWorkStateFromInfo_(info, cid); // 発売日→新作/準新作も同経路で確定
 
@@ -2824,6 +2821,9 @@
   var movieInfoTimer = null;
   function scheduleMovieWorkInfo(url) {
     if (movieInfoTimer) clearTimeout(movieInfoTimer);
+    movieInfoSeq++; // デバウンス待ちの間にも、前作品の非同期結果を無効化する。
+    var r = url && window.buildAffiliateLink ? window.buildAffiliateLink(url, '') : null;
+    beginAttrs_(r && r.ok ? r.cid : '');
     movieInfoTimer = setTimeout(function () { fetchMovieWorkInfo(url); }, 500);
   }
 

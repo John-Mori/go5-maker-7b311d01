@@ -30,6 +30,7 @@
       var el = $(Cats.elId(c.key));
       if (el && wasChecked[c.key]) el.checked = true;
     });
+    document.dispatchEvent(new CustomEvent('go5-categories-rendered')); // 先に届いた自動判定も、新しい欄へ反映する。
   }
 
   // ── 編集モーダル ──
