@@ -296,8 +296,11 @@ window.SCH = window.SCH || {};
     let takenNote = "";
     if (pickMode && pickTaken.length) {
       const ps = (ctx.byAcc[ids[0]] || {})[s1.id] || s1;
+      // 投稿完了済みの予約(履歴行)は枠IDを持たないので、公開時刻が枠の公開予定から10分以内なら同じ枠とみなす。
+      const psAt = ps.scheduled_at ? (Date.parse(String(ps.scheduled_at).replace(" ", "T")) || 0) : 0;
       const hits = pickTaken.filter(function (t) {
-        return t && ((t.id && t.id === ps.id) || (t.date === ps.date && t.time && t.time === ps.time));
+        return t && ((t.id && t.id === ps.id) || (t.date && t.date === ps.date && t.time && t.time === ps.time) ||
+          (t.at && psAt && Math.abs(t.at - psAt) <= 10 * 60000));
       });
       if (hits.length) {
         el.classList.add("taken");

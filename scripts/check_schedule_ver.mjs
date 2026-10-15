@@ -53,6 +53,11 @@ function iframeVersion() {
   const js = readFileSync(AFFILIATE, 'utf8');
   const m = js.match(/schedule\/index\.html\?v=(\d+)/);
   if (!m) { console.error('::error::affiliate.js に schedule/index.html?v=N が見つからない'); process.exit(2); }
+  // ドラフトの公開枠ピッカー(stock.js・pick=1)も同じ iframe。版を揃えないと古いカレンダーが出続ける
+  //   (2026-10-15 実測=ここだけ v=40 のまま据え置かれ、選択済み表示の新しい app.js が端末へ届かない穴だった)。
+  const pk = readFileSync(join(ROOT, 'js', 'stock.js'), 'utf8').match(/schedule\/index\.html\?pick=1[^\n]{0,40}?&v=(\d+)/);
+  if (!pk) { console.error('::error::stock.js に schedule/index.html?pick=1…&v=N が見つからない'); process.exit(2); }
+  if (Number(pk[1]) !== Number(m[1])) { console.error(`::error::stock.js の公開枠ピッカー iframe v=${pk[1]} が affiliate.js の v=${m[1]} と不一致`); process.exit(1); }
   return Number(m[1]);
 }
 

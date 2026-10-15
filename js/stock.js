@@ -3000,14 +3000,20 @@
   // 選択済みの公開枠(同じ投稿先ch)を題名つきで集める。今開いているドラフト自身も含め、
   // 選択後にピッカーを開き直した場面で「使用中の枠」が無表示へ戻らないようにする(Chami依頼2026-10-15)。
   function takenSlots_(acc) {
-    var out = [];
+    var out = [], live = {};
     loadMeta().forEach(function (m) {
       if (!m || !m.id) return;
       if ((m.account || 'acc1') !== acc) return;
+      if (m.videoId) live[m.videoId] = true;
       var p = loadDraftPost_(m.id), ps = p.pubSlot;
       if (!ps || !ps.date) return;
-      out.push({ id: ps.id || '', date: ps.date, time: ps.time || '', title: String(p.ytTitle || m.title || '(題名なし)').slice(0, 60) });
+      var at = ps.scheduled_at ? (Date.parse(String(ps.scheduled_at).replace(' ', 'T')) || 0) : 0;
+      out.push({ id: ps.id || '', date: ps.date, time: ps.time || '', at: at, title: String(p.ytTitle || m.title || '(題名なし)').slice(0, 60) });
     });
+    // 投稿完了でドラフトから外れた予約投稿も枠を埋めている。投稿履歴の公開予定時刻で同じ枠に載せる
+    //   (Chami 2026-10-15「どこが？」=予約済みの枠が出ず被り防止にならなかった)。生きているドラフトと同じ背骨IDは二重に出さない。
+    var hist = (window.Go5History && window.Go5History.takenSlots) ? (window.Go5History.takenSlots(acc) || []) : [];
+    hist.forEach(function (t) { if (!(t.videoId && live[t.videoId])) out.push({ id: '', date: '', time: '', at: t.at, title: String(t.title || '(題名なし)').slice(0, 60) }); });
     return out;
   }
   // カレンダーを上から降ろす。schedule/ を pick=1 で埋め込み、枠タップ→slot-picked を受ける。
@@ -3034,7 +3040,7 @@
       $('draftPickerClose').addEventListener('click', closeSlotPicker_);
     }
     var f = $('draftPickerFrame');
-    if (f && !f.getAttribute('src')) f.setAttribute('src', 'schedule/index.html?pick=1&acc=' + acc + '&v=40');
+    if (f && !f.getAttribute('src')) f.setAttribute('src', 'schedule/index.html?pick=1&acc=' + acc + '&v=45');
     // 表示→次フレームでスライドイン。iframe読込後に enter-pick を送る(未読込なら onload で)。
     pk.style.display = 'flex';
     requestAnimationFrame(function () { pk.style.transform = 'translateY(0)'; });
