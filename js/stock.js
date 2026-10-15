@@ -2997,12 +2997,12 @@
       if (clr) clr.style.display = 'none';
     }
   }
-  // 他のドラフトが既に選んでいる公開枠(同じ投稿先ch)を題名つきで集める=ピッカーで被りを見せる(Chami依頼2026-10-15)。
+  // 選択済みの公開枠(同じ投稿先ch)を題名つきで集める。今開いているドラフト自身も含め、
+  // 選択後にピッカーを開き直した場面で「使用中の枠」が無表示へ戻らないようにする(Chami依頼2026-10-15)。
   function takenSlots_(acc) {
     var out = [];
-    var selfId = _modalMeta && _modalMeta.id;
     loadMeta().forEach(function (m) {
-      if (!m || !m.id || m.id === selfId) return;
+      if (!m || !m.id) return;
       if ((m.account || 'acc1') !== acc) return;
       var p = loadDraftPost_(m.id), ps = p.pubSlot;
       if (!ps || !ps.date) return;
@@ -3034,7 +3034,7 @@
       $('draftPickerClose').addEventListener('click', closeSlotPicker_);
     }
     var f = $('draftPickerFrame');
-    if (f && !f.getAttribute('src')) f.setAttribute('src', 'schedule/index.html?pick=1&acc=' + acc + '&v=39');
+    if (f && !f.getAttribute('src')) f.setAttribute('src', 'schedule/index.html?pick=1&acc=' + acc + '&v=40');
     // 表示→次フレームでスライドイン。iframe読込後に enter-pick を送る(未読込なら onload で)。
     pk.style.display = 'flex';
     requestAnimationFrame(function () { pk.style.transform = 'translateY(0)'; });
