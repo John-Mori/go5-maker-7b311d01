@@ -1326,6 +1326,10 @@
       // ★iPhoneはカメラロール(アルバム)へ直接入れたい(Chami指示2026-07-29)。<a download>だと「ファイル」アプリ止まりで
       //   写真アルバムに入らない。Web共有シート(navigator.share)には「ビデオを保存」があり、そこからアルバムへ入る=
       //   本体タブの保存ボタン(app.js saveBtn)と同じ経路。共有が使えない/断られた時だけ従来の<a download>へ落とす。
+      // ★Androidは共有シートを通さず <a download> で直接保存する。Chromeは取得に時間がかかっても
+      //   そのまま「ダウンロード」へ落とせる=「もう一度タップ」を出さない(Chami 2026-10-15 msg 1560117573687840769)。
+      //   アルバム直行のために共有シートが要るのは iPhone だけ。
+      if (/Android/i.test(navigator.userAgent || '')) { settle(true); anchorDownload_(blob, name); return; }
       var file = null;
       try { file = new File([blob], name, { type: blob.type || 'video/mp4' }); } catch (e) {}
       if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
