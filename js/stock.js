@@ -2952,7 +2952,7 @@
   function rememberOpenModal_(id) { try { sessionStorage.setItem(OPEN_MODAL_KEY, id || ''); } catch (e) {} }
   function forgetOpenModal_() { try { sessionStorage.removeItem(OPEN_MODAL_KEY); } catch (e) {} }
   function modalIsOpen_() { var m = $('draftPostModal'); return !!(m && m.style.display !== 'none'); }
-  function closeModal_() { var m = $('draftPostModal'); if (m) m.style.display = 'none'; _modalMeta = null; forgetOpenModal_(); if (_stockBgPending) setTimeout(render, 0); }
+  function closeModal_() { closeSlotPicker_(); var m = $('draftPostModal'); if (m) m.style.display = 'none'; _modalMeta = null; forgetOpenModal_(); if (_stockBgPending) setTimeout(render, 0); }
 
   function copyText_(text, btn) {
     function flash() { var o = btn.textContent; btn.textContent = 'コピーしました'; setTimeout(function () { btn.textContent = o; }, 2000); }
@@ -3763,6 +3763,7 @@
     });
     $('draftModalComplete').addEventListener('click', function () {
       if (!_modalMeta) return;
+      closeSlotPicker_();
       if (!window.confirm('投稿履歴に反映します。OKを押すと正式に投稿完了になります。')) return;
       var id = _modalMeta.id;
       var ytUrl = ($('draftYtUrl') || {}).value || '';
