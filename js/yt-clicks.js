@@ -221,7 +221,8 @@
       var dw = d.getDay(), hol = !!holSet()[ymd];
       var cls = (dw === 6) ? 'dow-sat' : ((dw === 0 || hol) ? 'dow-sun' : '');
       var dowHtml = cls ? '<span class="' + cls + '">(' + DOW[dw] + ')</span>' : '(' + DOW[dw] + ')';
-      return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + dowHtml + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+      var year = d.getFullYear() !== new Date().getFullYear() ? (d.getFullYear() + '/') : '';
+      return year + (d.getMonth() + 1) + '/' + d.getDate() + ' ' + dowHtml + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
     } catch (e) { return ''; }
   }
   function setStatus(m, html) { var e = $('ytClickStatus'); if (!e) return; if (html) e.innerHTML = m || ''; else e.textContent = m || ''; }
@@ -888,6 +889,7 @@
       // 照会したID一覧。(応答に含まれないID＝非公開/予約公開の判定に使う)
       out.__queried = uniq.slice(0, 50);
       if (j && j.error) out.__error = (j.error.message || 'YouTube APIエラー');
+      recordYoutubePostTimes_(out);
       _health.yt = !(j && j.error); try { renderHealth_(); } catch (e) {} // 既存取得の結果を記録(追加通信ゼロ)
       return out;
     }).catch(function () { _health.yt = false; try { renderHealth_(); } catch (e) {} return { __error: '通信エラー(YouTubeに接続できませんでした)' }; }); // D2: 失敗を{}で握りつぶさない＝「成功表示なのに取れない」を防ぐ
@@ -1145,6 +1147,77 @@
   var _pubBackfillTried = {}; // シート補完でvidを補った投稿の公開日時を取りに行った印(セッション内で1回だけ・ループ防止)
   var lastErr = '';
 
+  // YouTubeが現在返した公開時刻と、利用者が直した投稿時刻を1つの同期キーで保持する。
+  // auto/manual/resetを別時計にして、別端末の古いwhole-key値で手動解除やAPI更新が戻らない形にする。
+  var HIST_POST_TIME_KEY = 'hist_post_time_v1';
+  function loadHistoryPostTimes_() {
+    try { var m = JSON.parse(localStorage.getItem(HIST_POST_TIME_KEY) || '{}'); return m && typeof m === 'object' && !Array.isArray(m) ? m : {}; }
+    catch (e) { return {}; }
+  }
+  function saveHistoryPostTimes_(m) { try { localStorage.setItem(HIST_POST_TIME_KEY, JSON.stringify(m || {})); } catch (e) {} }
+  function historyTimeKey_(it, ymap) {
+    var vid = ytIdOf(itemYt_(ymap, it) || it.ytUrl || '');
+    return vid ? ('yt:' + vid) : ('row:' + (it.account || acct()) + ':' + itemKey(it));
+  }
+  function historyPostTime_(it, ymap) {
+    var key = historyTimeKey_(it, ymap), rec = loadHistoryPostTimes_()[key] || {};
+    var manual = Number(rec.manualAt) > Number(rec.resetAt || 0) && Number(rec.manualMs) > 0;
+    var ms = manual ? Number(rec.manualMs) : (Number(rec.autoMs) > 0 ? Number(rec.autoMs) : null);
+    var vid = ytIdOf(itemYt_(ymap, it) || it.ytUrl || '');
+    if (ms == null && vid && publishedCache[vid] != null) ms = Number(publishedCache[vid]);
+    return {
+      key: key,
+      ms: ms,
+      manual: manual,
+      source: manual ? 'manual' : (rec.autoSource || ''),
+      scheduled: !manual && rec.autoSource === 'publishAt' && ms != null && ms > Date.now()
+    };
+  }
+  function youtubePostTime_(rec) {
+    if (!rec || typeof rec !== 'object') return null;
+    if (rec.privacy === 'private' && Number(rec.publishAt) > 0) return { ms: Number(rec.publishAt), source: 'publishAt' };
+    if (Number(rec.published) > 0) return { ms: Number(rec.published), source: 'publishedAt' };
+    return null;
+  }
+  function recordYoutubePostTimes_(records) {
+    var map = loadHistoryPostTimes_(), changed = false, now = Date.now();
+    Object.keys(records || {}).forEach(function (id) {
+      if (!id || id.indexOf('__') === 0) return;
+      var yt = youtubePostTime_(records[id]); if (!yt) return;
+      var key = 'yt:' + id, old = map[key] || {};
+      if (Number(old.autoMs) === yt.ms && old.autoSource === yt.source && old.privacy === (records[id].privacy || '')) return;
+      var rec = {};
+      Object.keys(old).forEach(function (k) { rec[k] = old[k]; });
+      rec.autoMs = yt.ms; rec.autoSource = yt.source; rec.privacy = records[id].privacy || '';
+      rec.autoAt = Math.max(now, Number(old.autoAt || 0) + 1);
+      map[key] = rec; changed = true;
+    });
+    if (changed) saveHistoryPostTimes_(map);
+  }
+  function setManualPostTime_(key, ms) {
+    var map = loadHistoryPostTimes_(), old = map[key] || {}, rec = {};
+    Object.keys(old).forEach(function (k) { rec[k] = old[k]; });
+    rec.manualMs = Number(ms); rec.manualAt = Math.max(Date.now(), Number(old.manualAt || 0) + 1, Number(old.resetAt || 0) + 1);
+    map[key] = rec; saveHistoryPostTimes_(map);
+  }
+  function resetManualPostTime_(key) {
+    var map = loadHistoryPostTimes_(), old = map[key] || {}, rec = {};
+    Object.keys(old).forEach(function (k) { rec[k] = old[k]; });
+    rec.resetAt = Math.max(Date.now(), Number(old.resetAt || 0) + 1, Number(old.manualAt || 0) + 1);
+    map[key] = rec; saveHistoryPostTimes_(map);
+  }
+  function toLocalDateTimeInput_(ms) {
+    if (!Number(ms)) return '';
+    var d = new Date(Number(ms)), p = function (n) { return n < 10 ? ('0' + n) : String(n); };
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + 'T' + p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+  function fromLocalDateTimeInput_(s) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(String(s || ''));
+    if (!m) return NaN;
+    var d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), 0, 0);
+    return d.getTime();
+  }
+
   // ── YouTubeメタ(題名/投稿日時/視聴回数)を localStorage に永続化 ──────────────
   //   在メモリだけだとリロードのたびに再取得＝取得失敗時に題名が消えて不安定。
   //   永続化して起動時に即表示し、refresh で上書き更新する。(題名/投稿日時は不変・視聴回数は最新化)
@@ -1182,7 +1255,8 @@
       var yt = itemYt_(ymap, it) || it.ytUrl || '';
       var vid = ytIdOf(yt);
       var hasUrl = !!vid;
-      var pub = (vid && (vid in publishedCache)) ? publishedCache[vid] : null;
+      var postTime = historyPostTime_(it, ymap);
+      var pub = postTime.ms;
       var group = hasUrl ? 1 : 0;
       var t = (pub != null) ? pub : (it.ts || 0);
       return { it: it, i: i, group: group, t: t };
@@ -2337,10 +2411,13 @@
     render();
   }
   var _treeSyncSeen_ = (function () { try { return localStorage.getItem(TREE_LINKS_KEY) || ''; } catch (e) { return ''; } })();
+  var _postTimeSyncSeen_ = (function () { try { return localStorage.getItem(HIST_POST_TIME_KEY) || ''; } catch (e) { return ''; } })();
   document.addEventListener('go5-synced', function () {
     var now = ''; try { now = localStorage.getItem(TREE_LINKS_KEY) || ''; } catch (e) {}
-    if (now === _treeSyncSeen_) return;
+    var postNow = ''; try { postNow = localStorage.getItem(HIST_POST_TIME_KEY) || ''; } catch (e) {}
+    if (now === _treeSyncSeen_ && postNow === _postTimeSyncSeen_) return;
     _treeSyncSeen_ = now;
+    _postTimeSyncSeen_ = postNow;
     fetchAllClicks_(true).then(function () { renderWhenHistIdle_(); }, function () { renderWhenHistIdle_(); });
   });
   function historyPreviewData_(usedKey, refCid) {
@@ -2542,8 +2619,9 @@
         var vCum = (_dl.cv != null) ? _dl.cv : Math.max(_dl.wv || 0, _dl.tv || 0, _dl.yv || 0);
         if (vCum > 0) views = Math.max(views || 0, vCum);
       }
-      var pub = vid && (vid in publishedCache) ? publishedCache[vid] : null;
-      var sched = (pub == null) && vid && schedMap[vid]; // 公開済みが観測されたら予約表示はしない
+      var postTime = historyPostTime_(it, ymap);
+      var pub = postTime.ms != null && !postTime.scheduled ? postTime.ms : null;
+      var sched = postTime.scheduled ? { publishAt: postTime.ms } : ((pub == null) && vid && schedMap[vid]); // APIが返した予約時刻を最優先
       // ★予約公開(sched)/カレンダー予定(plannedAt)の「予定時刻」が既に過ぎていたら、YouTube公開が
       //   まだ観測できていなくても実際には投稿済み＝その予定時刻から計測を始める(Chami依頼2026-08-05
       //   「ドラフトのまま投稿してるのに投稿予定になる。この場合も18:30から計測スタートにして」)。
@@ -2555,7 +2633,7 @@
       var schedPassed = !isNaN(schedMs) && schedMs <= Date.now(); // 予定時刻を過ぎた=実際には投稿済み
       var stillScheduled = (!!sched || !!it.plannedAt) && !schedPassed; // 予定時刻がまだ=本当に投稿予定
       var prePostFlag = !!(sched && !schedPassed); // 計測窓の抑止は「本当にまだ投稿前」の時だけ
-      var deltaTs = it.ts || (schedPassed ? schedMs : 0); // 実投稿時刻が無い予定過ぎ投稿は予定時刻を計測起点にする
+      var deltaTs = postTime.ms != null ? postTime.ms : (it.ts || (schedPassed ? schedMs : 0)); // 見出し・並びと同じ実効投稿時刻を日別集計にも渡す
       // YouTube動画が紐付いていない投稿(Bluesky単体投稿等)は、YouTube公開日時が原理的に存在しない。
       //   sendSync_()と同じ考え方(実投稿時刻(ts)を正とする)でit.tsにフォールバックする＝
       //   「投稿日時不明」のまま放置しない。(シート復元直後のvid無し投稿で顕在化)
@@ -2574,6 +2652,14 @@
               //   (宵桜艶帖の1件・Chami報告2026-08-05)。上の§1637の設計意図どおり実投稿時刻(ts)を先に正とし、tsも無い時だけ「…」を出す。
               : (it.ts ? '<b class="vdate-tsonly">' + fmtPostDate(it.ts) + '</b>'
                 : (vid ? '<b class="vdate-pending">…</b>' : '<b class="vdate-unknown">投稿日時不明</b>')))));
+      var dateEditHtml = '<span class="vdate-tools">' +
+        (postTime.manual ? '<span class="vdate-manual-tag">手動</span>' : '') +
+        '<button class="vdate-edit-btn" type="button" data-time-key="' + esc(postTime.key) + '">日時変更</button></span>';
+      var dateEditorHtml = '<div class="vdate-editor" hidden>' +
+        '<input class="vdate-input" type="datetime-local" aria-label="投稿日時" value="' + esc(toLocalDateTimeInput_(postTime.ms || it.ts || Date.now())) + '">' +
+        '<button class="vdate-save" type="button" data-time-key="' + esc(postTime.key) + '">保存</button>' +
+        '<button class="vdate-auto" type="button" data-time-key="' + esc(postTime.key) + '">自動に戻す</button>' +
+        '<button class="vdate-cancel" type="button">閉じる</button></div>';
       var rawTitle = (vid && titleCache[vid]) || it.title || (it.manual ? '(手動追加)' : '(無題)');
       var dispTitle = esc(stripCommonTags(rawTitle));
       var tagWarn = !it.manual && vid && (vid in titleCache) && missingCommonTags(rawTitle);
@@ -2595,7 +2681,8 @@
       return '<div class="vrow' + (it.remade ? ' vrow-remade' : '') + '" data-hist-anchor="' + esc(k) + '" data-hist-usedkey="' + esc(pKey) + '" data-hist-refcid="' + esc(rImgCid) + '">' +
         '<div class="vrow-body">' +
         // 1行目＝日付＋サークル名(作者名)、2行目＝動画の題名(改行して統一)
-        '<div class="vrow-h">' + dateHtml + (it.workUrl ? '<span class="vrow-author" data-fanza-author-url="' + esc(it.workUrl) + '"></span>' : '') + '</div>' +
+        '<div class="vrow-h">' + dateHtml + dateEditHtml + (it.workUrl ? '<span class="vrow-author" data-fanza-author-url="' + esc(it.workUrl) + '"></span>' : '') + '</div>' +
+        dateEditorHtml +
         '<div class="vrow-title">' + titleHtml + '</div>' +
         (it.workUrl ? '<div class="fanza-name-row" data-fanza-url="' + esc(it.workUrl) + '" style="display:none;"></div>' : '') +
         (it.workUrl ?
@@ -2754,6 +2841,29 @@
         var k = b.getAttribute('data-k');
         setTimeout(function () { deleteItem(k, row); }, 60); // 枠線を描画してから確認ダイアログ
       });
+    });
+
+    // 投稿日時の手動上書き。API更新はauto側だけを書き換えるため、manual解除までは表示へ出ない。
+    list.querySelectorAll('.vdate-edit-btn').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var row = b.closest('.vrow'), ed = row && row.querySelector('.vdate-editor');
+        if (ed) ed.hidden = !ed.hidden;
+      });
+    });
+    list.querySelectorAll('.vdate-cancel').forEach(function (b) {
+      b.addEventListener('click', function () { var ed = b.closest('.vdate-editor'); if (ed) ed.hidden = true; });
+    });
+    list.querySelectorAll('.vdate-save').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var ed = b.closest('.vdate-editor'), input = ed && ed.querySelector('.vdate-input');
+        var ms = fromLocalDateTimeInput_(input && input.value);
+        if (!isFinite(ms)) { if (input) input.setCustomValidity('日時を入れてくれ'); if (input) input.reportValidity(); return; }
+        setManualPostTime_(b.getAttribute('data-time-key'), ms);
+        render();
+      });
+    });
+    list.querySelectorAll('.vdate-auto').forEach(function (b) {
+      b.addEventListener('click', function () { resetManualPostTime_(b.getAttribute('data-time-key')); render(); });
     });
 
     // 作り直し(削除の代わりに「被リビルド」の印を付ける／取り消す)
@@ -3280,8 +3390,8 @@
   //   カレンダーiframeはこの解決を持たないので、本体側で解決してから postMessage で渡す(integration.js)。
   function effPostMs_(it, ymap, schedMap) {
     var vid = ytIdOf(itemYt_(ymap, it) || it.ytUrl || '');
-    var pub = vid && (vid in publishedCache) ? publishedCache[vid] : null;
-    if (pub != null) return Number(pub);
+    var postTime = historyPostTime_(it, ymap);
+    if (postTime.ms != null) return Number(postTime.ms);
     var sched = vid && schedMap[vid];
     var plannedMs = it.plannedAt ? (Date.parse(String(it.plannedAt).replace(' ', 'T')) || NaN) : NaN;
     var schedMs = (sched && sched.publishAt) ? Number(sched.publishAt) : plannedMs;
@@ -4105,7 +4215,8 @@
       //   「投稿日＝即時投稿を押した時ではなく、YouTubeでの投稿時間を参照する」)。pubMsはAPIから実取得した
       //   publishedAtのみ(null厳格判定)＝旧懸念の「今日/now に落ちる」ことは無い。YouTube未連携の投稿(vid無し=
       //   Bluesky単体等)は原理的にYouTube公開日時が無いのでts(実投稿時刻)へフォールバックする。
-      var pubMs = (vid && publishedCache[vid] != null) ? publishedCache[vid] : null;
+      var postTime = historyPostTime_(it, ymap);
+      var pubMs = postTime.ms != null ? postTime.ms : null;
       var postedMs = (pubMs != null) ? pubMs : ((it.ts && it.ts > 0) ? it.ts : null);
       var rec = {
         videoId: it.videoId || '',

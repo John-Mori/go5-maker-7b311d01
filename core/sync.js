@@ -526,6 +526,48 @@
       return JSON.stringify(out);
     } catch (e) { return null; }
   }
+  // 投稿履歴の実効日時。API観測(auto)・手動指定(manual)・手動解除(reset)を別時計で統合する。
+  // whole-key LWWでは、別端末が持つ古いAPI値や古い手動値が新しい状態へ戻り得るため、動画単位でマージする。
+  var HISTORY_POST_TIME_KEY = "hist_post_time_v1";
+  function isHistoryPostTimeKey(k) { return String(k) === HISTORY_POST_TIME_KEY; }
+  function historyPostTimeRec_(v) {
+    if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+    var out = {}, autoAt = Math.max(0, Number(v.autoAt) || 0), manualAt = Math.max(0, Number(v.manualAt) || 0), resetAt = Math.max(0, Number(v.resetAt) || 0);
+    if (autoAt && Number(v.autoMs) > 0) {
+      out.autoMs = Number(v.autoMs); out.autoAt = autoAt;
+      out.autoSource = v.autoSource === "publishAt" ? "publishAt" : "publishedAt";
+      out.privacy = String(v.privacy || "");
+    }
+    if (manualAt && Number(v.manualMs) > 0) { out.manualMs = Number(v.manualMs); out.manualAt = manualAt; }
+    if (resetAt) out.resetAt = resetAt;
+    return Object.keys(out).length ? out : null;
+  }
+  function newerHistoryGroup_(a, b, atKey) {
+    var atA = Number(a && a[atKey]) || 0, atB = Number(b && b[atKey]) || 0;
+    if (atA !== atB) return atA > atB ? a : b;
+    return JSON.stringify(a || {}) >= JSON.stringify(b || {}) ? a : b;
+  }
+  function mergeHistoryPostTimeRec_(a, b) {
+    a = historyPostTimeRec_(a); b = historyPostTimeRec_(b);
+    if (!a) return b; if (!b) return a;
+    var out = {}, auto = newerHistoryGroup_(a, b, "autoAt"), manual = newerHistoryGroup_(a, b, "manualAt");
+    if (auto && auto.autoAt) { out.autoMs = auto.autoMs; out.autoAt = auto.autoAt; out.autoSource = auto.autoSource; out.privacy = auto.privacy || ""; }
+    if (manual && manual.manualAt) { out.manualMs = manual.manualMs; out.manualAt = manual.manualAt; }
+    out.resetAt = Math.max(Number(a.resetAt) || 0, Number(b.resetAt) || 0);
+    if (!out.resetAt) delete out.resetAt;
+    return out;
+  }
+  function mergeHistoryPostTimes_(olderStr, newerStr) {
+    try {
+      var older = JSON.parse(olderStr || "{}"), newer = JSON.parse(newerStr || "{}"), out = {}, ids = {};
+      if (!older || typeof older !== "object" || Array.isArray(older)) older = {};
+      if (!newer || typeof newer !== "object" || Array.isArray(newer)) newer = {};
+      Object.keys(older).forEach(function (id) { ids[id] = 1; });
+      Object.keys(newer).forEach(function (id) { ids[id] = 1; });
+      Object.keys(ids).forEach(function (id) { var rec = mergeHistoryPostTimeRec_(older[id], newer[id]); if (rec) out[id] = rec; });
+      return JSON.stringify(out);
+    } catch (e) { return null; }
+  }
   // 配列キーの id フィールド名。(候補=cid / ドラフト=id / テンプレ帳=name / セール案内=id)union/墓標の両方で使う。
   function arrIdField_(k) { return isCandArrayKey(k) ? "cid" : ((isStockArrayKey(k) || isStockArchiveKey(k) || isDiscUrlsKey(k)) ? "id" : (isTplBookKey(k) ? "name" : null)); }
   // 空とみなす値。(undefined / null / 空文字)0・false は「意味のある更新」なので空ではない。
@@ -1193,7 +1235,7 @@
         //   ただし同期設定後にこの端末で実際に保存した記録(editAt)があるキーは、親子を問わず保存時刻で比べる(LWW)。
         if (firstSync) {
           // 配列/墓標(候補・ドラフト)は初回でも union で両立させる＝新規端末の下書きを雲で潰さない。
-          Object.keys(lmapLs).forEach(function (k) { if (!editAt[k] && !isCandArrayKey(k) && !isCandDelKey(k) && !isStockArrayKey(k) && !isStockArchiveKey(k) && !isStockDelKey(k) && !isArchDelKey(k) && !isTplBookKey(k) && !isTplDelKey(k) && !isDiscUrlsKey(k) && !isDiscDelKey(k) && !isScheduleStateKey(k) && !isPostedMapKey(k) && !isCandTextKey(k) && !isCandTodayKey(k) && !isImageManifestKey(k) && !isTreeLinksKey(k) && rls[k] !== undefined) delete lmapLs[k]; });
+          Object.keys(lmapLs).forEach(function (k) { if (!editAt[k] && !isCandArrayKey(k) && !isCandDelKey(k) && !isStockArrayKey(k) && !isStockArchiveKey(k) && !isStockDelKey(k) && !isArchDelKey(k) && !isTplBookKey(k) && !isTplDelKey(k) && !isDiscUrlsKey(k) && !isDiscDelKey(k) && !isScheduleStateKey(k) && !isPostedMapKey(k) && !isCandTextKey(k) && !isCandTodayKey(k) && !isImageManifestKey(k) && !isTreeLinksKey(k) && !isHistoryPostTimeKey(k) && rls[k] !== undefined) delete lmapLs[k]; });
           Object.keys(lmapIdb).forEach(function (k) { if (ridb[k] !== undefined) delete lmapIdb[k]; });
         }
         var mls = mergeMaps(lmapLs, rls), midb = mergeMaps(lmapIdb, ridb);
@@ -1279,6 +1321,15 @@
           var a = lmapLs[k], b = rls[k];
           if (a && b && !a.d && !b.d) {
             var u = mergeTreeLinks_(a.v, b.v);
+            if (u != null) mls[k] = { t: Math.max(a.t || 0, b.t || 0), v: u };
+          }
+        });
+        // 投稿日時も動画/行単位で統合。API時刻・手動時刻・解除の各時計を保ち、古い端末で戻さない。
+        Object.keys(mls).forEach(function (k) {
+          if (!isHistoryPostTimeKey(k)) return;
+          var a = lmapLs[k], b = rls[k];
+          if (a && b && !a.d && !b.d) {
+            var u = mergeHistoryPostTimes_(a.v, b.v);
             if (u != null) mls[k] = { t: Math.max(a.t || 0, b.t || 0), v: u };
           }
         });
@@ -1374,6 +1425,10 @@
             // Preserve a manifest edit made while synchronization was in progress.
             var um = mergeImageManifest_(e.v, live);
             if (um != null) finalV = um;
+          } else if (isHistoryPostTimeKey(k)) {
+            // 同期中のAPI更新・手動編集・解除も動画単位で重ね、開始時スナップショットで潰さない。
+            var uh = mergeHistoryPostTimes_(e.v, live);
+            if (uh != null) finalV = uh;
           } else if (isCandDelKey(k) || isStockDelKey(k) || isTplDelKey(k) || isDiscDelKey(k) || isArchDelKey(k)) {
             // 墓標もライブ値とunion＝同期中に増えた削除を絶対に失わない。
             var u3 = mergeDelMap(e.v, live);
@@ -1771,7 +1826,7 @@
     // 作成履歴(go5_stock_archive)の thumbDataUrl detox 純関数を公開。(stock.js の保存側=S2 が呼ぶ。副作用なし・fail-open)
     slimStockArchive: function (arrStr, keepN) { return slimStockArchive(arrStr, keepN); },
     // Nodeテスト/デバッグ用に純関数を公開。(副作用なし)
-    _test: { unionCand: unionCand, isTreeLinksKey: isTreeLinksKey, mergeTreeLinks_: mergeTreeLinks_, chooseTreeLinksRec_: chooseTreeLinksRec_, unionByField: unionByField, mergeDelMap: mergeDelMap, applyTombstone: applyTombstone, parseDelMap: parseDelMap, candDelKeyOf: candDelKeyOf, isCandArrayKey: isCandArrayKey, isCandDelKey: isCandDelKey, isStockArrayKey: isStockArrayKey, isStockArchiveKey: isStockArchiveKey, isStockDelKey: isStockDelKey, isArchDelKey: isArchDelKey, isTplBookKey: isTplBookKey, isTplDelKey: isTplDelKey, tplDelKeyOf: tplDelKeyOf, isDiscUrlsKey: isDiscUrlsKey, isDiscDelKey: isDiscDelKey, discDelKeyOf: discDelKeyOf, isSyncLsKey: isSyncLsKey, isScheduleStateKey: isScheduleStateKey, mergeScheduleState: mergeScheduleState, arrIdField_: arrIdField_, isSyncIdbKey: isSyncIdbKey, isPostedMapKey: isPostedMapKey, mergePostedMap: mergePostedMap, isCandTextKey: isCandTextKey, mergeCandText_: mergeCandText_, mergeCandTextRec_: mergeCandTextRec_, mergeCandTextMirrorIntoLs_: mergeCandTextMirrorIntoLs_, writeCandTextFallback_: writeCandTextFallback_, isCandTodayKey: isCandTodayKey, mergeCandToday_: mergeCandToday_, isImageManifestKey: isImageManifestKey, imageManifestRec_: imageManifestRec_, chooseImageManifestRec_: chooseImageManifestRec_, mergeImageManifest_: mergeImageManifest_, hasEmptyImgSlot: hasEmptyImgSlot, preferImgRecord_: preferImgRecord_ }
+    _test: { unionCand: unionCand, isTreeLinksKey: isTreeLinksKey, mergeTreeLinks_: mergeTreeLinks_, chooseTreeLinksRec_: chooseTreeLinksRec_, isHistoryPostTimeKey: isHistoryPostTimeKey, mergeHistoryPostTimes_: mergeHistoryPostTimes_, mergeHistoryPostTimeRec_: mergeHistoryPostTimeRec_, unionByField: unionByField, mergeDelMap: mergeDelMap, applyTombstone: applyTombstone, parseDelMap: parseDelMap, candDelKeyOf: candDelKeyOf, isCandArrayKey: isCandArrayKey, isCandDelKey: isCandDelKey, isStockArrayKey: isStockArrayKey, isStockArchiveKey: isStockArchiveKey, isStockDelKey: isStockDelKey, isArchDelKey: isArchDelKey, isTplBookKey: isTplBookKey, isTplDelKey: isTplDelKey, tplDelKeyOf: tplDelKeyOf, isDiscUrlsKey: isDiscUrlsKey, isDiscDelKey: isDiscDelKey, discDelKeyOf: discDelKeyOf, isSyncLsKey: isSyncLsKey, isScheduleStateKey: isScheduleStateKey, mergeScheduleState: mergeScheduleState, arrIdField_: arrIdField_, isSyncIdbKey: isSyncIdbKey, isPostedMapKey: isPostedMapKey, mergePostedMap: mergePostedMap, isCandTextKey: isCandTextKey, mergeCandText_: mergeCandText_, mergeCandTextRec_: mergeCandTextRec_, mergeCandTextMirrorIntoLs_: mergeCandTextMirrorIntoLs_, writeCandTextFallback_: writeCandTextFallback_, isCandTodayKey: isCandTodayKey, mergeCandToday_: mergeCandToday_, isImageManifestKey: isImageManifestKey, imageManifestRec_: imageManifestRec_, chooseImageManifestRec_: chooseImageManifestRec_, mergeImageManifest_: mergeImageManifest_, hasEmptyImgSlot: hasEmptyImgSlot, preferImgRecord_: preferImgRecord_ }
   };
   root.Go5Sync._test.readSyncIdbEntries_ = readSyncIdbEntries_; root.Go5Sync._test.protectUnreadIdb_ = protectUnreadIdb_;
   root.Go5Sync._test.mergeLiveArray_ = mergeLiveArray_; root.Go5Sync._test.fastCandidateMergeState_ = fastCandidateMergeState_;

@@ -317,6 +317,13 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .vtag-rebuild{color:#3fb6a8;border-color:#3fb6a8;font-weight:700;}
 .vtag-remade{color:#c98a3a;border-color:#c98a3a;font-weight:700;}
 .vrow-h .vtag-scheduled,.vtag-scheduled{color:#e8b31f;border-color:#e8b31f;font-weight:700;}  /* YouTube予約公開の「投稿予定」 */
+.vdate-tools{display:inline-flex;align-items:center;gap:5px;flex:0 0 auto;}
+.vdate-edit-btn,.vdate-save,.vdate-auto,.vdate-cancel{width:auto;flex:0 0 auto;border:1px solid #2b9a91;border-radius:7px;background:transparent;color:#247f78;font-size:11px;line-height:1.2;padding:3px 7px;cursor:pointer;}
+.vdate-edit-btn:active,.vdate-save:active,.vdate-auto:active,.vdate-cancel:active{opacity:.65;}
+.vdate-manual-tag{display:inline-block;border:1px solid #2b9a91;border-radius:6px;color:#247f78;font-size:11px;font-weight:700;padding:1px 5px;}
+.vdate-editor{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:5px 0 4px;}
+.vdate-editor[hidden]{display:none;}
+.vdate-input{width:auto;max-width:100%;min-height:30px;border:1px solid var(--line);border-radius:7px;background:var(--panel);color:var(--ink);padding:3px 6px;font-size:13px;}
 
 /* ── 💡候補タブ（クリーム面・作品候補メモ＋サークル作品一覧） ── */
 .cand-filter-sale{display:flex;align-items:center;gap:6px;margin-top:8px;font-size:12.5px;color:var(--sub);cursor:pointer;}
