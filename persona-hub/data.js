@@ -12,9 +12,9 @@ window.PERSONA_HUB_DATA = {
   "_source_fingerprint": {
    "口調": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
-    "sha1": "578df6e6004d105c62ad0ec8a051739f4c3676e5",
-    "bytes": 60283,
-    "mtime": 1792020688.266
+    "sha1": "a8c97e549307d71585ed61ec43bea8c9b484c5f3",
+    "bytes": 60331,
+    "mtime": 1792024331.86
    },
    "呼称": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
@@ -628,6 +628,8 @@ window.PERSONA_HUB_DATA = {
     "first_person": [
      "わたし"
     ],
+    "plain_only": true,
+    "min_sentences": 3,
     "forbidden": [
      "対応しました",
      "対応いたします",
