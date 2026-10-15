@@ -3,9 +3,10 @@ const { test, expect } = require('@playwright/test');
 
 test.describe('ドラフト公開枠の重複表示', () => {
   test('別ドラフトで選んだ公開枠を題名つきで表示する', async ({ page }) => {
+    const allowedOrigin = new URL(process.env.BASE_URL || 'https://john-mori.github.io/go5-maker-7b311d01/').origin;
     await page.route('**/*', async (route) => {
       const url = new URL(route.request().url());
-      if (url.hostname === '127.0.0.1' || url.hostname === 'localhost') await route.continue();
+      if (url.origin === allowedOrigin) await route.continue();
       else await route.abort();
     });
 
