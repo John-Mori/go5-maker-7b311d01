@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://i.ytimg.com https://*.ytimg.com; connect-src 'self'; base-uri 'none'; form-action 'none'">
   <title>ぶいとも分析</title>
-  <link rel="stylesheet" href="style.css?v=20261003-refresh">
+  <link rel="stylesheet" href="style.css?v=20261015-nijitag">
 </head>
 <body>
   <header class="app-header">
@@ -33,7 +33,10 @@
           <p class="section-kicker">Vともっと推し活ちゃんねる</p>
           <div class="title-row">
             <h2>投稿と初動の伸び</h2>
-            <button class="tag-copy" id="tagCopy" type="button" data-copy="#shorts #ホロライブ #ホロライブ切り抜き" aria-label="動画用タグをコピー"><span class="tag-text"><span>#shorts</span> <span>#ホロライブ</span> <span>#ホロライブ切り抜き</span></span><span class="tag-state" id="tagCopyState">コピー</span></button>
+            <div class="tag-copies">
+              <button class="tag-copy" id="tagCopy" type="button" data-copy="#shorts #ホロライブ #ホロライブ切り抜き" aria-label="ホロライブ用タグをコピー"><span class="tag-text"><span>#shorts</span> <span>#ホロライブ</span> <span>#ホロライブ切り抜き</span></span><span class="tag-state">コピー</span></button>
+              <button class="tag-copy" id="tagCopyNiji" type="button" data-copy="#shorts #にじさんじ #にじさんじ切り抜き" aria-label="にじさんじ用タグをコピー"><span class="tag-text"><span>#shorts</span> <span>#にじさんじ</span> <span>#にじさんじ切り抜き</span></span><span class="tag-state">コピー</span></button>
+            </div>
           </div>
         </div>
         <span class="count" id="ownListCount">0本</span>
@@ -71,6 +74,6 @@
   </main>
 
   <script src="data/data.js"></script>
-  <script src="app.js?v=20261003-refresh"></script>
+  <script src="app.js?v=20261015-nijitag"></script>
 </body>
 </html>

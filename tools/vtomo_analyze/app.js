@@ -184,24 +184,24 @@
     });
   }
 
-  const tagCopy = $("#tagCopy");
-  if (tagCopy) {
+  $$(".tag-copy").forEach((tagCopy) => {
+    const tagState = tagCopy.querySelector(".tag-state");
     let timer = 0;
     tagCopy.addEventListener("click", () => {
       copyText(tagCopy.dataset.copy).then(() => {
         tagCopy.classList.add("copied");
-        $("#tagCopyState").textContent = "コピー済";
+        tagState.textContent = "コピー済";
       }, () => {
-        $("#tagCopyState").textContent = "失敗";
+        tagState.textContent = "失敗";
       }).finally(() => {
         clearTimeout(timer);
         timer = setTimeout(() => {
           tagCopy.classList.remove("copied");
-          $("#tagCopyState").textContent = "コピー";
+          tagState.textContent = "コピー";
         }, 1600);
       });
     });
-  }
+  });
 
   if (!data) {
     $("#emptyState").hidden = false;

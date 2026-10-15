@@ -155,6 +155,7 @@ h2 { margin: 0; font-size: 1rem; }
 
 .section-head.compact { margin-top: 18px; }
 .title-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.tag-copies { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; max-width: 100%; }
 
 .tag-copy {
   display: inline-flex;
