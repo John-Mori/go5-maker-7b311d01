@@ -53,6 +53,8 @@ test.describe('ドラフト公開枠の重複表示', () => {
     await page.locator('#draftPickerClose').click();
     await expect(page.locator('#draftSlotPicker')).toBeHidden();
     await page.locator('#draftModalClose').click();
+    // モーダル側もピッカーを閉じるため、既存の280ms閉じ処理が終わってから次のドラフトを開く。
+    await page.waitForTimeout(350);
 
     await page.locator(`.stk-mode[data-id="${secondId}"]`).click();
     await page.locator('#draftPubSched').check();
