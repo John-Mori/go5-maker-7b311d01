@@ -3488,7 +3488,7 @@
       if (_modalMeta === meta) { setDescUrlSlot_(r.replyShortUrl || r.replyUrl || r.parentShortUrl || r.parentUrl); saveDraftPost_(); }
       renderBskyStatus_(loadDraftPost_(meta.id));
       var hr = autoRecordBskyHistory_(meta);
-      if (st && hr && (hr.ok || hr.reason === 'dupe' || hr.reason === 'persist-pending')) st.innerHTML += '<br>📒 投稿履歴にも載せました(YouTube URLは投稿完了で追記されます)。';
+      if (st && hr && (hr.ok || hr.reason === 'dupe' || hr.reason === 'persist-pending')) st.innerHTML += '<br>📒 投稿履歴へは投稿完了を押した時に載ります(Blueskyの記録は控えてあります)。';
       else if (st) st.innerHTML += '<br>⚠️ 投稿履歴への自動記録はできませんでした(理由=' + esc((hr && hr.reason) || '不明') + ')。投稿完了を押せば載ります。';
     }).catch(function (e) {
       var m = String(e && e.message ? e.message : e);

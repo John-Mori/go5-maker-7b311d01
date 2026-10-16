@@ -233,6 +233,10 @@
 
   // 表示する全アイテム(履歴＋手動追加)を結合。manualOnly=true の手動短縮URL履歴は除外。
   function allItems() { return loadHist().filter(function (it) { return !it.manualOnly; }).concat(loadManual()); }
+  // Bluesky投稿時の自動記録行(autoRecorded)はドラフトのまま=投稿完了で印が外れるまで一覧に出さない
+  //   (Chami 2026-10-16 msg 1560466397182693502「ドラフトにしただけでとうこうりれきにのせないで」)。
+  //   行そのものは残す=説明欄短縮(導線1)の計測と、投稿完了での同じ行への追記はそのまま効く。
+  function notDraft_(it) { return !(it && it.autoRecorded); }
 
   // ── シート由来・表示専用マージ(Chami報告2026-07-21：「宵桜(acc2)の履歴だけ消える」「月詠み(acc1)の
   //   再生数が出ない」の真因は、この端末にその行が元々無いこと=別端末で投稿した分だった)。
@@ -441,7 +445,7 @@
     var local = allItems();
     var c = _sheetExtraCache[acct()];
     var items = (c && c.items && c.items.length) ? local.concat(c.items) : local;
-    return filterOtherChannel_(applySheetOverlays_(items, acct()));
+    return filterOtherChannel_(applySheetOverlays_(items, acct())).filter(notDraft_);
   }
   // GASのhistoryをマージ用に取得。未設定/失敗時は前回キャッシュ(無ければ空)を返すだけ＝ローカル表示は無傷。
   function fetchSheetExtra_(cb) {
@@ -494,7 +498,7 @@
   function channelItemsFor_(a) {
     var local = loadArr('short_hist__' + a).filter(function (it) { return it && !it.manualOnly; })
       .concat(loadArr('verify_manual__' + a));
-    return applySheetOverlays_(local.concat(rankSheetItems_(a)), a);
+    return applySheetOverlays_(local.concat(rankSheetItems_(a)), a).filter(notDraft_);
   }
   // ランキング(両ch合算)用に、指定チャンネル a のシート履歴を明示取得する。
   //   fetchSheetExtra_ は acct()(今のタブ)固定なので非アクティブ側が取れない。ここは a を明示。
@@ -2128,6 +2132,9 @@
     var gasUrl = '';
     try { gasUrl = (localStorage.getItem('bsky_gas_url') || '').trim(); } catch (e) {}
     if (!gasUrl || !it || !it.videoId) return;
+    // ドラフト中(Bluesky自動記録・投稿完了前)の行は記録シートへ出さない=他端末の投稿履歴にも載せない。
+    //   投稿完了で印が外れた後の追記(addCompletedPost の dupe 経路)で初めて送る。
+    if (it.autoRecorded) return;
     var payload = {
       op: 'upsert',
       channel: chForItem_(it),       // 接頭辞優先で誤タブ書き込みを防ぐ
@@ -3408,7 +3415,7 @@
     var extra = (c && c.items && c.items.length) ? c.items
       : ((window.HistMerge && window.HistMerge.mergeSheetExtras) ? window.HistMerge.mergeSheetExtras(local, loadSheetRaw_(a)) : []);
     var items = (extra && extra.length) ? local.concat(extra) : local;
-    return filterOtherChannelFor_(applySheetOverlays_(items, a), a);
+    return filterOtherChannelFor_(applySheetOverlays_(items, a), a).filter(notDraft_);
   }
   // 深夜投稿(翌0〜3時)は暦日では翌日だが、カレンダーでは前日の深夜枠(24:xx〜27:xx)として扱う。
   //   その日(dateStr)の枠へ紐づけ候補にするため、翌日の3時以前も含める(Chami依頼2026-08-10)。
