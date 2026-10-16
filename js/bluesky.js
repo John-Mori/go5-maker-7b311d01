@@ -2379,10 +2379,11 @@
   // 指定アカウントの投稿履歴アイテム一覧。(候補タブの投稿詳細モーダル用＝いつ/何で投稿したか)
   //   投稿履歴タブの表示(yt-clicks allItems)と同じく「短縮URL履歴 + 手動追加分(verify_manual__)」を合成して返す。
   //   short_hist__ だけだと、手動で追加した投稿が『履歴には見えるのに投稿済みpillが光らない』事故になる。(INC-71追補)
+  function liveDraftVids_() { var v = {}; try { var dels = {}; try { dels = JSON.parse(localStorage.getItem('go5_stock_del') || '{}') || {}; } catch (e2) {} (JSON.parse(localStorage.getItem('go5_stock_meta') || '[]') || []).forEach(function (m) { if (!m || !m.videoId) return; var d = m.id ? Number(dels[m.id] || 0) : 0; if (!d || Number(m.addedAt || m.ts || 0) > d) v[m.videoId] = 1; }); } catch (e) {} return v; }
   try { window.Go5PostedItems = function (a) {
     var acc = a || acctId(), out = [];
     try { out = histLoadFor_(acc) || []; } catch (e) { out = []; }
-    try { var man = (window.Go5Hist ? window.Go5Hist.read('verify_manual__' + acc) : JSON.parse(localStorage.getItem('verify_manual__' + acc) || '[]')); if (Array.isArray(man) && man.length) out = out.concat(man.filter(function (m) { return !(m && m.autoRecorded); })); } catch (e) {} // ドラフト中(Bluesky自動記録)は投稿済みにしない
+    try { var man = (window.Go5Hist ? window.Go5Hist.read('verify_manual__' + acc) : JSON.parse(localStorage.getItem('verify_manual__' + acc) || '[]')); if (Array.isArray(man) && man.length) { var _lv = liveDraftVids_(); out = out.concat(man.filter(function (m) { return !(m && m.autoRecorded && m.videoId && _lv[m.videoId]); })); } } catch (e) {} // ドラフトが残っている自動記録行だけ投稿済みにしない(v1041)
     // ★全端末同期される作成履歴(go5_stock_archive)も「投稿済み」の根拠に含める。short_hist__/verify_manual__ は
     //   端末ローカルで同期しないため、別端末で投稿完了した作品は候補pillが光らなかった(Chami依頼2026-08-03「連動させて」)。
     //   作成履歴は投稿完了(archiveStock_)で全端末へ同期される=同じ根拠を全端末が共有して pill が揃う。

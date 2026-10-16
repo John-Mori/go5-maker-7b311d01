@@ -71,3 +71,27 @@ test('ドラフトでBluesky投稿しただけでは投稿履歴に出ず、投�
   await expect(page.locator('.vrow-title').filter({ hasText: anchor })).toBeVisible({ timeout: 15000 });
   await expect(page.locator('.vrow-title').filter({ hasText: title })).toHaveCount(1);
 });
+
+// v1040は印(autoRecorded)だけで隠したため、ドラフトがもう無い(=投稿済み)のに印が残った行まで全部消えた
+//   (Chami 2026-10-16 msg 1560570367716622353「投稿履歴全部消えたんだけど。それは違うやろ」)。
+//   隠すのは同じ背骨IDのドラフトがまだ在る行だけ。ドラフトが無い印つき行は必ず投稿履歴に出す。
+test('ドラフトが残っていない自動記録行は投稿履歴から消さない', async ({ page }) => {
+  const titles = ['印が残った投稿済みの行その1', '印が残った投稿済みの行その2'];
+  const liveTitle = 'まだドラフトに居る行';
+  await page.goto('StockLists.html', { waitUntil: 'domcontentloaded' });
+  await page.evaluate(({ titles, liveTitle }) => {
+    const account = window.Go5Acct.current();
+    localStorage.setItem('bsky_gas_url', '');
+    localStorage.setItem('hist_maint_at', String(Date.now()));
+    localStorage.setItem('hist_metrics_at', String(Date.now()));
+    const rows = titles.map((t, i) => ({ manual: true, id: 'm:auto' + i, ts: Date.now() - (i + 1) * 3600000, title: t, videoId: account + '-2026101' + (3 + i) + '-1100-old' + i, autoRecorded: true }));
+    rows.push({ manual: true, id: 'm:live', ts: Date.now(), title: liveTitle, videoId: account + '-20261016-1200-live', autoRecorded: true });
+    localStorage.setItem('verify_manual__' + account, JSON.stringify(rows));
+    localStorage.setItem('short_hist__' + account, '[]');
+    localStorage.setItem('verify_yt__' + account, '{}');
+    localStorage.setItem('go5_stock_meta', JSON.stringify([{ id: 'stk_e2e_live', ts: Date.now(), addedAt: Date.now(), account, label: liveTitle, title: liveTitle, videoId: account + '-20261016-1200-live', attrs: {} }]));
+  }, { titles, liveTitle });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  for (const t of titles) await expect(page.locator('.vrow-title').filter({ hasText: t })).toBeVisible({ timeout: 15000 });
+  await expect(page.locator('.vrow-title').filter({ hasText: liveTitle })).toHaveCount(0);
+});
