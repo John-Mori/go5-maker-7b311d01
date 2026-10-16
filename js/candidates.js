@@ -4063,8 +4063,10 @@
           var u = img.getAttribute('src') || url;
           img.removeAttribute('src'); img.setAttribute('src', u); // 同一URLを空→再設定で再ロードを促す(クエリを足さない=CDNキャッシュを割らない)
         }, n === 0 ? 1200 : 4000);
+      } else if (img.classList.contains('cand-refimg-thumb')) {
+        refThumbCdnFailed_(img, url);
       } else {
-        // 上限到達=作品情報ごと取り直せるタップ札へ差し替える(cand-thumb のみ。buzz/refは静かに枠のまま)。
+        // 上限到達=作品情報ごと取り直せるタップ札へ差し替える(cand-thumb のみ。buzzは静かに枠のまま)。
         var cid = img.getAttribute('data-thumbcid') || '';
         if (cid && img.parentNode) {
           var ph = document.createElement('div');
@@ -4076,6 +4078,45 @@
         }
       }
     }, true);
+  }
+  // 動画生成用画像の固定URL(sync-worker /img/<hash>)が読めない時、黒い枠のまま黙らない(Chami 2026-10-16
+  //   msg 1560453278234583110「過去作の画像が黒くなってる」)。端末内(IDB/旧LS)の同じ画像があればそれへ差し替え、
+  //   無ければ「読めない」と分かる札にする。失敗したURLの応答コードは診断へ積む(?imgdiag=1でコピー可)。
+  function refThumbCdnFailed_(img, url) {
+    var cid = img.getAttribute('data-refimgview') || '';
+    var idx = parseInt(img.getAttribute('data-refidx'), 10) || 0;
+    if (window.Go5ImgDiag) {
+      try {
+        var ctl = window.AbortController ? new AbortController() : null;
+        var timer = ctl ? setTimeout(function () { ctl.abort(); }, 10000) : null;
+        fetch(url, { method: 'HEAD', cache: 'no-store', signal: ctl ? ctl.signal : undefined }).then(function (r) {
+          clearTimeout(timer);
+          Go5ImgDiag.push('ref_cdn_err', { cid: cid, status: r.status, key: url.slice(-12) });
+        }, function () { clearTimeout(timer); Go5ImgDiag.push('ref_cdn_err', { cid: cid, status: 0, key: url.slice(-12) }); });
+      } catch (e) {}
+    }
+    function useLocal_(rec) {
+      var src = imageRecImgs_(rec)[idx] || '';
+      if (!/^data:image\//.test(src) || !img.isConnected) return false;
+      img.setAttribute('data-cdnfallback', '1');
+      img.setAttribute('src', src);
+      return true;
+    }
+    function showFailed_() {
+      if (!img.isConnected || !img.parentNode) return;
+      var ph = document.createElement('div');
+      ph.className = 'cand-refimg-ph cand-refimg-stalled';
+      ph.setAttribute('data-refretry', cid);
+      ph.setAttribute('title', '保存先から画像を読めませんでした。タップで再試行します(画像が消えたわけではありません)');
+      ph.textContent = '⚠ 画像を読めません(タップで再試行)';
+      img.parentNode.replaceChild(ph, img);
+    }
+    var lsRec = legacyRefOf_(cid);
+    if (lsRec && !isR2Marker_(lsRec) && useLocal_(lsRec)) return;
+    if (!_idbOk || !cid || !window.Go5Idb) { showFailed_(); return; }
+    window.Go5Idb.get(idbKey('ref', cid)).then(function (rec) {
+      if (!useLocal_(rec)) showFailed_();
+    }, showFailed_);
   }
   // カード共通の配線：サムネのタップで画像モーダル／🖼投稿画像ボタン。
   function wireCardCommon_(el) {
