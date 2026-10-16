@@ -3512,8 +3512,15 @@
     resolveSrcImageBlob_(meta.id).then(function (blob) {
       if (!blob || _modalMeta !== meta || _draftImg.id !== meta.id) return;
       _draftImg.blob = blob; _draftImg.url = URL.createObjectURL(blob);
+      // 表示はdata:URLで渡す=iPhoneの長押し「写真に保存」がblob:だと効かないことがある(Chami 2026-10-16 msg 1560575304139935815
+      //   「普通の投稿画像にして長押ししたら普通にDLできるように」)。読めなければblob:のまま出す(fail-open)。
       if (img) img.src = _draftImg.url;
       if (wrap) wrap.style.display = '';
+      try {
+        var fr = new FileReader();
+        fr.onload = function () { if (img && _draftImg.id === meta.id && typeof fr.result === 'string') img.src = fr.result; };
+        fr.readAsDataURL(blob);
+      } catch (e) {}
     }).catch(function () {});
   }
   function shareDraftImg_(btn) {
@@ -3589,7 +3596,7 @@
             '<div id="draftParentCard">' +
               '<textarea id="draftParentText" rows="2" placeholder="親投稿の本文(短文)" style="display:none;width:100%;box-sizing:border-box;margin:0 0 8px;padding:0;border:none;outline:none;resize:none;background:transparent;color:var(--ink);font-size:.92rem;line-height:1.5;"></textarea>' +
               '<div id="draftImgWrap" style="display:none;">' +
-                '<img id="draftImg" alt="投稿画像" style="display:block;width:100%;max-height:220px;object-fit:contain;border-radius:8px;border:1px solid var(--line);background:#000;">' +
+                '<img id="draftImg" alt="投稿画像" style="display:block;width:100%;height:auto;border-radius:8px;border:1px solid var(--line);-webkit-touch-callout:default;-webkit-user-select:auto;user-select:auto;-webkit-user-drag:auto;">' +
               '</div>' +
             '</div>' +
           '</div>' +
