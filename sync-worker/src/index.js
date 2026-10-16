@@ -103,6 +103,13 @@ export default {
       if (!authOk(request, env)) return json({ ok: false, error: "bad_token" }, 403, cors);
       return personaEdit(decodeURIComponent(path.slice("/api/persona/edit/".length)), env, cors);
     }
+    // 画像が読めなかった記録(POST /api/diag/img)。端末の Go5ImgDiag は端末内にしか残らず、
+    //   Chamiに「出た/出ない」を聞き返すしかなかった(2026-10-16 黒い過去作画像)。
+    //   R2 diag/img/<JST日付>.jsonl へ追記し、PCは wrangler r2 object get で読む(読み口は作らない)。
+    if (path === "/api/diag/img" && request.method === "POST") {
+      if (!authOk(request, env)) return json({ ok: false, error: "bad_token" }, 403, cors);
+      return diagImgAppend(request, env, cors);
+    }
     // 状態 push
     if (path === "/api/push" && request.method === "POST") {
       if (!authOk(request, env)) return json({ ok: false, error: "bad_token" }, 403, cors);
@@ -279,6 +286,33 @@ async function imgHas(url, env, cors) {
 //   ★SYNC_TOKEN を PC へ置かない設計を崩さない(teian と同じ向き)= 書きは Worker・読みは wrangler。
 //   ★消さない= 1行ずつ追記するだけ。PC側が自分のカーソル(行数)を持つ。
 //     箱を空にしてから処理する形にすると、その隙に落ちた分が無言で消える(実害の記録あり)。
+const DIAG_IMG_PREFIX = "diag/img/";
+const DIAG_IMG_MAX = 128 * 1024; // 1日ぶんの上限。超えたら足さず507で返す(同じ失敗の連打で膨らませない)
+async function diagImgAppend(request, env, cors) {
+  if (!env.SYNC_IMAGES) return json({ ok: false, error: "r2_unset" }, 500, cors);
+  const body = parseJson(await request.text());
+  const list = Array.isArray(body && body.events) ? body.events.slice(0, 20) : [];
+  const ua = String(request.headers.get("User-Agent") || "").slice(0, 160);
+  const at = new Date().toISOString();
+  const lines = list.filter((e) => e && e.ev).map((e) => JSON.stringify({
+    at, ua,
+    ev: String(e.ev).slice(0, 40),
+    cid: String(e.cid || "").slice(0, 80),
+    key: /^[0-9a-f]{64}$/.test(String(e.key)) ? String(e.key) : "",
+    status: Number(e.status) || 0,
+    outcome: String(e.outcome || "").slice(0, 20),
+  }));
+  if (!lines.length) return json({ ok: false, error: "bad_body" }, 400, cors);
+  const day = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+  const k = DIAG_IMG_PREFIX + day + ".jsonl";
+  const cur = await env.SYNC_IMAGES.get(k);
+  const prev = cur ? await cur.text() : "";
+  if (prev.length > DIAG_IMG_MAX) return json({ ok: false, error: "diag_full" }, 507, cors);
+  // read-modify-write。同時に重なると片方が消えうるが、診断用途なので許容する。
+  await env.SYNC_IMAGES.put(k, prev + lines.join("\n") + "\n", { httpMetadata: { contentType: "application/x-ndjson", cacheControl: "no-store" } });
+  return json({ ok: true, added: lines.length }, 200, cors);
+}
+
 const PQ_KEY = "persona/queue.jsonl";
 const PQ_MAX = 256 * 1024; // これを超えたら**黙って捨てず**エラーで返す(静かな喪失を作らない)
 const PE_PREFIX = "persona/edit/";

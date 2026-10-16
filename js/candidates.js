@@ -4082,27 +4082,34 @@
   // 動画生成用画像の固定URL(sync-worker /img/<hash>)が読めない時、黒い枠のまま黙らない(Chami 2026-10-16
   //   msg 1560453278234583110「過去作の画像が黒くなってる」)。端末内(IDB/旧LS)の同じ画像があればそれへ差し替え、
   //   無ければ「読めない」と分かる札にする。失敗したURLの応答コードは診断へ積む(?imgdiag=1でコピー可)。
+  //   同じ記録を同期サーバーへも送る(R2 diag/img/<日付>.jsonl)= Chamiに「出た/出ない」を聞き返さずPCで読める。
   function refThumbCdnFailed_(img, url) {
     var cid = img.getAttribute('data-refimgview') || '';
     var idx = parseInt(img.getAttribute('data-refidx'), 10) || 0;
-    if (window.Go5ImgDiag) {
-      try {
-        var ctl = window.AbortController ? new AbortController() : null;
-        var timer = ctl ? setTimeout(function () { ctl.abort(); }, 10000) : null;
-        fetch(url, { method: 'HEAD', cache: 'no-store', signal: ctl ? ctl.signal : undefined }).then(function (r) {
-          clearTimeout(timer);
-          Go5ImgDiag.push('ref_cdn_err', { cid: cid, status: r.status, key: url.slice(-12) });
-        }, function () { clearTimeout(timer); Go5ImgDiag.push('ref_cdn_err', { cid: cid, status: 0, key: url.slice(-12) }); });
-      } catch (e) {}
+    var key = (url.match(/\/img\/([0-9a-f]{64})$/) || [])[1] || '';
+    var status = null, outcome = null;
+    function report_() {
+      if (status === null || outcome === null) return;
+      if (window.Go5ImgDiag) { try { Go5ImgDiag.push('ref_cdn_err', { cid: cid, status: status, key: url.slice(-12), outcome: outcome }); } catch (e) {} }
+      queueImgDiag_({ ev: 'ref_cdn_err', cid: cid, key: key, status: status, outcome: outcome });
     }
+    try {
+      var ctl = window.AbortController ? new AbortController() : null;
+      var timer = ctl ? setTimeout(function () { ctl.abort(); }, 10000) : null;
+      fetch(url, { method: 'HEAD', cache: 'no-store', signal: ctl ? ctl.signal : undefined }).then(function (r) {
+        clearTimeout(timer); status = r.status; report_();
+      }, function () { clearTimeout(timer); status = 0; report_(); });
+    } catch (e) { status = -1; }
     function useLocal_(rec) {
       var src = imageRecImgs_(rec)[idx] || '';
       if (!/^data:image\//.test(src) || !img.isConnected) return false;
       img.setAttribute('data-cdnfallback', '1');
       img.setAttribute('src', src);
+      outcome = 'local'; report_();
       return true;
     }
     function showFailed_() {
+      outcome = 'none'; report_();
       if (!img.isConnected || !img.parentNode) return;
       var ph = document.createElement('div');
       ph.className = 'cand-refimg-ph cand-refimg-stalled';
@@ -4117,6 +4124,32 @@
     window.Go5Idb.get(idbKey('ref', cid)).then(function (rec) {
       if (!useLocal_(rec)) showFailed_();
     }, showFailed_);
+  }
+  // 画像診断の送信は3秒まとめて1回・同じ(cid,key)はページ内で1回だけ。失敗しても画面には何も出さない。
+  var _imgDiagQ = [], _imgDiagSent = {}, _imgDiagTimer = null;
+  function queueImgDiag_(ev) {
+    var id = ev.cid + ':' + ev.key;
+    if (_imgDiagSent[id]) return;
+    _imgDiagSent[id] = 1;
+    _imgDiagQ.push(ev);
+    if (!_imgDiagTimer) _imgDiagTimer = setTimeout(flushImgDiag_, 3000);
+  }
+  function flushImgDiag_() {
+    _imgDiagTimer = null;
+    var events = _imgDiagQ.splice(0, 20);
+    if (_imgDiagQ.length) _imgDiagTimer = setTimeout(flushImgDiag_, 3000);
+    var c = null; try { c = window.Go5Sync && window.Go5Sync.getConfig && window.Go5Sync.getConfig(); } catch (e) {}
+    var url = (c && c.url) || '', token = (c && c.token) || '';
+    if (!events.length || !/^https?:\/\//.test(url) || !token) return;
+    try {
+      var ctl = window.AbortController ? new AbortController() : null;
+      var timer = ctl ? setTimeout(function () { ctl.abort(); }, 10000) : null;
+      fetch(url + '/api/diag/img', {
+        method: 'POST', cache: 'no-store', keepalive: true, signal: ctl ? ctl.signal : undefined,
+        headers: { 'X-Sync-Token': token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ events: events })
+      }).then(function () { clearTimeout(timer); }, function () { clearTimeout(timer); });
+    } catch (e) {}
   }
   // カード共通の配線：サムネのタップで画像モーダル／🖼投稿画像ボタン。
   function wireCardCommon_(el) {

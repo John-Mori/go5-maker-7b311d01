@@ -42,4 +42,40 @@ test.describe('候補の動画生成用画像: 固定URLが読めない時', () 
     await expect(ph).toContainText('画像を読めません', { timeout: 15000 });
     await expect(page.locator('img[data-refimgview="' + cid + '"]')).toHaveCount(0);
   });
+
+  // Chamiに「出た/出ない」を聞き返さずに済むよう、読めなかった記録を同期サーバーへ送る。
+  test('読めなかった記録(応答コード・差し替え先)を同期サーバーへ1回だけ送る', async ({ page }) => {
+    const cid = 'd_ref_cdn_fallback_diag';
+    const posts = [];
+    await page.route('**/api/**', async (route) => {
+      const req = route.request();
+      if (req.url().endsWith('/api/diag/img')) {
+        posts.push({ token: req.headers()['x-sync-token'], body: req.postDataJSON() });
+        return route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' });
+      }
+      return route.fulfill({ status: 403, contentType: 'application/json', body: '{"ok":false}' });
+    });
+    // sync2_token を本当に入れると起動時の同期が走って一覧が別物になるため、getConfig の返す token だけ差す。
+    await page.addInitScript(() => {
+      let v;
+      Object.defineProperty(window, 'Go5Sync', {
+        configurable: true,
+        get() { return v; },
+        set(x) {
+          if (x && x.getConfig) {
+            const orig = x.getConfig;
+            x.getConfig = function () { return Object.assign({}, orig.apply(this, arguments), { token: 'TEST_TOKEN' }); };
+          }
+          v = x;
+        }
+      });
+    });
+    await seed(page, cid, true);
+    await expect(page.locator('[data-refimgview="' + cid + '"]')).toHaveAttribute('src', /^data:image\/png/, { timeout: 15000 });
+    await expect.poll(() => posts.length, { timeout: 15000 }).toBeGreaterThan(0);
+    await page.waitForTimeout(4000);
+    expect(posts.length).toBe(1);
+    expect(posts[0].token).toBe('TEST_TOKEN');
+    expect(posts[0].body.events).toEqual([{ ev: 'ref_cdn_err', cid, key: HASH, status: 404, outcome: 'local' }]);
+  });
 });
