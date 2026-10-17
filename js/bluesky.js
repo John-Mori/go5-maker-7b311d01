@@ -1012,7 +1012,7 @@
   function renderDiscUrlList_() {
     var wrap = $('discUrlList'); if (!wrap) return;
     var arr = discUrlsLoad_(), cur = discCurrentEntry_(), sel = cur ? cur.id : '';
-    if (!arr.length) { wrap.innerHTML = '<div class="hint">(未登録。下から追加してください)</div>'; return; }
+    if (!arr.length) { wrap.innerHTML = '<div class="hint">(未登録。下に名前とURLを入れると、ここに○付きで出ます)</div>'; return; }
     wrap.innerHTML = arr.map(function (e) {
       var checked = (e.id === sel) ? ' checked' : '';
       return '<label class="disc-url-item">' +
@@ -1074,10 +1074,14 @@
   }
   (function wireDiscUrlAdd_() {
     var btn = $('discUrlAddBtn'); if (!btn) return;
-    btn.addEventListener('click', function () {
+    // ★iPhoneはキーボードが閉じる時に画面がずれ、＋追加のタップが空振りして入力欄に残ったままになる
+    //   (Chami msg 1561054969539465236「セールにラジオボタンつけて。出てない」)。
+    //   名前とURLが揃った時点(欄を離れた/改行)で自動で追加し、一覧へ○付きで出す。
+    function addFromInputs_(auto) {
       var nameEl = $('discUrlName'), urlEl = $('discUrlInput'), hint = $('discUrlHint');
       var name = ((nameEl && nameEl.value) || '').trim();
       var url = ((urlEl && urlEl.value) || '').trim();
+      if (auto && !(name && /^https?:\/\//.test(url))) return;
       if (!/^https?:\/\//.test(url)) { if (hint) hint.textContent = 'URLは http:// か https:// で始めてください。'; return; }
       var arr = discUrlsLoad_();
       var entry = { id: 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: name || ('セールURL' + (arr.length + 1)), url: url, at: Date.now() };
@@ -1088,6 +1092,12 @@
       renderDiscUrlList_();
       renderPreview();
       if (els.pcModal && !els.pcModal.hidden) recomposePcText_();
+    }
+    btn.addEventListener('click', function () { addFromInputs_(false); });
+    ['discUrlName', 'discUrlInput'].forEach(function (id) {
+      var el = $(id); if (!el) return;
+      el.addEventListener('change', function () { addFromInputs_(true); });
+      el.addEventListener('keydown', function (ev) { if (ev.key === 'Enter' && !ev.isComposing) { ev.preventDefault(); addFromInputs_(true); } });
     });
   })();
 
