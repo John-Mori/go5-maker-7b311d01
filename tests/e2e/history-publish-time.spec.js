@@ -87,49 +87,35 @@ test('videos.list の公開時刻変更で見出し・並び・日別集計の�
   );
 });
 
-test('手動日時はAPI更新より優先され、自動に戻すと最新API時刻へ戻る', async ({ page }) => {
+test('日時変更ボタンは出さず、過去の手動日時が残っていてもAPI時刻を表示する', async ({ page }) => {
+  // Chami 2026-10-17 msg 1560865357139542176「日時変更というの、いらない」
   await seedHistory(page);
-  let targetPublishedAt = '2026-10-15T19:30:00+09:00';
+  await page.addInitScript(({ targetId }) => {
+    const rec = { manualMs: Date.parse('2026-10-16T20:15:00+09:00'), manualAt: Date.now() };
+    localStorage.setItem('hist_post_time_v1', JSON.stringify({ ['yt:' + targetId]: rec }));
+  }, { targetId: TARGET_ID });
   await page.route('**/youtube/v3/videos?*', async (route) => {
     const ids = new URL(route.request().url()).searchParams.get('id').split(',');
     const items = ids.map((id) => id === TARGET_ID
-      ? videoItem(id, '深夜公開の動画', targetPublishedAt)
+      ? videoItem(id, '深夜公開の動画', '2026-10-17T18:40:00+09:00')
       : videoItem(id, '比較用の動画', '2026-10-15T10:00:00+09:00'));
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items }) });
   });
 
-  await page.goto('StockLists.html?history-publish-time=manual', { waitUntil: 'domcontentloaded' });
-  let target = await historyRow(page, '深夜公開の動画');
-  await expect(target.locator('.vrow-h')).toContainText('19:30');
-
-  await target.locator('.vdate-edit-btn').click();
-  await target.locator('.vdate-input').fill('2026-10-16T20:15');
-  await target.locator('.vdate-save').click();
-  target = await historyRow(page, '深夜公開の動画');
-  await expect(target.locator('.vrow-h')).toContainText('10/16');
-  await expect(target.locator('.vrow-h')).toContainText('20:15');
-  await expect(target.locator('.vdate-manual-tag')).toHaveText('手動');
-
-  targetPublishedAt = '2026-10-17T18:40:00+09:00';
+  await page.goto('StockLists.html?history-publish-time=no-manual', { waitUntil: 'domcontentloaded' });
   await clickApiRefresh(page);
-  target = await historyRow(page, '深夜公開の動画');
-  await expect(target.locator('.vrow-h')).toContainText('10/16');
-  await expect(target.locator('.vrow-h')).toContainText('20:15');
-  await expect(target.locator('.vrow-delta')).toHaveAttribute(
-    'data-delta-ts',
-    String(Date.parse('2026-10-16T20:15:00+09:00'))
-  );
-
-  await target.locator('.vdate-edit-btn').click();
-  await target.locator('.vdate-auto').click();
-  target = await historyRow(page, '深夜公開の動画');
+  const target = await historyRow(page, '深夜公開の動画');
   await expect(target.locator('.vrow-h')).toContainText('10/17');
   await expect(target.locator('.vrow-h')).toContainText('18:40');
+  await expect(page.locator('.vdate-edit-btn')).toHaveCount(0);
+  await expect(page.locator('.vdate-editor')).toHaveCount(0);
   await expect(target.locator('.vdate-manual-tag')).toHaveCount(0);
   await expect(target.locator('.vrow-delta')).toHaveAttribute(
     'data-delta-ts',
     String(Date.parse('2026-10-17T18:40:00+09:00'))
   );
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('hist_post_time_v1') || '{}'));
+  expect(stored['yt:' + 'deepnight01'].manualMs).toBe(Date.parse('2026-10-16T20:15:00+09:00'));
 });
 
 test('予約中は status.publishAt を snippet.publishedAt より優先する', async ({ page }) => {

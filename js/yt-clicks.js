@@ -1169,8 +1169,10 @@
   }
   function historyPostTime_(it, ymap) {
     var key = historyTimeKey_(it, ymap), rec = loadHistoryPostTimes_()[key] || {};
-    var manual = Number(rec.manualAt) > Number(rec.resetAt || 0) && Number(rec.manualMs) > 0;
-    var ms = manual ? Number(rec.manualMs) : (Number(rec.autoMs) > 0 ? Number(rec.autoMs) : null);
+    // 手動の日時変更は廃止(Chami 2026-10-17 msg 1560865357139542176「日時変更というの、いらない」)。
+    //   過去に入れた manualMs は同期データに残すが表示には使わない=常にYouTubeの公開時刻へ追従する。
+    var manual = false;
+    var ms = Number(rec.autoMs) > 0 ? Number(rec.autoMs) : null;
     var vid = ytIdOf(itemYt_(ymap, it) || it.ytUrl || '');
     if (ms == null && vid && publishedCache[vid] != null) ms = Number(publishedCache[vid]);
     return {
@@ -1202,30 +1204,6 @@
     });
     if (changed) saveHistoryPostTimes_(map);
   }
-  function setManualPostTime_(key, ms) {
-    var map = loadHistoryPostTimes_(), old = map[key] || {}, rec = {};
-    Object.keys(old).forEach(function (k) { rec[k] = old[k]; });
-    rec.manualMs = Number(ms); rec.manualAt = Math.max(Date.now(), Number(old.manualAt || 0) + 1, Number(old.resetAt || 0) + 1);
-    map[key] = rec; saveHistoryPostTimes_(map);
-  }
-  function resetManualPostTime_(key) {
-    var map = loadHistoryPostTimes_(), old = map[key] || {}, rec = {};
-    Object.keys(old).forEach(function (k) { rec[k] = old[k]; });
-    rec.resetAt = Math.max(Date.now(), Number(old.resetAt || 0) + 1, Number(old.manualAt || 0) + 1);
-    map[key] = rec; saveHistoryPostTimes_(map);
-  }
-  function toLocalDateTimeInput_(ms) {
-    if (!Number(ms)) return '';
-    var d = new Date(Number(ms)), p = function (n) { return n < 10 ? ('0' + n) : String(n); };
-    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + 'T' + p(d.getHours()) + ':' + p(d.getMinutes());
-  }
-  function fromLocalDateTimeInput_(s) {
-    var m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(String(s || ''));
-    if (!m) return NaN;
-    var d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), 0, 0);
-    return d.getTime();
-  }
-
   // ── YouTubeメタ(題名/投稿日時/視聴回数)を localStorage に永続化 ──────────────
   //   在メモリだけだとリロードのたびに再取得＝取得失敗時に題名が消えて不安定。
   //   永続化して起動時に即表示し、refresh で上書き更新する。(題名/投稿日時は不変・視聴回数は最新化)
@@ -2663,14 +2641,6 @@
               //   (宵桜艶帖の1件・Chami報告2026-08-05)。上の§1637の設計意図どおり実投稿時刻(ts)を先に正とし、tsも無い時だけ「…」を出す。
               : (it.ts ? '<b class="vdate-tsonly">' + fmtPostDate(it.ts) + '</b>'
                 : (vid ? '<b class="vdate-pending">…</b>' : '<b class="vdate-unknown">投稿日時不明</b>')))));
-      var dateEditHtml = '<span class="vdate-tools">' +
-        (postTime.manual ? '<span class="vdate-manual-tag">手動</span>' : '') +
-        '<button class="vdate-edit-btn" type="button" data-time-key="' + esc(postTime.key) + '">日時変更</button></span>';
-      var dateEditorHtml = '<div class="vdate-editor" hidden>' +
-        '<input class="vdate-input" type="datetime-local" aria-label="投稿日時" value="' + esc(toLocalDateTimeInput_(postTime.ms || it.ts || Date.now())) + '">' +
-        '<button class="vdate-save" type="button" data-time-key="' + esc(postTime.key) + '">保存</button>' +
-        '<button class="vdate-auto" type="button" data-time-key="' + esc(postTime.key) + '">自動に戻す</button>' +
-        '<button class="vdate-cancel" type="button">閉じる</button></div>';
       var rawTitle = (vid && titleCache[vid]) || it.title || (it.manual ? '(手動追加)' : '(無題)');
       var dispTitle = esc(stripCommonTags(rawTitle));
       var tagWarn = !it.manual && vid && (vid in titleCache) && missingCommonTags(rawTitle);
@@ -2692,8 +2662,7 @@
       return '<div class="vrow' + (it.remade ? ' vrow-remade' : '') + '" data-hist-anchor="' + esc(k) + '" data-hist-usedkey="' + esc(pKey) + '" data-hist-refcid="' + esc(rImgCid) + '">' +
         '<div class="vrow-body">' +
         // 1行目＝日付＋サークル名(作者名)、2行目＝動画の題名(改行して統一)
-        '<div class="vrow-h">' + dateHtml + dateEditHtml + (it.workUrl ? '<span class="vrow-author" data-fanza-author-url="' + esc(it.workUrl) + '"></span>' : '') + '</div>' +
-        dateEditorHtml +
+        '<div class="vrow-h">' + dateHtml + (it.workUrl ? '<span class="vrow-author" data-fanza-author-url="' + esc(it.workUrl) + '"></span>' : '') + '</div>' +
         '<div class="vrow-title">' + titleHtml + '</div>' +
         (it.workUrl ? '<div class="fanza-name-row" data-fanza-url="' + esc(it.workUrl) + '" style="display:none;"></div>' : '') +
         (it.workUrl ?
@@ -2852,29 +2821,6 @@
         var k = b.getAttribute('data-k');
         setTimeout(function () { deleteItem(k, row); }, 60); // 枠線を描画してから確認ダイアログ
       });
-    });
-
-    // 投稿日時の手動上書き。API更新はauto側だけを書き換えるため、manual解除までは表示へ出ない。
-    list.querySelectorAll('.vdate-edit-btn').forEach(function (b) {
-      b.addEventListener('click', function () {
-        var row = b.closest('.vrow'), ed = row && row.querySelector('.vdate-editor');
-        if (ed) ed.hidden = !ed.hidden;
-      });
-    });
-    list.querySelectorAll('.vdate-cancel').forEach(function (b) {
-      b.addEventListener('click', function () { var ed = b.closest('.vdate-editor'); if (ed) ed.hidden = true; });
-    });
-    list.querySelectorAll('.vdate-save').forEach(function (b) {
-      b.addEventListener('click', function () {
-        var ed = b.closest('.vdate-editor'), input = ed && ed.querySelector('.vdate-input');
-        var ms = fromLocalDateTimeInput_(input && input.value);
-        if (!isFinite(ms)) { if (input) input.setCustomValidity('日時を入れてくれ'); if (input) input.reportValidity(); return; }
-        setManualPostTime_(b.getAttribute('data-time-key'), ms);
-        render();
-      });
-    });
-    list.querySelectorAll('.vdate-auto').forEach(function (b) {
-      b.addEventListener('click', function () { resetManualPostTime_(b.getAttribute('data-time-key')); render(); });
     });
 
     // 作り直し(削除の代わりに「被リビルド」の印を付ける／取り消す)
