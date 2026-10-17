@@ -3050,7 +3050,7 @@
     // 投稿完了でドラフトから外れた予約投稿も枠を埋めている。投稿履歴の公開予定時刻で同じ枠に載せる
     //   (Chami 2026-10-15「どこが？」=予約済みの枠が出ず被り防止にならなかった)。生きているドラフトと同じ背骨IDは二重に出さない。
     var hist = (window.Go5History && window.Go5History.takenSlots) ? (window.Go5History.takenSlots(acc) || []) : [];
-    hist.forEach(function (t) { if (!(t.videoId && live[t.videoId])) out.push({ id: '', date: '', time: '', at: t.at, title: String(t.title || '(題名なし)').slice(0, 60) }); });
+    hist.forEach(function (t) { if (!(t.videoId && live[t.videoId])) out.push({ id: '', date: '', time: '', at: t.at, posted: true, title: String(t.title || '(題名なし)').slice(0, 60) }); });
     return out;
   }
   // カレンダーを上から降ろす。schedule/ を pick=1 で埋め込み、枠タップ→slot-picked を受ける。
@@ -3077,7 +3077,7 @@
       $('draftPickerClose').addEventListener('click', closeSlotPicker_);
     }
     var f = $('draftPickerFrame');
-    if (f && !f.getAttribute('src')) f.setAttribute('src', 'schedule/index.html?pick=1&acc=' + acc + '&v=45');
+    if (f && !f.getAttribute('src')) f.setAttribute('src', 'schedule/index.html?pick=1&acc=' + acc + '&v=46');
     // 表示→次フレームでスライドイン。iframe読込後に enter-pick を送る(未読込なら onload で)。
     pk.style.display = 'flex';
     requestAnimationFrame(function () { pk.style.transform = 'translateY(0)'; });

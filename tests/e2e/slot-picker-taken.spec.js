@@ -126,4 +126,47 @@ test.describe('ドラフト公開枠の重複表示', () => {
     await expect(takenNote).toBeVisible();
     await expect(takenNote).toContainText('選択済み：予約済みの動画');
   });
+  // 過去日(昨日)に投稿した分も、ピッカーで見返すと題名が出る。題名の後ろのタグは出さない
+  //   (Chami 2026-10-18「ドラフト参照時のカレンダー、昨日など過去や未来の情報を保存したものを表示するようにして。題名の後ろのタグは非表示でいい」)。
+  test('昨日の投稿もタグ抜きの題名で表示する', async ({ page }) => {
+    const allowedOrigin = new URL(process.env.BASE_URL || 'https://john-mori.github.io/go5-maker-7b311d01/').origin;
+    await page.route('**/*', async (route) => {
+      const url = new URL(route.request().url());
+      if (url.origin === allowedOrigin) await route.continue();
+      else await route.abort();
+    });
+    const draftId = 'stk_e2e_taken_past';
+    await page.goto('Stock.html', { waitUntil: 'domcontentloaded' });
+    const info = await page.evaluate(({ draftId }) => {
+      const jst = (ms) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms));
+      const today = jst(Date.now());
+      const y = jst(Date.parse(today + 'T12:00:00+09:00') - 86400000);
+      localStorage.setItem('current_account', 'acc3');
+      localStorage.setItem('hist_post_time_v1', '{}');
+      localStorage.setItem('verify_manual__acc3', '[]');
+      localStorage.setItem('short_hist__acc3', JSON.stringify([
+        { videoId: 'acc3-past-1', ts: Date.now() - 86400000, plannedAt: y + 'T13:07:00+09:00', title: '昨日の動画 #shorts #漫画 #漫画紹介', account: 'acc3' }
+      ]));
+      const now = Date.now();
+      localStorage.setItem('go5_stock_meta', JSON.stringify([{
+        id: draftId, ts: now, addedAt: now, account: 'acc3', label: '今日のドラフト', title: '今日のドラフト', author: 'test',
+        bskyText: '本文', affiliateUrl: '', workUrl: '', videoName: 'p.mp4', videoId: 'acc3-20261018-0900-past', attrs: {}
+      }]));
+      const wd = new Date(today + 'T12:00:00+09:00').getUTCDay();
+      return { md: y.slice(5).replace('-', '/'), monday: wd === 1 };
+    }, { draftId });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+
+    await page.locator(`.stk-mode[data-id="${draftId}"]`).click();
+    await page.locator('#draftPubSched').check();
+    await page.locator('#draftPickSlot').click();
+    const picker = page.frameLocator('#draftPickerFrame');
+    await expect(picker.locator('.slot .cell[data-acc="acc3"]').first()).toBeVisible();
+    if (info.monday) await picker.getByRole('button', { name: /前週/ }).click();
+    const day = picker.locator('.day').filter({ has: picker.locator('.day-md', { hasText: info.md }) }).first();
+    const note = day.locator('.taken-note');
+    await expect(note).toHaveCount(1);
+    await expect(note).toContainText('投稿済み：昨日の動画(13:07公開)');
+    await expect(note).not.toContainText('#');
+  });
 });

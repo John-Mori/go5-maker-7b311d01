@@ -175,6 +175,7 @@ window.SCH = window.SCH || {};
     root.innerHTML = "";
     root.style.setProperty("--channel-count", String(Math.max(1, chan.ids().length)));
     document.body.classList.toggle("verify-mode", verificationMode);
+    result.taken = takenAssign_(result);   // ピックの「選択済み」を表示範囲の枠へ一度だけ割り当てる
 
     const ds = displayStart();
     const metaByDate = {};
@@ -261,6 +262,52 @@ window.SCH = window.SCH || {};
     return cell;
   }
 
+  // ピックの「選択済み」を枠へ割り当てる(枠id→[{title,at,posted,offAt}])。
+  //   枠IDが一致/同じ日付・時刻/公開時刻が枠の公開予定から10分以内 のどれかなら、その枠に載せる。
+  //   どの枠とも合わない投稿(即時投稿など枠の時刻から外れた分)は、公開日の一番近い枠へ「(HH:MM公開)」つきで載せる。
+  //   過去日も未来日も同じに扱う(Chami 2026-10-18「昨日など過去や未来の情報を保存したものを表示するようにして」)。
+  function takenAssign_(ctx) {
+    const out = {};
+    if (!pickMode || !pickTaken.length) return out;
+    const ids = chan.isShown(pickAcc) ? [pickAcc] : chan.ids();
+    const all = ctx.byAcc[ids[0]] || {};
+    const slots = Object.keys(all).map(function (k) { return all[k]; }).filter(Boolean);
+    const atOf = function (ps) { return ps.scheduled_at ? (Date.parse(String(ps.scheduled_at).replace(" ", "T")) || 0) : 0; };
+    const push = function (id, t, offAt) { (out[id] = out[id] || []).push({ title: t.title, at: t.at || 0, posted: !!t.posted, offAt: offAt || "" }); };
+    pickTaken.forEach(function (t) {
+      if (!t) return;
+      let hit = false;
+      slots.forEach(function (ps) {
+        const psAt = atOf(ps);
+        if ((t.id && t.id === ps.id) || (t.date && t.date === ps.date && t.time && t.time === ps.time) ||
+          (t.at && psAt && Math.abs(t.at - psAt) <= 10 * 60000)) { push(ps.id, t); hit = true; }
+      });
+      if (hit || !(t.at > 0)) return;
+      const day = jstParts_(t.at);
+      let best = null, bestD = Infinity;
+      slots.forEach(function (ps) {
+        if (ps.date !== day.date) return;
+        const d = Math.abs(atOf(ps) - t.at);
+        if (d < bestD) { best = ps; bestD = d; }
+      });
+      if (best) push(best.id, t, day.time);
+    });
+    return out;
+  }
+  function jstParts_(ms) {
+    const p = {};
+    new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+      .formatToParts(new Date(ms)).forEach(function (x) { p[x.type] = x.value; });
+    return { date: p.year + "-" + p.month + "-" + p.day, time: p.hour + ":" + p.minute };
+  }
+  // 題名の後ろのハッシュタグ(#shorts #漫画 …)は出さない(Chami 2026-10-18)。#で始まる題名だけは全部消えないよう原文のまま。
+  function takenTitle_(t) {
+    const r = String(t || "").trim();
+    const i = r.search(/[#＃]/);
+    const head = i < 0 ? r : r.slice(0, i).trim();
+    return head || r || "(題名なし)";
+  }
+
   // その日の枠を重要度で並べ、優先度1〜5を割り当てる（表示順は時刻のまま／1＝その日の本命）
   function assignPriorities(arr) {
     const weight = { "本命": 6, "準本命": 5, "通常": 4, "テスト": 3, "昼補助": 2, "深夜補助": 1 };
@@ -292,21 +339,14 @@ window.SCH = window.SCH || {};
       return chanCell(chan.info(id).short, addMin(base, acctOffAt(config, id, base)), st, id);
     }).join("");
     if (allDone) el.classList.add("cleared"); // 全ch済＝行ごと沈める
-    // ピックモード：他のドラフトが選択済みの枠に題名を出す。枠IDが一致するか、同じ日付・時刻なら同じ枠とみなす。
+    // ピックモード：他のドラフト・投稿済み/予約済みの動画が入っている枠に題名を出す(割り当ては takenAssign_)。
     let takenNote = "";
-    if (pickMode && pickTaken.length) {
-      const ps = (ctx.byAcc[ids[0]] || {})[s1.id] || s1;
-      // 投稿完了済みの予約(履歴行)は枠IDを持たないので、公開時刻が枠の公開予定から10分以内なら同じ枠とみなす。
-      const psAt = ps.scheduled_at ? (Date.parse(String(ps.scheduled_at).replace(" ", "T")) || 0) : 0;
-      const hits = pickTaken.filter(function (t) {
-        return t && ((t.id && t.id === ps.id) || (t.date && t.date === ps.date && t.time && t.time === ps.time) ||
-          (t.at && psAt && Math.abs(t.at - psAt) <= 10 * 60000));
-      });
-      if (hits.length) {
-        el.classList.add("taken");
-        const names = hits.map(function (t) { return String(t.title || "(題名なし)"); }).join(" / ");
-        takenNote = `<span class="taken-note" title="${escapeAttr(names)}">選択済み：${escapeHtml(names)}</span>`;
-      }
+    const hits = (pickMode && ctx.taken) ? (ctx.taken[s1.id] || []) : [];
+    if (hits.length) {
+      el.classList.add("taken");
+      const posted = hits.every(function (h) { return h.posted && h.at && h.at <= Date.now(); });
+      const names = hits.map(function (h) { return takenTitle_(h.title) + (h.offAt ? "(" + h.offAt + "公開)" : ""); }).join(" / ");
+      takenNote = `<span class="taken-note" title="${escapeAttr(names)}">${posted ? "投稿済み" : "選択済み"}：${escapeHtml(names)}</span>`;
     }
     el.innerHTML =
       `<span class="bar"></span>` +

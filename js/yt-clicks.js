@@ -3486,18 +3486,19 @@
     });
     return out;
   }
-  // 公開枠ピッカーの「選択済み」用:投稿完了でドラフトから外れた予約投稿の公開時刻(これから先の分)を返す。
+  // 公開枠ピッカーの「選択済み」用:投稿完了でドラフトから外れた投稿の公開時刻を返す。
+  //   過去日もピッカーで見返せるよう、これから先だけでなく直近120日ぶんを渡す(Chami 2026-10-18「昨日など過去や未来の情報を」)。
   //   新しい投稿完了は verify_manual へ、古い行は short_hist(manualOnly除く)にいる。
   //   時刻は YouTube の公開予定/手動時刻(historyPostTime_)を優先し、無ければ投稿完了時の予約時刻(plannedAt)。
   function takenSlotsFor_(acc) {
-    var ymap = loadYtMapFor_(acc), from = Date.now() - 6 * 3600000, out = [];
+    var ymap = loadYtMapFor_(acc), from = Date.now() - 120 * 86400000, out = [];
     var rows = loadArrFor_('verify_manual', acc).concat(loadArrFor_('short_hist', acc).filter(function (it) { return it && !it.manualOnly; }));
     rows.forEach(function (it) {
       if (!it) return;
       var ms = historyPostTime_(it, ymap).ms;
       if (!(ms > 0) && it.plannedAt) ms = Date.parse(String(it.plannedAt).replace(' ', 'T')) || 0;
       if (!(ms >= from)) return;
-      out.push({ at: ms, videoId: it.videoId || '', title: it.ytTitlePlan || it.title || '' });
+      out.push({ at: ms, videoId: it.videoId || '', title: titleCache[ytIdOf(itemYt_(ymap, it) || it.ytUrl || '')] || it.ytTitlePlan || it.title || '' });
     });
     return out;
   }
