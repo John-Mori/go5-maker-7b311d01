@@ -2701,7 +2701,8 @@
         '</div>' +
         (tagsHtml ? '<div class="vrow-tags">' + tagsHtml + '</div>' : '') +
         '<div class="vmetrics">' +
-          '<span title="YouTube再生数">▶ ' + (views != null ? num(views) : (vid ? '…' : '–')) + '</span>' +
+          // 投稿予定(予定時刻がまだ)は再生数が出ないので「…」(取得中)ではなく「予」(Chami msg 1561152543743021070)
+          '<span title="YouTube再生数">▶ ' + (stillScheduled ? '<span class="vviews-sched" title="投稿予定">予</span>' : (views != null ? num(views) : (vid ? '…' : '–'))) + '</span>' +
           '<span title="Bsky投稿クリック数(YT→投稿・導線1)' + (it.rebuildBaseClicks != null ? '(総合値。カッコ内＝リビルド前の動画までのクリック数)' : '') + '"><img class="emico" src="assets/icons/ic-link.png" alt="クリック"> ' + (clicksTotal != null ? num(clicksTotal) : (code ? '…' : '–')) +
             (it.rebuildBaseClicks != null ? ' <span class="vclicks-base">(' + num(it.rebuildBaseClicks) + ')</span>' : '') + '</span>' +
           ((wcode || it.workShortUrl) ? '<span title="作品リンククリック数(投稿→FANZA・導線2)。計測URLを入れると投稿前でも0で表示。数値は短縮URL(r2)確定後に集計"><img class="emico emico-cursor" src="assets/icons/ic-cursor-pink.png" alt="作品クリック"> ' + (wclicks != null ? num(wclicks) : (wcode ? '…' : '0')) + '</span>' : '') +
