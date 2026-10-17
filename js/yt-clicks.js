@@ -1167,8 +1167,17 @@
     var vid = ytIdOf(itemYt_(ymap, it) || it.ytUrl || '');
     return vid ? ('yt:' + vid) : ('row:' + (it.account || acct()) + ':' + itemKey(it));
   }
+  // ★読むだけの経路は、保存文字列が同じ間は解析結果を使い回す。履歴の並べ替えやカレンダーで項目ごとに
+  //   同じ大きなJSONを解析し直し、iPhoneで画面が固まっていた(Chami msg 1561055385383862336)。書き換え経路は従来どおり毎回読む。
+  var _postTimesRaw = null, _postTimesParsed = {};
+  function readHistoryPostTimes_() {
+    var raw = null;
+    try { raw = localStorage.getItem(HIST_POST_TIME_KEY); } catch (e) { return {}; }
+    if (raw !== _postTimesRaw) { _postTimesRaw = raw; _postTimesParsed = loadHistoryPostTimes_(); }
+    return _postTimesParsed;
+  }
   function historyPostTime_(it, ymap) {
-    var key = historyTimeKey_(it, ymap), rec = loadHistoryPostTimes_()[key] || {};
+    var key = historyTimeKey_(it, ymap), rec = readHistoryPostTimes_()[key] || {};
     // 手動の日時変更は廃止(Chami 2026-10-17 msg 1560865357139542176「日時変更というの、いらない」)。
     //   過去に入れた manualMs は同期データに残すが表示には使わない=常にYouTubeの公開時刻へ追従する。
     var manual = false;

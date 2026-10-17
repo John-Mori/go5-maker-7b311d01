@@ -1122,7 +1122,10 @@
     });
   }
   // ④コメントは textarea 化＝入力中(改行含む)も即プレビュー反映。(2行モードの改行が2行目に出るのを確認しやすく)
-  els.top.addEventListener("input", preview);
+  // ★1キーごとに1080×1920を描き直すとiPhoneで詰まる→同じフレーム内の連打は1回の描画へ合流(描く中身は同じ)
+  let previewRaf_ = 0;
+  const previewSoon_ = () => { if (previewRaf_) return; previewRaf_ = requestAnimationFrame(() => { previewRaf_ = 0; preview(); }); };
+  els.top.addEventListener("input", previewSoon_);
 
   // ①作者の「2行モード」チェックボックス(コメントと同仕様)：保存値を復元し、切替でプレビュー再描画。
   const authorTwoLineEl = document.getElementById("authorTwoLine");
@@ -1137,7 +1140,7 @@
     });
   }
   // 作者も textarea 化＝入力中(改行含む)も即プレビュー反映。
-  els.author.addEventListener("input", preview);
+  els.author.addEventListener("input", previewSoon_);
 
   // 入力テキストを即localStorageへ退避(iOS Safariがタブを破棄→戻ると勝手にリロードされ、
   // 従来は作者名/誘導文/④コメントが消えていた=「ヒヤッとする」の正体)。前景写真の退避と対で「戻っても消えない」を作る。
@@ -1288,6 +1291,8 @@
         stopTimer = setTimeout(() => reject(new Error("動画書き出しの完了応答がありません。もう一度お試しください。")), 12000);
       });
       try { await Promise.race([stopped, stopTimeout]); } finally { if (stopTimer) clearTimeout(stopTimer); }
+      // ★録画が終わったらキャンバスの録画トラックを止める。止めないと作るたびに1080×1920の生きたトラックが残りiPhoneのメモリを食う
+      try { stream.getTracks().forEach((t) => t.stop()); } catch (e) {}
       if (stopError) throw stopError;
       if (runId !== _makeRunSeq) throw new Error("古い作成処理の完了を破棄しました。もう一度お試しください。");
 
@@ -1308,7 +1313,10 @@
       lastName = sanitize(titleForBurn(els.top.value)) + "." + ext;
 
       const url = URL.createObjectURL(lastBlob);
+      // 前回の完成動画のURLは新しいものへ差し替える時に手放す(作るたびに数MBが残り続けていた)
+      const prevResultUrl = els.result.getAttribute("src") || "";
       els.result.src = url;
+      if (prevResultUrl.indexOf("blob:") === 0 && els.dl.getAttribute("href") === prevResultUrl) { try { URL.revokeObjectURL(prevResultUrl); } catch (e) {} }
       els.dl.href = url; els.dl.download = lastName;
       // ★ドラフト作成時は動画作成タブに結果(プレビュー＋動画DL)を出さない(Chami依頼2026-08-13)。
       //   ドラフトタブ内で動画をDLできるので動画作成タブ側の導線は不要＝生成後はドラフトタブへ自動遷移する(stock.js)。

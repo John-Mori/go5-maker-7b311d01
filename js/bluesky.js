@@ -1293,8 +1293,9 @@
     h = h.replace(/(^|\s)(#[^\s#<]+)/g, '$1<span class="lnk">$2</span>');     // ハッシュタグ
     return h;
   }
+  var graphemeSeg_ = null; // 毎キー作り直さず使い回す
   function countGraphemes(s) {
-    try { if (typeof Intl !== 'undefined' && Intl.Segmenter) { var seg = new Intl.Segmenter('ja', { granularity: 'grapheme' }); var n = 0, it = seg.segment(s)[Symbol.iterator](); while (!it.next().done) n++; return n; } } catch (e) {}
+    try { if (typeof Intl !== 'undefined' && Intl.Segmenter) { var seg = graphemeSeg_ || (graphemeSeg_ = new Intl.Segmenter('ja', { granularity: 'grapheme' })); var n = 0, it = seg.segment(s)[Symbol.iterator](); while (!it.next().done) n++; return n; } } catch (e) {}
     return Array.from(s).length;
   }
   function photoFile() { var p = $('photo'), f = p && p.files && p.files[0]; return f || (window.Go5ForegroundFile && window.Go5ForegroundFile()) || null; }
@@ -1485,14 +1486,23 @@
   }
 
   // ---- プレビュー画像(単独=選択画像／無ければ動画の元写真／無ければ自動添付の注記) ----
+  // ★同じ写真なら作り直さない。1文字打つたびに元写真(12MP級)を再デコードしてiPhoneのタブが落ちていた(Chami msg 1561055385383862336)
+  var lastImgFile = null;
   function showPreviewImage(file) {
+    if (file === lastImgFile && lastImgUrl && els.pvImg.getAttribute('src') === lastImgUrl) {
+      els.pvImgWrap.style.display = 'block';
+      if (els.pvImgNote) els.pvImgNote.style.display = 'none';
+      return;
+    }
     if (lastImgUrl) { try { URL.revokeObjectURL(lastImgUrl); } catch (e) {} }
-    lastImgUrl = URL.createObjectURL(file);
+    lastImgUrl = URL.createObjectURL(file); lastImgFile = file;
     els.pvImg.src = lastImgUrl; els.pvImgWrap.style.display = 'block';
     if (els.pvImgNote) els.pvImgNote.style.display = 'none';
   }
   function hidePreviewImage() {
     els.pvImgWrap.style.display = 'none'; els.pvImg.removeAttribute('src');
+    if (lastImgUrl) { try { URL.revokeObjectURL(lastImgUrl); } catch (e) {} }
+    lastImgUrl = ''; lastImgFile = null;
     if (els.pvImgNote) els.pvImgNote.style.display = 'block';
   }
 

@@ -1189,7 +1189,7 @@
   var _candidateHydrateInFlight = false;
   var _candidateHydrateRetryTimer = null;
   var _candidateHydrateFailures = 0;
-  var _syncRehydrateRetryTimer = null;
+  var _syncRehydrateRetryTimer = null, _syncRehydrateFails = 0;
   // 投稿履歴画像(post:/used:)の展開状態は prefix 別に持つ(_histInFlight/_histRetryTimer/_histFails=hydrateHistPrefix_ 近傍で宣言)。
   //   ★旧: post:/used: を1束で読み1つのフラグで守っていた=空の post: の巻き添えで used: を捨てていた(2026-08-23 実機ダンプで判明・修正)。
   // 展開成功/回復のたびに失敗回数をゼロへ戻す。
@@ -2442,7 +2442,15 @@
   }
   // 背景(オートsync・画像ハイドレート)由来の再描画。候補タブ表示中のみ・入力中は保留。
   var _bgRetryTimer = null;
+  // ★同期1回で pulledCand・画像の再読込・画像到着の合図が続けて来ると、そのたびに全カード(画像込み)を
+  //   作り直してiPhoneのタブが落ちていた(Chami msg 1561055385383862336)。続けて来た要求は1回の描画へまとめる。
+  //   描くのは最後の状態なので仕上がりは同じ。
+  var _bgRenderTimer = null;
   function bgRender_() {
+    if (_bgRenderTimer) return;
+    _bgRenderTimer = setTimeout(function () { _bgRenderTimer = null; bgRenderNow_(); }, 60);
+  }
+  function bgRenderNow_() {
     try {
       var pc = document.getElementById('pageCand');
       if (!pc || pc.hidden) return;
@@ -2520,17 +2528,19 @@
         clearTimeout(_syncRehydrateRetryTimer);
         _syncRehydrateRetryTimer = null;
       }
-      if (!result.failed.length) resetCandidateHydrateFailures_();
+      if (!result.failed.length) { resetCandidateHydrateFailures_(); _syncRehydrateFails = 0; }
       if (!_candidateHydrated && result.refComplete) markCandidateHydrated_();
       bgRender_();   // 入力中は保留(打ちかけの候補入力を消さない)
       if (result.failed.length) throw new Error('partial-image-read-failed');
     }).catch(function (e) {
       try { console.warn('[go5 idb] 同期画像の再読込を再試行します', e); } catch (_) {}
+      // 読めない状態が続く時は間隔を広げる(1.5秒→最長60秒)。1.5秒ごとに全画像を読み直すとメモリが尽きる。
       if (!_syncRehydrateRetryTimer) {
+        var waitMs = Math.min(60000, 1500 * Math.pow(2, Math.min(_syncRehydrateFails++, 6)));
         _syncRehydrateRetryTimer = setTimeout(function () {
           _syncRehydrateRetryTimer = null;
           reHydrateFromSync_();
-        }, 1500);
+        }, waitMs);
       }
     });
   }
@@ -6698,7 +6708,8 @@
     document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') retryVisibleHistoryImages_(true); });
     // Safariが背景中にtimerを間引いても、投稿履歴を表示している間は30秒ごとに可視作品を再武装する。
     // 失敗回数は保持するため、3回目以降は低頻度のまま。ページ再読込・移動は不要。
-    setInterval(function () { retryVisibleHistoryImages_(true); }, 30000);
+    // 裏に回っている間は走らせない(戻った時は上の visibilitychange で即再武装する)
+    setInterval(function () { if (document.hidden) return; retryVisibleHistoryImages_(true); }, 30000);
   } catch (e) {}
   // IDBが使えない/展開が走らない端末でも、LSに積もった退避画像をR2へ逃がす解毒を一度は必ず動かす(冪等・非破壊)。
   try { setTimeout(function () { try { hydrateR2Refs_(); } catch (e) {} }, 2500); } catch (e) {}

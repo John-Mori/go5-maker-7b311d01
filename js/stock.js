@@ -731,11 +731,13 @@
       var finish = function (b) {
         if (done) return; done = true;
         clearTimeout(timer);
+        // 使い終わった一時videoのデコーダを手放す(iPhoneはsrcを残すと動画1本分のメモリを握り続ける)
+        try { v.onloadeddata = v.onseeked = v.onerror = null; v.removeAttribute('src'); v.load(); } catch (e3) {}
         try { URL.revokeObjectURL(url); } catch (e2) {}
         resolve(b || null);
       };
-      timer = setTimeout(function () { finish(null); }, 8000);
       var v = document.createElement('video');
+      timer = setTimeout(function () { finish(null); }, 8000);
       v.muted = true; v.playsInline = true; v.preload = 'auto';
       var capture_ = function () {
         try {
@@ -743,7 +745,7 @@
           c.width = v.videoWidth || 1080; c.height = v.videoHeight || 1920;
           if (!c.width || !c.height) { finish(null); return; }
           c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
-          c.toBlob(function (b) { finish(b); }, 'image/jpeg', 0.85);
+          c.toBlob(function (b) { try { c.width = c.height = 0; } catch (e4) {} finish(b); }, 'image/jpeg', 0.85);
         } catch (e) { finish(null); }
       };
       var seekEnd_ = function () {
