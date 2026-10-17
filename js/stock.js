@@ -3184,9 +3184,9 @@
     return (meta && meta.bskyText) || '';
   }
 
-  // 子の文(draftXText)の手直しを、そのchの投稿本文(bsky_text__accN)へ書き戻す
-  //   (Chami msg 1561144626054955010「新しくドラフトで動画作ると元に戻る。戻らないようにして」)。
-  //   子の文は開くたびに本文から作り直すため、欄だけ直しても次のドラフトで元の文に戻っていた。
+  // 子の文(draftXText)の正は、そのchの投稿本文(bsky_text__accN)だけ
+  //   (Chami msg 1561150497170399334「ドラフトの子の文はここの投稿本文を参照して」)。
+  //   v1055の「子の文の手直しを投稿本文へ書き戻す」は逆向きで、投稿本文(テンプレ帳の反映)を子の文で上書きしていたため外した。
   //   _xBase=いま欄に出している文(sys)と、その元の本文(master)。プログラムで欄を書く時は setXSys_ を通す。
   var _xBase = { id: '', master: '', sys: '' };
   var _xFresh = { id: '', info: null }; // 投稿モードで取り直した作品情報(2行目の新作/話題作用)
@@ -3205,22 +3205,14 @@
     if (master != null || _xBase.id !== meta.id) _xBase = { id: meta.id, master: master != null ? master : masterBody_(meta), sys: v };
     else _xBase.sys = v;
   }
-  function writeBackChildText_() {
-    var meta = _modalMeta, el = $('draftXText'), core = window.Go5MovieAttrsCore;
-    if (!meta || !el || _xBase.id !== meta.id || !core || !core.childEditToMaster) return;
-    var nm = core.childEditToMaster(_xBase.master, _xBase.sys, el.value);
-    if (nm == null || !nm.trim()) return;
-    var changed = nm !== _xBase.master;
-    _xBase.master = nm; _xBase.sys = el.value;
-    if (!changed) return;
-    var acc = meta.account || (window.Go5Acct && Go5Acct.current && Go5Acct.current()) || 'acc1';
-    try { localStorage.setItem((window.Go5Acct && Go5Acct.key) ? Go5Acct.key('bsky_text', acc) : ('bsky_text__' + acc), nm); } catch (e) {}
-    try {
-      // 同じchの投稿タブ欄(Stock.htmlでは非表示ホスト)も揃える=古い欄の値で本文を上書きし戻さない。
-      var cur = (window.Go5Acct && Go5Acct.current && Go5Acct.current()) || 'acc1', b = $('bskyText');
-      if (b && cur === acc && b.value !== nm) { b.value = nm; b.dispatchEvent(new Event('input', { bubbles: true })); }
-    } catch (e) {}
-    kickSync_();
+  // 投稿本文が変わったら(同期で届いた/別タブで直した/テンプレ帳を反映した)、開いている子の文も作り直す。
+  //   その場で手直し中(欄が自動で出した文と違う)なら触らない=打っている文を消さない。
+  function followMaster_() {
+    var meta = _modalMeta, el = $('draftXText'), m = $('draftPostModal');
+    if (!meta || !el || (m && m.style.display === 'none') || _xBase.id !== meta.id) return;
+    if (el.value !== _xBase.sys) return;
+    if (masterBody_(meta) === _xBase.master) return;
+    recomposeChild_(meta);
   }
 
   // 販促テンプレの解決に必要な値(タグ種別/割引率/実価格)を、手元のキャッシュだけで集める(ネット不使用)。
@@ -3751,7 +3743,7 @@
       '</div>';
     document.body.appendChild(m);
 
-    $('draftXText').addEventListener('input', function () { writeBackChildText_(); saveDraftPost_(); });
+    $('draftXText').addEventListener('input', saveDraftPost_);
     $('draftYtTagsInput').addEventListener('input', function () {
       buildModalYtTitle_();
       try { localStorage.setItem('yt_tags_shared', this.value); } catch (e) {}
@@ -3881,6 +3873,10 @@
         if ($('draftXText')) recomposeChild_(_modalMeta);
       }
     });
+    // 投稿本文(bsky_text__accN)が変わったら子の文も追従する(Chami msg 1561150497170399334)。
+    document.addEventListener('go5-synced', function (e) { if (e && e.detail && e.detail.pulled) followMaster_(); });
+    document.addEventListener('go5-body-changed', followMaster_);
+    window.addEventListener('storage', function (e) { if (!e.key || /^bsky_text(_|$)/.test(e.key)) followMaster_(); });
     m.addEventListener('click', function (e) { if (e.target === m) { closeModal_(); } });
     return m;
   }
