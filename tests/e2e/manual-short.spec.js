@@ -110,6 +110,35 @@ test.describe('単体短縮リンク発行', () => {
     expect(legacyCalls).toBe(0);
   });
 
+  // 2026-10-17 X投稿URLをアフィ包み(al.fanza?lurl=x.com)で短縮した6本がFANZAの400で行き止まりだった。
+  //   アフィにチェックが入ったままでもDMM/FANZA以外は包まず、そのURLのまま短縮して止めない。
+  test('X投稿URLはアフィにチェックがあっても包まずに短縮する', async ({ page }) => {
+    const xUrl = 'https://x.com/healingbooks_/status/2110751884915147239?s=46';
+    const saved = [];
+    await page.addInitScript(() => {
+      localStorage.setItem('current_account', 'acc3');
+      localStorage.setItem('fanza_af_id', 'test-affiliate-990');
+    });
+    await page.route('https://xdgh3.com/api/shorten', async (route) => {
+      const destination = new URLSearchParams(route.request().postData() || '').get('url') || '';
+      // 画面が自動で出すキャンペーン短縮は数えない(手入力のX投稿URLの分だけ)。
+      if (destination.includes('healingbooks_')) saved.push(destination);
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ short: 'https://xdgh3.com/x-post', url: destination }),
+      });
+    });
+    await page.goto('index.html', { waitUntil: 'domcontentloaded' });
+    await page.locator('#tabAffi').click();
+    await expect(page.locator('#manualAffiliateOn')).toBeChecked();
+    await page.locator('#manualUrl').fill(xUrl);
+    await page.locator('#manualShortBtn').click();
+    await expect(page.locator('#manualOut')).toHaveText('https://xdgh3.com/x-post');
+    await expect(page.locator('#manualAffStatus')).toContainText('DMM/FANZA以外');
+    expect(saved).toEqual([xUrl]);
+  });
+
   test('アフィIDが無い場合は誤った短縮リンクを発行しない', async ({ page }) => {
     let calls = 0;
     await page.addInitScript(() => localStorage.setItem('current_account', 'acc1'));

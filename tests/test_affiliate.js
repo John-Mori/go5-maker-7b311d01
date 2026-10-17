@@ -237,6 +237,12 @@ test('L-3: 他人のアフィリンク(al.fanza lurl包み) → 素URLを取り�
   assert.ok(!r.link.includes('SOMEONE_ELSE'), 'must not retain the other affiliate id');
   assert.strictEqual(r.clean, 'https://www.dmm.co.jp/dc/doujin/-/list/=/article=campaign/id=317274/');
 });
+test('L-5: 一覧ラッパもDMM/FANZA以外は包まない(x.com → not_fanza)', function () {
+  const r = buildFanzaListLink('https://x.com/healingbooks_/status/2110751884915147239?s=46', 'af001');
+  assert.strictEqual(r.ok, false, 'x.com を lurl へ入れてはいけない: ' + (r.link || ''));
+  assert.strictEqual(r.error, 'not_fanza');
+  assert.strictEqual(buildAffiliateLink('https://example.com/item?cid=d_1', 'af001').ok, false, 'cid= があっても他サイトは包まない');
+});
 test('L-4: 非URL → {ok:false, error:bad_url}', function () {
   assert.strictEqual(buildFanzaListLink('not a url', 'af001').error, 'bad_url');
   assert.strictEqual(buildFanzaListLink('', 'af001').error, 'empty');

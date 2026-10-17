@@ -2248,6 +2248,8 @@
     var state = window.classifyPromoUrl(url, shortHostList_());
     if (state.isShortened) return Promise.resolve({ ok: true, link: url, changed: false }); // 既に短縮済み→そのまま
     var built = window.ensureAffiliateLink(url, curAfId_());
+    // DMM/FANZA以外は包まず短縮だけ(包むと400で行き止まり)。
+    if (!built.ok && built.error === 'not_fanza') built = { ok: true, link: url };
     if (!built.ok) return Promise.resolve({ ok: false, error: built.error });
     return makeShortAndShare(built.link).then(function (r) {
       var link = (r && (r.shareUrl || r.shortUrl)) || built.link;
@@ -2600,7 +2602,14 @@
     var url = String(rawUrl || '').trim();
     account = account || acctId();
     if (!/^https?:\/\//.test(url)) return Promise.resolve({ issued: false, tried: false, url: '', out: 'URLは http:// か https:// で始めてください', aff: '', affMsg: '' });
-    var targetUrl = url, afId = curAfId_();
+    var targetUrl = url, afId = curAfId_(), notFanza = false;
+    // DMM/FANZA・DLsite以外(X/Blueskyの投稿URL等)はアフィで包むとFANZAが400を返して行き止まりになる。
+    //   止めずに、包まない短縮へ切り替えて「なぜ包まなかったか」を表示する(2026-10-17 分析部門の依頼)。
+    if (useAffiliate && typeof window.isFanzaHostUrl === 'function') {
+      var inner_ = (typeof window.normalizeWorkUrl === 'function' && window.normalizeWorkUrl(url)) || url;
+      var dl_ = typeof window.isDlsiteUrl === 'function' && window.isDlsiteUrl(inner_);
+      if (!dl_ && !window.isFanzaHostUrl(inner_)) { useAffiliate = false; notFanza = true; }
+    }
     if (useAffiliate) {
       if (typeof window.ensureAffiliateLink !== 'function' || typeof window.hasRealAffiliateId !== 'function') {
         return Promise.resolve({ issued: false, tried: false, url: '', out: 'アフィリンク機能を読み込めませんでした。再読み込み後にお試しください', aff: 'ng', affMsg: 'アフィリンクNG' });
@@ -2618,7 +2627,7 @@
     if (!expectedBase) {
       if (useAffiliate) rememberManualAffiliateShort_(account, targetUrl, targetUrl);
       return Promise.resolve({ issued: true, tried: true, raw: true, url: targetUrl, out: targetUrl, dest: targetUrl,
-        aff: useAffiliate ? 'ok' : 'off', affMsg: useAffiliate ? 'アフィリンクOK・短縮なし' : 'アフィリンクなし・短縮なし(元URL)' });
+        aff: useAffiliate ? 'ok' : 'off', affMsg: useAffiliate ? 'アフィリンクOK・短縮なし' : (notFanza ? NOT_FANZA_MSG_ + '・短縮なし' : 'アフィリンクなし・短縮なし(元URL)') });
     }
     return makeShortAndShare(targetUrl, { account: account }).then(function (res) {
       var s = (res && (res.shareUrl || res.shortUrl)) || '';
@@ -2632,12 +2641,13 @@
       if (useAffiliate && issued) rememberManualAffiliateShort_(account, s, destination);
       return { issued: issued, tried: true, url: issued ? s : '', dest: destination,
         out: issued ? s : (domainOk && useAffiliate ? '短縮先のアフィリンクを確認できませんでした。発行し直してください' : '短縮リンクを発行できませんでした。通信後にもう一度お試しください'),
-        aff: useAffiliate ? (issued ? 'ok' : 'ng') : 'off', affMsg: useAffiliate ? (issued ? 'アフィリンクOK' : 'アフィリンクNG') : 'アフィリンクなし(チェックOFF)' };
+        aff: useAffiliate ? (issued ? 'ok' : 'ng') : 'off', affMsg: useAffiliate ? (issued ? 'アフィリンクOK' : 'アフィリンクNG') : (notFanza ? NOT_FANZA_MSG_ : 'アフィリンクなし(チェックOFF)') };
     }).catch(function () {
       return { issued: false, tried: true, url: '', out: '短縮リンクを発行できませんでした。通信後にもう一度お試しください',
-        aff: useAffiliate ? 'ng' : 'off', affMsg: useAffiliate ? 'アフィリンクNG' : 'アフィリンクなし(チェックOFF)' };
+        aff: useAffiliate ? 'ng' : 'off', affMsg: useAffiliate ? 'アフィリンクNG' : (notFanza ? NOT_FANZA_MSG_ : 'アフィリンクなし(チェックOFF)') };
     });
   }
+  var NOT_FANZA_MSG_ = 'DMM/FANZA以外のURLなのでアフィで包まずに短縮';
   try { window.Go5IssueAffShort = issueAffShort_; } catch (e) {}
   if (els.manualShortBtn) els.manualShortBtn.addEventListener('click', function () {
     var useAffiliate = !els.manualAffiliateOn || !!els.manualAffiliateOn.checked;

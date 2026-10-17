@@ -5,6 +5,18 @@
  */
 
 /**
+ * DMM/FANZAのURLか(ホスト名で判定)。al.fanza の lurl へ他サイト(x.com / bsky.app 等)を入れると
+ * FANZA側が 400 Bad Request を返して行き止まりになる(2026-10-17実測・短縮6本29クリックが届かなかった)。
+ * @param {string} rawUrl
+ * @returns {boolean}
+ */
+function isFanzaHostUrl(rawUrl) {
+  const u = (rawUrl || '').trim();
+  if (!u) return false;
+  try { return /(^|\.)(?:dmm|fanza)\.(?:co\.jp|com)$/i.test(new URL(u).hostname); } catch (e) { return false; }
+}
+
+/**
  * @param {string} rawUrl  - 作品URL(計測パラメータ付きでも可)
  * @param {string} afId    - アフィリエイトID(空の場合は【アフィID】で構造プレビュー)
  * @returns {{ ok: true, cid: string, link: string }
@@ -34,6 +46,7 @@ function buildAffiliateLink(rawUrl, afId) {
 
   let clean = raw.split('?')[0].trim();
   if (!/^https?:\/\//i.test(clean)) return { ok: false, error: 'bad_url' };
+  if (!isFanzaHostUrl(clean)) return { ok: false, error: 'not_fanza' };
   if (!clean.endsWith('/')) clean += '/';
   const lurl = encodeURIComponent(clean);
   const af = (afId && afId.trim()) ? afId.trim() : '【アフィID】';
@@ -54,6 +67,7 @@ function buildFanzaListLink(rawUrl, afId) {
   if (!raw) return { ok: false, error: 'empty' };
   let clean = normalizeWorkUrl(raw); // utm等を除去(?/#以降を落とす)
   if (!clean) return { ok: false, error: 'bad_url' };
+  if (!isFanzaHostUrl(clean)) return { ok: false, error: 'not_fanza' }; // X/Bluesky等を包むと400で行き止まり
   if (!clean.endsWith('/')) clean += '/';
   const lurl = encodeURIComponent(clean);
   const af = (afId && afId.trim()) ? afId.trim() : '【アフィID】';
@@ -204,6 +218,9 @@ function ensureAffiliateLink(rawUrl, afId) {
     if (rd.ok) return { ok: true, link: rd.link, wasAlready: false };
     return { ok: false, error: rd.error };
   }
+  // DMM/FANZA以外(x.com / bsky.app 等)は包まない。既に包まれた物も中身が他サイトなら行き止まりなので通さない。
+  const inner = normalizeWorkUrl(url);
+  if (inner && !isFanzaHostUrl(inner)) return { ok: false, error: 'not_fanza' };
   if (hasRealAffiliateId(url)) return { ok: true, link: url, wasAlready: true };
   const r1 = buildAffiliateLink(url, afId);
   if (r1.ok) return { ok: true, link: r1.link, wasAlready: false };
@@ -233,6 +250,7 @@ if (typeof window !== 'undefined') {
   window.buildFanzaListLink = buildFanzaListLink;
   window.buildDlsiteAffiliateLink = buildDlsiteAffiliateLink;
   window.isDlsiteUrl = isDlsiteUrl;
+  window.isFanzaHostUrl = isFanzaHostUrl;
   window.hasRealAffiliateIdDlsite = hasRealAffiliateIdDlsite;
   window.buildAnyAffiliateLink = buildAnyAffiliateLink;
   window.normalizeWorkUrl = normalizeWorkUrl;
@@ -245,7 +263,7 @@ if (typeof window !== 'undefined') {
 // Node.js(CommonJS)向けエクスポート
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
-    buildAffiliateLink, buildFanzaListLink, buildDlsiteAffiliateLink, isDlsiteUrl,
+    buildAffiliateLink, buildFanzaListLink, buildDlsiteAffiliateLink, isDlsiteUrl, isFanzaHostUrl,
     hasRealAffiliateIdDlsite, buildAnyAffiliateLink,
     normalizeWorkUrl, isShortenedUrl, hasRealAffiliateId, classifyPromoUrl, ensureAffiliateLink
   };

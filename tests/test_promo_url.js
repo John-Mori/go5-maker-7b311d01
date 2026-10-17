@@ -120,6 +120,23 @@ test('E-5: 非URL(cidも無い) → 失敗', function () {
   const r = ensureAffiliateLink('not a url', 'af001');
   assert.strictEqual(r.ok, false);
 });
+test('E-6: DMM/FANZA以外(X/Bluesky投稿URL)はアフィで包まない(包むとFANZAが400で行き止まり・2026-10-17)', function () {
+  for (const u of [
+    'https://x.com/healingbooks_/status/2110751884915147239?s=46',
+    'https://bsky.app/profile/books-healing.bsky.social/post/3abc',
+    'https://www.youtube.com/shorts/abcdefg',
+  ]) {
+    const r = ensureAffiliateLink(u, 'supww138-001');
+    assert.strictEqual(r.ok, false, '包まれてはいけない: ' + u + ' → ' + (r.link || ''));
+    assert.strictEqual(r.error, 'not_fanza');
+  }
+  // 既にal.fanzaで包まれていても、中身が他サイトなら行き止まりなので通さない
+  const wrapped = 'https://al.fanza.co.jp/?lurl=' + encodeURIComponent('https://x.com/healingbooks_/status/2110751884915147239/') + '&af_id=supww138-001&ch=toolbar&ch_id=link';
+  assert.strictEqual(ensureAffiliateLink(wrapped, 'supww138-001').ok, false);
+  // DMM/FANZAはこれまでどおり包む
+  assert.strictEqual(ensureAffiliateLink('https://book.dmm.com/product/4148691/', 'af001').ok, true);
+  assert.strictEqual(ensureAffiliateLink('https://www.dmm.co.jp/dc/doujin/-/list/=/article=campaign/id=317274/', 'af001').ok, true);
+});
 
 // ────────────────────────────────────────────────────────────
 // buildDiscountCacheKey（依頼3: 恒久対策＝ドメインが変われば別キー）
