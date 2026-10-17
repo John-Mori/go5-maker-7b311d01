@@ -1009,8 +1009,24 @@
   }
 
   // ---- UI: セール案内URL一覧(選択・追加・削除)の描画・配線 ----
+  // 同じURLが2件以上あれば1件へ畳み、捨てた側へ墓標を打って全端末から消す(Chami msg 1561077224172429414
+  //   「セールが同じやつ二つ被ってるから片方消して」)。どの端末でも同じ側が残る(BlueskyCore.dedupeDiscUrls)。
+  function discDedupe_() {
+    if (!(window.BlueskyCore && window.BlueskyCore.dedupeDiscUrls)) return;
+    var r = window.BlueskyCore.dedupeDiscUrls(discUrlsLoad_(), discSelectedId_());
+    if (!r.dropIds.length) return;
+    try { localStorage.setItem(discUrlsKey_(), JSON.stringify(r.list.slice(0, 50))); } catch (e) {}
+    try {
+      var m = JSON.parse(localStorage.getItem(discDelKey_()) || '{}') || {}, now = new Date().getTime();
+      r.dropIds.forEach(function (id) { m[id] = now; });
+      localStorage.setItem(discDelKey_(), JSON.stringify(m));
+    } catch (e) {}
+    if (r.sel !== discSelectedId_()) { try { localStorage.setItem(discSelKey_(), r.sel || ''); } catch (e) {} }
+    discKickSync_();
+  }
   function renderDiscUrlList_() {
     var wrap = $('discUrlList'); if (!wrap) return;
+    discDedupe_();
     var arr = discUrlsLoad_(), cur = discCurrentEntry_(), sel = cur ? cur.id : '';
     if (!arr.length) { wrap.innerHTML = '<div class="hint">(未登録。下に名前とURLを入れると、ここに○付きで出ます)</div>'; return; }
     wrap.innerHTML = arr.map(function (e) {
@@ -1082,8 +1098,22 @@
       var name = ((nameEl && nameEl.value) || '').trim();
       var url = ((urlEl && urlEl.value) || '').trim();
       if (auto && !(name && /^https?:\/\//.test(url))) return;
+      if (!name && !url) return; // 欄を離れた時点で自動追加済み=続く＋追加タップで結果の案内を上書きしない
       if (!/^https?:\/\//.test(url)) { if (hint) hint.textContent = 'URLは http:// か https:// で始めてください。'; return; }
       var arr = discUrlsLoad_();
+      // 同じURLが既に一覧にあれば増やさず、それを選ぶだけにする(重複の入口を塞ぐ)
+      var norm = function (u) { return String(u || '').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, ''); }, dup = null;
+      arr.forEach(function (x) { if (!dup && x && norm(x.url) === norm(url)) dup = x; });
+      if (dup) {
+        discSetSelectedId_(dup.id);
+        if (nameEl) nameEl.value = ''; if (urlEl) urlEl.value = '';
+        if (hint) hint.textContent = '同じURLの「' + (dup.name || '(無題)') + '」が登録済みなので、それを選びました。';
+        renderDiscUrlList_();
+        renderPreview();
+        if (els.pcModal && !els.pcModal.hidden) recomposePcText_();
+        document.dispatchEvent(new CustomEvent('go5-disc-url-changed'));
+        return;
+      }
       var entry = { id: 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: name || ('セールURL' + (arr.length + 1)), url: url, at: Date.now() };
       arr.unshift(entry); discUrlsSave_(arr);
       discSetSelectedId_(entry.id); // 追加したものをそのまま選択(=次回もこれを使う)

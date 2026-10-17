@@ -10,7 +10,7 @@
 'use strict';
 
 const assert = require('assert');
-const { buildBlueskyPost, detectFacets, stripAutoBlocks, xWeightedLength, insertHookCta, stripHookCtaLines, HOOK_DEEPEN_LINE, CTA_LINE, WORK_LINK_PLACEHOLDER, fillWorkLinkPlaceholder, hasWorkLinkPlaceholder, SALE_LINK_PLACEHOLDER, fillSaleLinkPlaceholder, hasSaleLinkPlaceholder, resolvePromoTemplate, sanitizeXLinks, shouldSkipDiscSeed, composeXParentText } = require('../js/bluesky-core.js');
+const { buildBlueskyPost, detectFacets, stripAutoBlocks, xWeightedLength, insertHookCta, stripHookCtaLines, HOOK_DEEPEN_LINE, CTA_LINE, WORK_LINK_PLACEHOLDER, fillWorkLinkPlaceholder, hasWorkLinkPlaceholder, SALE_LINK_PLACEHOLDER, fillSaleLinkPlaceholder, hasSaleLinkPlaceholder, resolvePromoTemplate, sanitizeXLinks, shouldSkipDiscSeed, composeXParentText, dedupeDiscUrls } = require('../js/bluesky-core.js');
 
 let passed = 0;
 let failed = 0;
@@ -637,6 +637,41 @@ test('SEED-3: delMapがnull/undefinedでも例外を投げない(false)', functi
 });
 test('SEED-4: アカウント別のidを混同しない(acc3の墓標はacc1の判定に影響しない)', function () {
   assert.strictEqual(shouldSkipDiscSeed({ 'seed-acc3': 1 }, 'seed-acc1'), false);
+});
+
+// ────────────────────────────────────────────────────────────
+// DUP-* dedupeDiscUrls(セール案内URLの重複を1件へ畳む・2026-10-18 Chami msg 1561077224172429414
+//   「セールが同じやつ二つ被ってるから片方消して」)。同期がid単位unionなので同じURLがid違いで2件残っていた。
+// ────────────────────────────────────────────────────────────
+test('DUP-1: 同じURLの2件を1件にし、記載開始が古い方を残す・選択は残す側へ付け替え', function () {
+  var arr = [{ id: 'dB', name: '秋セール', url: 'https://x.test/sale', at: 200 }, { id: 'dA', name: '秋セール', url: 'https://x.test/sale', at: 100 }];
+  var r = dedupeDiscUrls(arr, 'dB');
+  assert.deepStrictEqual(r.list.map(function (e) { return e.id; }), ['dA']);
+  assert.deepStrictEqual(r.dropIds, ['dB']);
+  assert.strictEqual(r.sel, 'dA');
+});
+test('DUP-2: 端末ごとに選択が違っても残す側は同じ(両方消える事故を防ぐ)', function () {
+  var arr = [{ id: 'dB', url: 'https://x.test/s', at: 200 }, { id: 'dA', url: 'https://x.test/s', at: 100 }];
+  assert.deepStrictEqual(dedupeDiscUrls(arr, 'dA').dropIds, ['dB']);
+  assert.deepStrictEqual(dedupeDiscUrls(arr, 'dB').dropIds, ['dB']);
+  assert.deepStrictEqual(dedupeDiscUrls(arr.slice().reverse(), '').dropIds, ['dB']);
+});
+test('DUP-3: http/https・末尾スラッシュ・前後空白の違いは同じURLとみなす／別URLは残す', function () {
+  var arr = [{ id: 'a', url: 'https://x.test/s/', at: 1 }, { id: 'b', url: ' http://x.test/s', at: 2 }, { id: 'c', url: 'https://x.test/other', at: 3 }];
+  var r = dedupeDiscUrls(arr, 'c');
+  assert.deepStrictEqual(r.list.map(function (e) { return e.id; }), ['a', 'c']);
+  assert.strictEqual(r.sel, 'c');
+});
+test('DUP-4: 重複が無ければ配列も選択もそのまま', function () {
+  var arr = [{ id: 'a', url: 'https://x.test/1', at: 1 }, { id: 'b', url: 'https://x.test/2', at: 2 }];
+  var r = dedupeDiscUrls(arr, 'b');
+  assert.strictEqual(r.list, arr); assert.deepStrictEqual(r.dropIds, []); assert.strictEqual(r.sel, 'b');
+});
+test('DUP-5: 残す側が自動名(セールURLn)なら捨てる側の名前を引き継ぐ', function () {
+  var arr = [{ id: 'b', name: 'ハロウィン', url: 'https://x.test/h', at: 9 }, { id: 'a', name: 'セールURL1', url: 'https://x.test/h', at: 1 }];
+  var r = dedupeDiscUrls(arr, '');
+  assert.strictEqual(r.list.length, 1); assert.strictEqual(r.list[0].id, 'a'); assert.strictEqual(r.list[0].name, 'ハロウィン');
+  assert.strictEqual(arr[1].name, 'セールURL1'); // 元の配列は書き換えない
 });
 
 // ────────────────────────────────────────────────────────────

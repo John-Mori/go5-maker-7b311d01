@@ -412,6 +412,39 @@
   function shouldSkipDiscSeed(delMap, seedId) {
     return !!(delMap && Object.prototype.hasOwnProperty.call(delMap, seedId) && delMap[seedId] != null);
   }
+  // ---- セール案内URLの重複を1件へ畳む(2026-10-18 Chami msg 1561077224172429414「セールが同じやつ二つ被ってるから片方消して」) ----
+  //   同期は id 単位の union なので、同じURLを別端末/空振りタップの後で追加し直すと id 違いの同じURLが2件残る。
+  //   URL(前後空白・末尾スラッシュ・http/https差を無視)が同じものを1件にする。残すのは 記載開始(at)が古い方(同じならidの小さい方)。
+  //   ★選択中かどうかで残す側を変えない=どの端末で畳んでも同じ1件が残る(端末ごとに別の側を消して両方消える事故を防ぐ)。
+  //   残す側の名前が自動名(セールURLn)で、捨てる側に名前があればその名前を引き継ぐ。純粋関数・Nodeテスト対象。
+  //   @returns {{list:Array, dropIds:string[], sel:string}} list=畳んだ後の配列(元の並び順) / dropIds=墓標を打つid / sel=選択の付け替え先
+  function discUrlNorm_(u) { return String(u == null ? '' : u).trim().replace(/^https?:\/\//i, '').replace(/\/+$/, ''); }
+  function dedupeDiscUrls(arr, selId) {
+    arr = Array.isArray(arr) ? arr : [];
+    var keepOf = {}, autoName = /^セールURL\d+$/;
+    arr.forEach(function (e) {
+      if (!e || !e.url) return;
+      var k = discUrlNorm_(e.url), cur = keepOf[k];
+      if (!cur) { keepOf[k] = e; return; }
+      var ea = e.at || Infinity, ca = cur.at || Infinity;
+      if (ea < ca || (ea === ca && String(e.id) < String(cur.id))) keepOf[k] = e;
+    });
+    var dropIds = [], nameFix = {}, sel = selId;
+    arr.forEach(function (e) {
+      if (!e || !e.url) return;
+      var keep = keepOf[discUrlNorm_(e.url)];
+      if (keep === e) return;
+      dropIds.push(e.id);
+      if (e.id === selId) sel = keep.id;
+      if ((!keep.name || autoName.test(keep.name)) && e.name && !autoName.test(e.name) && !nameFix[keep.id]) nameFix[keep.id] = e.name;
+    });
+    if (!dropIds.length) return { list: arr, dropIds: [], sel: selId };
+    var list = arr.filter(function (e) { return !e || dropIds.indexOf(e.id) < 0; }).map(function (e) {
+      if (e && nameFix[e.id]) { var c = {}; for (var p in e) c[p] = e[p]; c.name = nameFix[e.id]; return c; }
+      return e;
+    });
+    return { list: list, dropIds: dropIds, sel: sel };
+  }
   function fillSaleLinkPlaceholder(text, saleLink) {
     var s = String(text == null ? '' : text);
     if (saleLink == null || saleLink === '') return s; // まだ短縮リンクが用意できていなければプレースホルダのまま返す
@@ -633,6 +666,7 @@
     hasSaleLinkPlaceholder: hasSaleLinkPlaceholder,
     composeXParentText: composeXParentText,
     shouldSkipDiscSeed: shouldSkipDiscSeed,
+    dedupeDiscUrls: dedupeDiscUrls,
     insertHookCta: insertHookCta,
     stripHookCtaLines: stripHookCtaLines,
     HOOK_DEEPEN_LINE: HOOK_DEEPEN_LINE,
