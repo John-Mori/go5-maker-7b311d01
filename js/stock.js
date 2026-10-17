@@ -367,6 +367,7 @@
     var store = idb();
     if (store) { store.del('stock_v_' + id).catch(function () {}); store.del('stock_t_' + id).catch(function () {}); store.del('stock_img_' + id).catch(function () {}); store.del('stock_prev_' + id).catch(function () {}); store.del('stock:imgs:' + id).catch(function () {}); }
     if (_thumbCache[id]) { try { URL.revokeObjectURL(_thumbCache[id]); } catch (e) {} delete _thumbCache[id]; }
+    if (typeof _srcMem !== 'undefined') delete _srcMem[id];
   }
 
   // ── ①-B ドラフトの画像を全端末へ運ぶ(2026-07-31) ──
@@ -1586,23 +1587,53 @@
 
   // 動画に使った元画像のBlobを解決する。手元Blob(stock_img_)優先、無ければ同期ミラー(stock:imgs:.src)の
   //   dataURLから実体へ戻す(別端末で作った分)。どちらも無ければ null(=元画像はスキップ・非致命)。
+  // ★投稿モードの投稿画像が開いてもなかなか出ない(Chami msg 1561074852478062743「すぐ表示して欲しい」)。
+  //   旧実装は IDB(2件)→ミラー→R2 の直列で、iOS Safari のIDBが無言で固まると番犬×張り直しで数十秒待ってから
+  //   やっとR2へ進んでいた。動画(resolveVideoBlob_)・サムネと同じ型に合流=メモリ→IDB、IDBが1.5秒で答えなければ
+  //   (病んでいれば即)R2を並走させて先に出た方を採る。取り出し中は同じidの約束を共有し、二重に読まない。
+  var SRC_IDB_HEAD_START_MS = 1500;
+  var _srcMem = {}, _srcMemOrder = [], _srcInflight = {};
+  function putSrcMem_(id, blob) {
+    if (!id || !blob || !blob.size) return;
+    if (!_srcMem[id]) _srcMemOrder.push(id);
+    _srcMem[id] = blob;
+    while (_srcMemOrder.length > 3) { var drop = _srcMemOrder.shift(); if (drop !== id) delete _srcMem[drop]; }
+  }
+  function srcFromR2_(id) {
+    if (!(window.Go5Sync && Go5Sync.fetchBlobR2At)) return Promise.resolve(null);
+    return Go5Sync.fetchBlobR2At('go5src:' + id).then(function (b) { return (b && b.size) ? b : null; }).catch(function () { return null; });
+  }
   function resolveSrcImageBlob_(id) {
+    if (_srcMem[id]) return Promise.resolve(_srcMem[id]);
+    if (_srcInflight[id]) return _srcInflight[id];
     var store = idb();
-    if (!store) return Promise.resolve(null);
-    return Promise.all([
-      store.get('stock_img_' + id).catch(function () { return null; }),
-      store.get('stock:imgs:' + id).catch(function () { return null; })
-    ]).then(function (r) {
-      var img = r[0], mirror = r[1] || {};
-      if (img) return img;
-      if (mirror.src) return durlToBlob_(mirror.src); // .then が Promise を自動で解く
-      // ★手元IDBにも同期ミラーにも無い=作成直後にR2へ控えた元画像 go5src:<id> を取り寄せる(2026-08-17③)。
-      //   これでIDB退避後でもDrive保存の「元画像」が空にならない。
-      if (window.Go5Sync && Go5Sync.fetchBlobR2At) {
-        return Go5Sync.fetchBlobR2At('go5src:' + id).then(function (b) { return (b && b.size) ? b : null; }).catch(function () { return null; });
-      }
-      return null;
-    }, function () { return null; });
+    var fromIdb = function () {
+      if (!store) return null;
+      return Promise.all([
+        store.get('stock_img_' + id).catch(function () { return null; }),
+        store.get('stock:imgs:' + id).catch(function () { return null; })
+      ]).then(function (r) {
+        var img = r[0], mirror = r[1] || {};
+        if (img) return img;
+        if (mirror.src) return durlToBlob_(mirror.src); // .then が Promise を自動で解く
+        return null;
+      }, function () { return null; });
+    };
+    // ★手元IDBにも同期ミラーにも無い=作成直後にR2へ控えた元画像 go5src:<id> を取り寄せる(2026-08-17③)。
+    //   これでIDB退避後でもDrive保存の「元画像」が空にならない。
+    var p = raceWithFallback_(fromIdb, function () {
+      return srcFromR2_(id).then(function (b) {
+        // 雲から取った元画像は手元へ戻す=次に開く時はIDBから即出る(IDBが病んでいる時は積まない)。
+        if (b && store && !idbSick_(store)) store.get('stock_img_' + id).then(function (cur) { if (!cur) return store.set('stock_img_' + id, b); }).catch(function () {});
+        return b;
+      });
+    }, (!store || idbSick_(store)) ? 0 : SRC_IDB_HEAD_START_MS, function (b) { return !!(b && b.size); }).then(function (b) {
+      delete _srcInflight[id];
+      if (b) putSrcMem_(id, b);
+      return b || null;
+    }, function () { delete _srcInflight[id]; return null; });
+    _srcInflight[id] = p;
+    return p;
   }
 
   // 「ドラフトで作成」で動画と台帳が初めて安全に着地した瞬間にだけDrive保存を始める。
@@ -2858,7 +2889,7 @@
       if (_r2ThumbTried[m.id] || !(window.Go5Sync && Go5Sync.fetchBlobR2At)) return Promise.resolve(null);
       _r2ThumbTried[m.id] = 1;
       return Go5Sync.fetchBlobR2At('go5src:' + m.id).then(function (rb) {
-        if (rb && rb.size) { _thumbCache[m.id] = _thumbCache[m.id] || URL.createObjectURL(rb); return _thumbCache[m.id]; }
+        if (rb && rb.size) { putSrcMem_(m.id, rb); _thumbCache[m.id] = _thumbCache[m.id] || URL.createObjectURL(rb); return _thumbCache[m.id]; }
         return null;
       }).catch(function () { return null; });
     }
@@ -4069,6 +4100,11 @@
       page.addEventListener('toggle', function (e) {
         var d = e.target;
         if (d && d.id === 'stkArchDetails') _archOpen = !!d.open;
+      }, true);
+      // 投稿モードは指が触れた瞬間に投稿画像の取り出しを始める=開いた時には手元に揃っている(Chami msg 1561074852478062743)。
+      page.addEventListener('pointerdown', function (e) {
+        var b = e.target;
+        if (b && b.classList && b.classList.contains('stk-mode') && b.dataset && b.dataset.id) resolveSrcImageBlob_(b.dataset.id).catch(function () {});
       }, true);
       page.addEventListener('click', function (e) {
         var btn = e.target;
