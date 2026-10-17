@@ -1144,9 +1144,17 @@
   }
   function tplSelRefresh_() {
     var sel = $('bskyTplSel'); if (!sel) return;
-    var book = tplBookLoad_();
+    var book = tplBookLoad_(), prev = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : '';
     sel.innerHTML = '<option value="">(選択)</option>' + book.map(function (t, i) { return '<option value="' + i + '">' + escapeHtml(t.name) + '</option>'; }).join('');
+    // 作り直しても選んでいたテンプレは名前で選び直す(同期で並びが変わっても「現在文に更新」の対象がずれない)。
+    if (prev) book.forEach(function (t, i) { if (t.name === prev) sel.value = String(i); });
   }
+  // 同期で届いたテンプレ帳/セールURLを画面へ描き直す(Chami msg 1561049482962010206「保存しても保存されない」)。
+  //   取り込みは localStorage だけを書き換えるため、起動時に作った一覧が古いまま=未登録/保存前のテンプレに見えていた。
+  document.addEventListener('go5-synced', function (e) {
+    if (!e || !e.detail || !e.detail.pulled) return;
+    try { tplSelRefresh_(); renderDiscUrlList_(); renderPreview(); if (els.pcModal && !els.pcModal.hidden) recomposePcText_(); } catch (err) {}
+  });
   (function wireTplBook_() {
     var sel = $('bskyTplSel'); if (!sel) return;
     $('bskyTplSave').addEventListener('click', function () {
