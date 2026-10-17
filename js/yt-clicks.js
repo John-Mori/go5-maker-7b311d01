@@ -754,13 +754,13 @@
     // 同じセールが2行に出ない(Chami msg 1561077304300540106「セールが同じやつ二つ被ってるから片方消して」)。
     //   URLが同じ(http/https・末尾/無視)か、短縮コードが1つでも共通なら同じセール=1行に束ね、記載開始は古い方を残す。
     //   一覧側の重複そのものは bluesky.js discDedupe_ が墓標付きで消す。ここは表示の安全網。
-    var norm = function (u) { return String(u || '').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, ''); };
+    var saleUrlKey = function (u) { return String(u || '').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, ''); };
     var merged = [];
     rows.forEach(function (r) {
       var hit = null;
       merged.forEach(function (m) {
         if (hit) return;
-        if ((r.url && norm(m.url) === norm(r.url)) || r.codes.some(function (c) { return c !== 'JrziR' && m.codes.indexOf(c) >= 0; })) hit = m; // JrziRは既定ページ共通の歴史コード=束ねる根拠にしない
+        if ((r.url && saleUrlKey(m.url) === saleUrlKey(r.url)) || r.codes.some(function (c) { return c !== 'JrziR' && m.codes.indexOf(c) >= 0; })) hit = m; // JrziRは既定ページ共通の歴史コード=束ねる根拠にしない
       });
       if (!hit) { merged.push(r); return; }
       r.codes.forEach(function (c) { if (hit.codes.indexOf(c) < 0) hit.codes.push(c); });

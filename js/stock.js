@@ -3184,6 +3184,45 @@
     return (meta && meta.bskyText) || '';
   }
 
+  // 子の文(draftXText)の手直しを、そのchの投稿本文(bsky_text__accN)へ書き戻す
+  //   (Chami msg 1561144626054955010「新しくドラフトで動画作ると元に戻る。戻らないようにして」)。
+  //   子の文は開くたびに本文から作り直すため、欄だけ直しても次のドラフトで元の文に戻っていた。
+  //   _xBase=いま欄に出している文(sys)と、その元の本文(master)。プログラムで欄を書く時は setXSys_ を通す。
+  var _xBase = { id: '', master: '', sys: '' };
+  var _xFresh = { id: '', info: null }; // 投稿モードで取り直した作品情報(2行目の新作/話題作用)
+  // 本文→子の文の作り直し(セール/作品短縮が届いた時)。開いた時と同じく2行目も入れる(以前は落ちていた)。
+  function recomposeChild_(meta) {
+    var master = masterBody_(meta), t = composeXForModal_(meta) || master, acore = window.Go5MovieAttrsCore;
+    if (pillarSplitOn_(meta) && acore && acore.withAffiStatusLine) {
+      var info = (_xFresh.id === meta.id && _xFresh.info) || meta.priceInfo || null;
+      t = acore.withAffiStatusLine(t, info) || t;
+    }
+    setXSys_(meta, t, master);
+  }
+  function setXSys_(meta, v, master) {
+    var el = $('draftXText'); if (!el) return;
+    el.value = v;
+    if (master != null || _xBase.id !== meta.id) _xBase = { id: meta.id, master: master != null ? master : masterBody_(meta), sys: v };
+    else _xBase.sys = v;
+  }
+  function writeBackChildText_() {
+    var meta = _modalMeta, el = $('draftXText'), core = window.Go5MovieAttrsCore;
+    if (!meta || !el || _xBase.id !== meta.id || !core || !core.childEditToMaster) return;
+    var nm = core.childEditToMaster(_xBase.master, _xBase.sys, el.value);
+    if (nm == null || !nm.trim()) return;
+    var changed = nm !== _xBase.master;
+    _xBase.master = nm; _xBase.sys = el.value;
+    if (!changed) return;
+    var acc = meta.account || (window.Go5Acct && Go5Acct.current && Go5Acct.current()) || 'acc1';
+    try { localStorage.setItem((window.Go5Acct && Go5Acct.key) ? Go5Acct.key('bsky_text', acc) : ('bsky_text__' + acc), nm); } catch (e) {}
+    try {
+      // 同じchの投稿タブ欄(Stock.htmlでは非表示ホスト)も揃える=古い欄の値で本文を上書きし戻さない。
+      var cur = (window.Go5Acct && Go5Acct.current && Go5Acct.current()) || 'acc1', b = $('bskyText');
+      if (b && cur === acc && b.value !== nm) { b.value = nm; b.dispatchEvent(new Event('input', { bubbles: true })); }
+    } catch (e) {}
+    kickSync_();
+  }
+
   // 販促テンプレの解決に必要な値(タグ種別/割引率/実価格)を、手元のキャッシュだけで集める(ネット不使用)。
   //   ・Go5WorkInfo(取得済みキャッシュ)→ fanza_title_cache(スナップ) の順。取れなければ null(=Nのまま=誤値を貼らない)。
   // 手元の生キャッシュ(取得済みFANZA情報→スナップ)から価格/割引率だけを引く(ネット不使用)。取れなければ null。
@@ -3261,7 +3300,7 @@
         nv = window.BlueskyCore.fillWorkLinkPlaceholder(v, share, ''); // プレースホルダを短縮で埋める
       }
       if (nv !== v) {
-        el.value = nv; // 表示だけ更新(未編集なら手編集扱いにしない=saveDraftPost_は呼ばない)
+        setXSys_(meta, nv); // 表示だけ更新(未編集なら手編集扱いにしない=saveDraftPost_は呼ばない)
         // ★保存済みの投稿編集(saved.xText)が生アフィリンクのまま凍結されているのを短縮版へ更新する。
         //   これが無いと復元→再度開くたびに生リンクへ戻る(Chami報告2026-08-11「復活させたら短縮化されてない」)。
         //   saved.xText が無い(未編集)場合は保存しない=「空=未編集」ロジック(openPostModal_)を壊さない。
@@ -3313,7 +3352,7 @@
       if (saleLink && window.BlueskyCore && window.BlueskyCore.fillSaleLinkPlaceholder) {
         nv = window.BlueskyCore.fillSaleLinkPlaceholder(cur.value, saleLink);
       }
-      cur.value = nv;
+      setXSys_(meta, nv);
       try {
         var _sv = JSON.parse(localStorage.getItem('go5_draft_post_' + meta.id) || '{}');
         if (_sv && _sv.xText) saveDraftPost_(); // 保存済み本文があった時だけ短縮版で更新(未編集は保存しない=「空=未編集」を壊さない)
@@ -3345,10 +3384,11 @@
         var cur = $('draftXText');
         if (!fi || _modalMeta !== meta || !cur) return;
         var nv = acore.withAffiStatusLine(cur.value, fi);
-        if (nv && nv !== cur.value) cur.value = nv;
+        _xFresh = { id: meta.id, info: fi };
+        if (nv && nv !== cur.value) setXSys_(meta, nv);
       }).catch(function () {});
     }
-    $('draftXText').value = composedXText;
+    setXSys_(meta, composedXText, masterBody_(meta));
     // ①短縮URL置換：この作品のアフィリンクの短縮を発番し、本文に残る生アフィリンク/プレースホルダを短縮へ差し替える。
     //   ★短縮は draft の作品に対して非同期で発番する(live UIの作品とは別・workShortCache_は使わない)。
     //   ★保存済み(saved.xText)でも生アフィリンク完全一致/プレースホルダは短縮へ置換する(2026-08-12)。
@@ -3711,7 +3751,7 @@
       '</div>';
     document.body.appendChild(m);
 
-    $('draftXText').addEventListener('input', saveDraftPost_);
+    $('draftXText').addEventListener('input', function () { writeBackChildText_(); saveDraftPost_(); });
     $('draftYtTagsInput').addEventListener('input', function () {
       buildModalYtTitle_();
       try { localStorage.setItem('yt_tags_shared', this.value); } catch (e) {}
@@ -3832,15 +3872,13 @@
     document.addEventListener('go5-disc-url-changed', function () {
       if (!m || m.style.display === 'none' || !_modalMeta) return;
       if (window.__go5ComposeXTextForBskyText) {
-        var xtEl = $('draftXText');
-        if (xtEl) xtEl.value = composeXForModal_(_modalMeta);
+        if ($('draftXText')) recomposeChild_(_modalMeta);
       }
     });
     document.addEventListener('go5-work-short-ready', function () {
       if (!m || m.style.display === 'none' || !_modalMeta) return;
       if (window.__go5ComposeXTextForBskyText) {
-        var xtEl = $('draftXText');
-        if (xtEl) xtEl.value = composeXForModal_(_modalMeta);
+        if ($('draftXText')) recomposeChild_(_modalMeta);
       }
     });
     m.addEventListener('click', function (e) { if (e.target === m) { closeModal_(); } });

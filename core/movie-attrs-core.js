@@ -127,7 +127,52 @@
     return null;
   }
 
+  // 投稿モードの「子の文」を手で直した内容を、そのchの投稿本文(固定文)へ書き戻す形に戻す。
+  //   子の文=本文(master)の短縮URL/プレースホルダ置換+見出し直後の2行目(新作/話題作)差し込み(=sys)。
+  //   手で触っていない行は本文の元の行(プレースホルダのまま)、触った行は手の文(置換されたURLだけ本文側の表記へ戻す)。
+  //   2行目の自動行は本文へ入れない。対応が取れない時は null(=書き戻さない)。
+  //   (Chami msg 1561144626054955010「新しくドラフトで動画作ると元に戻る。戻らないようにして」)
+  function childEditToMaster(master, sys, edited) {
+    function split_(t) { return String(t == null ? '' : t).replace(/\r\n?/g, '\n').split('\n'); }
+    function isHead_(l) { return String(l || '').trim().indexOf('⇩気になった方はコチラから') === 0; }
+    function isSt_(l) { return AFFI_STATUS_RE.test(String(l || '').trim()); }
+    var M = split_(master), S = split_(sys), E = split_(edited);
+    var map = [], pairs = [], i = 0, j = 0;
+    while (i < S.length) {
+      if (j < M.length && S[i] === M[j]) { map.push(j); i++; j++; continue; }
+      if (isSt_(S[i]) && i > 0 && isHead_(S[i - 1])) {
+        if (j < M.length && isSt_(M[j])) { map.push(j); i++; j++; } else { map.push(-1); i++; }
+        continue;
+      }
+      if (j >= M.length) return null;
+      var a = M[j], b = S[i], p = 0, s = 0;
+      while (p < a.length && p < b.length && a[p] === b[p]) p++;
+      while (s < a.length - p && s < b.length - p && a[a.length - 1 - s] === b[b.length - 1 - s]) s++;
+      var mt = a.slice(p, a.length - s), st = b.slice(p, b.length - s);
+      if (/^(?:https?:\/\/)?[\w.-]+\.[a-z]{2,}\/\S+$/i.test(st)) pairs.push([st, mt]);
+      map.push(j); i++; j++;
+    }
+    if (j !== M.length) return null;
+    pairs.sort(function (x, y) { return y[0].length - x[0].length; });
+    // E と S の行LCS(手で残した行=Sの行と一致)
+    var n = E.length, m = S.length, dp = [], r, c;
+    for (r = 0; r <= n; r++) { var row = []; for (c = 0; c <= m; c++) row.push(0); dp.push(row); }
+    for (r = n - 1; r >= 0; r--) for (c = m - 1; c >= 0; c--) dp[r][c] = E[r] === S[c] ? dp[r + 1][c + 1] + 1 : Math.max(dp[r + 1][c], dp[r][c + 1]);
+    var out = [];
+    r = 0; c = 0;
+    while (r < n) {
+      if (c < m && E[r] === S[c]) { if (map[c] >= 0) out.push(M[map[c]]); r++; c++; continue; }
+      if (c < m && dp[r][c + 1] >= dp[r + 1][c]) { c++; continue; } // Sの行が消された
+      var line = E[r];
+      if (isSt_(line) && out.length && isHead_(out[out.length - 1])) { r++; continue; } // 自動の2行目は手で変えても本文へ入れない(毎回作品情報で出し直す)
+      pairs.forEach(function (pr) { line = line.split(pr[0]).join(pr[1]); });
+      out.push(line); r++;
+    }
+    return out.join('\n');
+  }
+
   var API = {
+    childEditToMaster: childEditToMaster,
     withAffiStatusLine: withAffiStatusLine,
     affiStatusLine: affiStatusLine,
     affiPostText: affiPostText,
