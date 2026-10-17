@@ -745,12 +745,28 @@
       var c = codeOf(cache[k] || ''); if (!c) return;
       (codesByEntry[eid] = codesByEntry[eid] || []).push(c);
     });
-    return arr.map(function (e) {
+    var rows = arr.map(function (e) {
       var codes = (codesByEntry[e.id] || []).slice();
       if (/campaign=gain/.test(String(e.url || '')) && codes.indexOf('JrziR') < 0) codes.push('JrziR'); // 既定セールページは歴史的JrziRを合算(過去分を失わない)
       var uniq = codes.filter(function (c, i) { return codes.indexOf(c) === i; });
       return { id: e.id, name: String(e.name || '(無題)'), url: String(e.url || ''), codes: uniq, at: (typeof e.at === 'number' ? e.at : 0) };
-    }).sort(function (a, b) {
+    });
+    // 同じセールが2行に出ない(Chami msg 1561077304300540106「セールが同じやつ二つ被ってるから片方消して」)。
+    //   URLが同じ(http/https・末尾/無視)か、短縮コードが1つでも共通なら同じセール=1行に束ね、記載開始は古い方を残す。
+    //   一覧側の重複そのものは bluesky.js discDedupe_ が墓標付きで消す。ここは表示の安全網。
+    var norm = function (u) { return String(u || '').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, ''); };
+    var merged = [];
+    rows.forEach(function (r) {
+      var hit = null;
+      merged.forEach(function (m) {
+        if (hit) return;
+        if ((r.url && norm(m.url) === norm(r.url)) || r.codes.some(function (c) { return c !== 'JrziR' && m.codes.indexOf(c) >= 0; })) hit = m; // JrziRは既定ページ共通の歴史コード=束ねる根拠にしない
+      });
+      if (!hit) { merged.push(r); return; }
+      r.codes.forEach(function (c) { if (hit.codes.indexOf(c) < 0) hit.codes.push(c); });
+      if (r.at && (!hit.at || r.at < hit.at)) { hit.at = r.at; hit.id = r.id; hit.name = r.name; hit.url = r.url; }
+    });
+    return merged.sort(function (a, b) {
       // 投稿履歴のセールページは「記載開始日」(登録時刻at)が新しいものを必ず上へ。
       return (Number(b.at) || 0) - (Number(a.at) || 0) || String(a.name).localeCompare(String(b.name), 'ja');
     });
