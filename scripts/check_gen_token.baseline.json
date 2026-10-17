@@ -5,6 +5,7 @@
     { "file": "js/app.js", "name": "_makeRunSeq", "state": "動画作成run/録画Blobの着地。旧MediaRecorderの遅着が新runを上書き=黒サムネを拒否(INC-139)" },
     { "file": "js/bluesky.js", "name": "movieInfoSeq", "state": "作品情報の行。URL連続変更で古い取得結果が別作品の行を上書きするのを拒否(INC-15)" },
     { "file": "js/candidates.js", "name": "_refOpenSeq", "state": "参照モーダルの非同期書き込み。閉じた/別作品を開いた後の遅着を破棄" },
+    { "file": "js/candidates.js", "name": "_allLoadSeq", "state": "📚全候補のカタログ読み込み。条件(セール中のみ等)を変える前の遅い返事が絞った一覧を上書きするのを拒否" },
     { "file": "js/stock.js", "name": "_renderSeq", "state": "ドラフト一覧DOMの描画。古い描画系列が最新DOM/サムネを上書きするのを拒否" },
     { "file": "js/yt-clicks.js", "name": "_rankGen", "state": "ランキング描画。古い非同期描画が最新DOMを上書きするのを拒否" },
     { "file": "js/yt-clicks.js", "name": "_fanzaGen", "state": "FANZA取得ジョブ。手動実行が進行中を乗っ取り旧実行を静かに停止(INC-07・取得中固着)" }

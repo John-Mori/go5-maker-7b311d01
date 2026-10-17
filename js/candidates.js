@@ -448,6 +448,7 @@
   var _sortTab = null;      // _sort を最後に既定へ揃えたタブ。タブが実際に変わった時だけ既定へ戻す目印(再描画では触らない)
   var _showHidden = false;
   var _filterSale = false; // 絞り込み：ONでセール中(値引き)の作品のみ表示
+  var _allLoadSeq = 0; // 📚全候補のカタログ読み込みの通し番号(最新の1本だけ描く)
   var _filterDoujin = false; // 種別絞り込み：同人のみ。Booksと両方ON/両方OFFは全件表示
   var _filterBooks = false;  // 種別絞り込み：Booksのみ
   var _filterToday = false;  // 今日の投稿候補として印を付けた作品だけを表示
@@ -4664,7 +4665,16 @@
       '</div><div id="candEditForm"></div>' +
       '<div id="candList">' + workSearchHtml_('all') + candPageSizeHtml_() + '<div id="candPageWrap"><p class="hint" style="padding:8px;">⏳ 全候補を読み込み中…</p></div></div>';
     wireSortControl_('all', renderAll_);
-    $('candFilterSale').addEventListener('change', function () { _filterSale = this.checked; _candPageByTab.all = 1; renderAll_(); });
+    // セール絞込は画面を作り直さず一覧だけ読み直す。ONは表示中のセール外カードをその場で隠し、Workerの返事を待たせない
+    //   (Chami msg 1561149383263785023「セール中のみのボタンがなかなか反応しない」)。
+    $('candFilterSale').addEventListener('change', function () {
+      _filterSale = this.checked; _candPageByTab.all = 1;
+      var cl = $('candCardList');
+      if (_filterSale && cl) Array.prototype.forEach.call(cl.children, function (n) {
+        var c = n.getAttribute && n.getAttribute('data-cid'); if (c && !isOnSale_(_cardIndex[c])) n.style.display = 'none';
+      });
+      load_();
+    });
     wirePriceFilter_(function () { _candPageByTab.all = 1; renderAll_(); });
     wireCandColsCtl_(); wireHidePostedButtons_(function () { renderAll_(); }); wireKindFilter_(function () { renderAll_(); }); wireBuiltinRename_('all');
 
@@ -4713,6 +4723,7 @@
           return mainSet[String(cid)] ? '<button type="button" class="cand-hide-btn cand-to-main-btn is-done" style="width:auto;" disabled>✅ 手動追加済み</button>'
             : '<button type="button" class="cand-hide-btn cand-to-main-btn" style="width:auto;" data-to-main="' + esc(cid) + '">手動追加へ</button>';
         }, function (node) { wireCardCommon_(node); });
+        Array.prototype.forEach.call(listEl.children, function (n) { if (n.style) n.style.display = ''; }); // セール絞込で先に隠した使い回しカードを戻す
       }
       wrap.querySelectorAll('[data-candpage]').forEach(function (b) { b.addEventListener('click', function () {
         var n = parseInt(b.getAttribute('data-candpage'), 10); if (!n || n < 1 || n > pages) return;
@@ -4724,9 +4735,11 @@
       if (_filterToday) { fallback_(); return; } // 今日印は同期LSの作品スナップが正本。サーバーカタログへ全件問い合わせしない。
       var page = _candPageByTab.all || 1, size = candPageSize_();
       var wrap = $('candPageWrap'); if (wrap) wrap.setAttribute('aria-busy', 'true');
+      var seq = ++_allLoadSeq; // 最後に出した読み込みだけを描く(条件を変える前の遅い返事で絞った一覧を上書きしない)
       catalogPage_({ sort: _sort, page: page, limit: size, q: _workSearchByTab.all || '', sale: _filterSale ? 1 : 0,
         priceMax: _priceMax || 0, kind: candidateKindQuery_() || 'all', hideRecent: (_hidePosted.acc1 || _hidePosted.acc2) ? 1 : 0,
         hidePostedAcc1: _hidePosted.allAcc1 ? 1 : 0, hidePostedAcc2: _hidePosted.allAcc2 ? 1 : 0 }, function (j) {
+        if (seq !== _allLoadSeq) return;
         if (wrap) wrap.removeAttribute('aria-busy');
         if (!j) { fallback_(); return; }
         _candPageByTab.all = j.page || 1; progressText_(j.progress); paint_(j.items || [], j.total || 0, j.page || 1, j.pages || 1, false);
