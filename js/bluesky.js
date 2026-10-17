@@ -1127,7 +1127,11 @@
   function tplBookKey_() { return 'bsky_tpl_book__' + acctId(); }
   function tplDelKey_() { return 'bsky_tpl_del__' + acctId(); }
   function tplBookLoad_() { try { return JSON.parse(localStorage.getItem(tplBookKey_()) || '[]') || []; } catch (e) { return []; } }
-  function tplBookSave_(arr) { try { localStorage.setItem(tplBookKey_(), JSON.stringify(arr.slice(0, 30))); } catch (e) {} }
+  // 保存したら即同期＝他端末/再読込の前に雲へ出し、古い本文で戻されないようにする(Chami msg 1561044298865189074)。
+  function tplBookSave_(arr) {
+    try { localStorage.setItem(tplBookKey_(), JSON.stringify(arr.slice(0, 30))); } catch (e) {}
+    try { if (window.Go5Sync && window.Go5Sync.flushSync) window.Go5Sync.flushSync(); else if (window.Go5Sync && window.Go5Sync.requestSync) window.Go5Sync.requestSync(); } catch (e) {}
+  }
   // 削除墓標を打つ(name→削除ts)＝この削除を全端末へ伝播させ、他端末の同名テンプレから復活しないようにする。
   //   同名を後から再保存(at>削除ts)すれば墓標を越えて残るので「保存は消さない」要望とも両立する。
   function tplTombstone_(name) {

@@ -570,6 +570,9 @@
   }
   // 配列キーの id フィールド名。(候補=cid / ドラフト=id / テンプレ帳=name / セール案内=id)union/墓標の両方で使う。
   function arrIdField_(k) { return isCandArrayKey(k) ? "cid" : ((isStockArrayKey(k) || isStockArchiveKey(k) || isDiscUrlsKey(k)) ? "id" : (isTplBookKey(k) ? "name" : null)); }
+  // 同一idの勝ち負けを「キーの保存時刻」ではなく行自身の更新時刻で決める配列。(テンプレ帳=at)
+  //   古い本文を持つ端末のキーが newer 扱いになると「現在文に更新」が元に戻るため(Chami msg 1561044298865189074)。
+  function arrAtField_(k) { return isTplBookKey(k) ? "at" : null; }
   // 空とみなす値。(undefined / null / 空文字)0・false は「意味のある更新」なので空ではない。
   function isEmptyVal_(v) { return v === undefined || v === null || v === ""; }
   // ★同一cidの2レコードをフィールド単位で統合する。newer を基本に採るが、newer 側で空(欠け)の
@@ -595,7 +598,7 @@
   }
   function isPhTitle_(t) { return t === "(タイトル未取得)"; }
   // id フィールドで配列を union。(候補=cid / ドラフト=id)重複はフィールド単位で統合(newer優先・空で消さない)。
-  function unionByField(olderStr, newerStr, idField) {
+  function unionByField(olderStr, newerStr, idField, atField) {
     idField = idField || "cid";
     try {
       var older = JSON.parse(olderStr || "[]"), newer = JSON.parse(newerStr || "[]");
@@ -605,6 +608,7 @@
         var idv = it ? it[idField] : null;
         var key = (idv != null) ? ("k:" + idv) : ("a:" + (anon++));
         if (!(key in byId)) { order.push(key); byId[key] = it; }
+        else if (atField && byId[key] && it && Number(byId[key][atField]) > Number(it[atField])) byId[key] = mergeCandItem_(it, byId[key]); // 先に入った行の方が新しい＝そちらを優先
         else byId[key] = mergeCandItem_(byId[key], it); // 重複id＝フィールド単位で統合(newer優先・空で消さない)
       }); }
       add(older); add(newer); // 後入れ(newer)が重複idで優先・ただし欠けたフィールドはolderを保持
@@ -724,11 +728,11 @@
     });
     return JSON.stringify(out);
   }
-  function mergeLiveArray_(mergedStr, liveStr, startStr, idField) {
+  function mergeLiveArray_(mergedStr, liveStr, startStr, idField, atField) {
     // 同期開始後にローカルが変わった時だけliveを最後に重ねる。未変更の古いliveを常にnewer扱いすると、
     // 雲から届いた新しい作品URLを同期開始時の古いURLへ巻き戻してしまう。
     if (liveStr === startStr) return mergedStr;
-    var updated = unionByField(mergedStr, liveStr, idField);
+    var updated = unionByField(mergedStr, liveStr, idField, atField);
     return updated == null ? mergedStr : updated;
   }
 
@@ -1255,7 +1259,7 @@
           var a = lmapLs[k], b = rls[k];
           if (a && b && !a.d && !b.d) {
             var localNewer = (a.t || 0) >= (b.t || 0);
-            var u = unionByField(localNewer ? b.v : a.v, localNewer ? a.v : b.v, idf);
+            var u = unionByField(localNewer ? b.v : a.v, localNewer ? a.v : b.v, idf, arrAtField_(k));
             // ★S3=作成履歴はこの push スナップショットも thumb 正規化してから雲へ送る(pull適用側で上書きされない経路の穴を塞ぐ)。
             if (u != null && isStockArchiveKey(k)) u = slimStockArchive(u, 3);
             if (u != null) mls[k] = { t: Math.max(a.t || 0, b.t || 0), v: u };
@@ -1378,7 +1382,7 @@
           var idf2 = arrIdField_(k);
           if (idf2) {
             // 同期開始後にライブ値が変わった時だけ再unionし、進行中に増えた分を失わない。
-            finalV = mergeLiveArray_(e.v, live, curLs[k], idf2);
+            finalV = mergeLiveArray_(e.v, live, curLs[k], idf2, arrAtField_(k));
             // ★墓標を適用：削除済みid/nameをunion結果から除外し復活を防ぐ。マージ済み墓標とライブ墓標の両方を効かせる。
             //   候補/ドラフト=id/addedAt。テンプレ帳=name/at(削除後に再保存したものは at>削除ts で残る)。作成履歴は墓標を適用しない。
             if (isCandArrayKey(k) || isStockArrayKey(k)) {
@@ -1826,7 +1830,7 @@
     // 作成履歴(go5_stock_archive)の thumbDataUrl detox 純関数を公開。(stock.js の保存側=S2 が呼ぶ。副作用なし・fail-open)
     slimStockArchive: function (arrStr, keepN) { return slimStockArchive(arrStr, keepN); },
     // Nodeテスト/デバッグ用に純関数を公開。(副作用なし)
-    _test: { unionCand: unionCand, isTreeLinksKey: isTreeLinksKey, mergeTreeLinks_: mergeTreeLinks_, chooseTreeLinksRec_: chooseTreeLinksRec_, isHistoryPostTimeKey: isHistoryPostTimeKey, mergeHistoryPostTimes_: mergeHistoryPostTimes_, mergeHistoryPostTimeRec_: mergeHistoryPostTimeRec_, unionByField: unionByField, mergeDelMap: mergeDelMap, applyTombstone: applyTombstone, parseDelMap: parseDelMap, candDelKeyOf: candDelKeyOf, isCandArrayKey: isCandArrayKey, isCandDelKey: isCandDelKey, isStockArrayKey: isStockArrayKey, isStockArchiveKey: isStockArchiveKey, isStockDelKey: isStockDelKey, isArchDelKey: isArchDelKey, isTplBookKey: isTplBookKey, isTplDelKey: isTplDelKey, tplDelKeyOf: tplDelKeyOf, isDiscUrlsKey: isDiscUrlsKey, isDiscDelKey: isDiscDelKey, discDelKeyOf: discDelKeyOf, isSyncLsKey: isSyncLsKey, isScheduleStateKey: isScheduleStateKey, mergeScheduleState: mergeScheduleState, arrIdField_: arrIdField_, isSyncIdbKey: isSyncIdbKey, isPostedMapKey: isPostedMapKey, mergePostedMap: mergePostedMap, isCandTextKey: isCandTextKey, mergeCandText_: mergeCandText_, mergeCandTextRec_: mergeCandTextRec_, mergeCandTextMirrorIntoLs_: mergeCandTextMirrorIntoLs_, writeCandTextFallback_: writeCandTextFallback_, isCandTodayKey: isCandTodayKey, mergeCandToday_: mergeCandToday_, isImageManifestKey: isImageManifestKey, imageManifestRec_: imageManifestRec_, chooseImageManifestRec_: chooseImageManifestRec_, mergeImageManifest_: mergeImageManifest_, hasEmptyImgSlot: hasEmptyImgSlot, preferImgRecord_: preferImgRecord_ }
+    _test: { unionCand: unionCand, isTreeLinksKey: isTreeLinksKey, mergeTreeLinks_: mergeTreeLinks_, chooseTreeLinksRec_: chooseTreeLinksRec_, isHistoryPostTimeKey: isHistoryPostTimeKey, mergeHistoryPostTimes_: mergeHistoryPostTimes_, mergeHistoryPostTimeRec_: mergeHistoryPostTimeRec_, unionByField: unionByField, mergeDelMap: mergeDelMap, applyTombstone: applyTombstone, parseDelMap: parseDelMap, candDelKeyOf: candDelKeyOf, isCandArrayKey: isCandArrayKey, isCandDelKey: isCandDelKey, isStockArrayKey: isStockArrayKey, isStockArchiveKey: isStockArchiveKey, isStockDelKey: isStockDelKey, isArchDelKey: isArchDelKey, isTplBookKey: isTplBookKey, isTplDelKey: isTplDelKey, tplDelKeyOf: tplDelKeyOf, isDiscUrlsKey: isDiscUrlsKey, isDiscDelKey: isDiscDelKey, discDelKeyOf: discDelKeyOf, isSyncLsKey: isSyncLsKey, isScheduleStateKey: isScheduleStateKey, mergeScheduleState: mergeScheduleState, arrIdField_: arrIdField_, arrAtField_: arrAtField_, isSyncIdbKey: isSyncIdbKey, isPostedMapKey: isPostedMapKey, mergePostedMap: mergePostedMap, isCandTextKey: isCandTextKey, mergeCandText_: mergeCandText_, mergeCandTextRec_: mergeCandTextRec_, mergeCandTextMirrorIntoLs_: mergeCandTextMirrorIntoLs_, writeCandTextFallback_: writeCandTextFallback_, isCandTodayKey: isCandTodayKey, mergeCandToday_: mergeCandToday_, isImageManifestKey: isImageManifestKey, imageManifestRec_: imageManifestRec_, chooseImageManifestRec_: chooseImageManifestRec_, mergeImageManifest_: mergeImageManifest_, hasEmptyImgSlot: hasEmptyImgSlot, preferImgRecord_: preferImgRecord_ }
   };
   root.Go5Sync._test.readSyncIdbEntries_ = readSyncIdbEntries_; root.Go5Sync._test.protectUnreadIdb_ = protectUnreadIdb_;
   root.Go5Sync._test.mergeLiveArray_ = mergeLiveArray_; root.Go5Sync._test.fastCandidateMergeState_ = fastCandidateMergeState_;

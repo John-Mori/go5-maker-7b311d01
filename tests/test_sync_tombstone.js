@@ -138,6 +138,16 @@ eq("別nameは両端末で両立(集めたテンプレを失わない)",
 eq("同nameは newer(後入れ)の本文を採用",
    JSON.parse(S.unionByField('[{"name":"A","text":"旧","at":1}]', '[{"name":"A","text":"新","at":2}]', "name")),
    [{ name: "A", text: "新", at: 2 }]);
+// ★「現在文に更新」が元に戻る(Chami msg 1561044298865189074): 古い本文を持つ端末側がキー単位で newer 扱いでも、
+//   テンプレの at が新しい方(=最後に更新した本文)を採る。キーの保存時刻ではなくテンプレ自身の更新時刻で決める。
+eq("同nameは at の新しい本文を採用(古い側が後入れでも戻さない)",
+   JSON.parse(S.unionByField('[{"name":"テンプレ暫定","text":"新","at":2}]', '[{"name":"テンプレ暫定","text":"旧","at":1}]', "name", "at")),
+   [{ name: "テンプレ暫定", text: "新", at: 2 }]);
+ok("arrAtField tpl=at", typeof S.arrAtField_ === "function" && S.arrAtField_("bsky_tpl_book__acc2") === "at");
+ok("arrAtField 候補は従来どおり(null)", typeof S.arrAtField_ === "function" && S.arrAtField_("cand_items") === null);
+eq("ライブ再union も at の新しい本文を残す",
+   JSON.parse(S.mergeLiveArray_('[{"name":"A","text":"新","at":5}]', '[{"name":"A","text":"旧","at":3}]', '[]', "name", "at")),
+   [{ name: "A", text: "新", at: 5 }]);
 
 // ── 📝テンプレ帳の削除墓標(bsky_tpl_del__)＝削除を全端末へ伝播(Chami依頼2026-08-03「前のやつ消して」) ──
 ok("isTplDelKey", S.isTplDelKey("bsky_tpl_del__acc1") && S.isTplDelKey("bsky_tpl_del") && !S.isTplDelKey("bsky_tpl_book__acc1"));
