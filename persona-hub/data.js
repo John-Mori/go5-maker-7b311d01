@@ -18,9 +18,9 @@ window.PERSONA_HUB_DATA = {
    },
    "呼称": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "sha1": "0b0a4d01a30344a79b302f952b75e8de7c2dba79",
-    "bytes": 141893,
-    "mtime": 1792287838.979
+    "sha1": "84ddcd7ba84cae7a1441b302ea0d4912fa95acd1",
+    "bytes": 142623,
+    "mtime": 1792314114.724
    },
    "アイコン": {
     "path": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
