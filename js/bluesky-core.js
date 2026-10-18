@@ -579,7 +579,9 @@
         continue;                             // %表示のとき価格専用行(¥N)は行ごと削除
       }
       if (noDiscount && /N\s*[%％]/.test(line)) continue; // 割引0%=N%を含む行を丸ごと削除(①)
-      if (opts.noPromo && /N\s*[%％]|[%％]\s*(?:オフ|OFF)/.test(line)) continue; // 販促なし=接頭辞なしの割引行も外す
+      // 販促なし=接頭辞なしの割引行も外す。ただしセール案内の行(例「⇩オータムセール🌰最大99%OFF!」)は作品の割引率ではないので残す
+      //   (Chami msg 1561255009562132584「オータムセールの文がドラフトモードの子の文に入らない」)。
+      if (opts.noPromo && (/N\s*[%％]/.test(line) || (/[%％]\s*(?:オフ|OFF)/i.test(line) && !/セール|sale/i.test(line)))) continue;
       out.push(line);
     }
     var res = out.join('\n');
