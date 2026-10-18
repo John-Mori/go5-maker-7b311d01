@@ -205,6 +205,37 @@
     return facets;
   }
 
+
+  // DMM/FANZA/DLsite行きのURL(アフィリンクal.fanza含む)は短縮しない運用のため長い(140〜190字)。
+  //   Blueskyは本文のURLを全文で300字に数えるので、本文には「【リンク】」とだけ出し、その範囲のfacetでURLを指す
+  //   (Chami 2026-10-18 5Sec軍議 msg 1561274889682559098「【リンク】という形式にするようにして」)。
+  //   他のURL(自分のX/YouTube/Bluesky投稿への短縮リンク等)と#タグは従来どおり detectFacets が拾う。
+  var LINK_LABEL = '【リンク】';
+  function isLabelHostUrl(u) {
+    try { return /(^|\.)(?:dmm|fanza)\.(?:co\.jp|com)$/i.test(new URL(u).hostname) || /(^|\.)dlsite\.com$/i.test(new URL(u).hostname); } catch (e) { return false; }
+  }
+  // @returns {{ text: string, facets: Array }}  text は【リンク】へ置換後の本文
+  function buildRichText(text) {
+    text = String(text || '');
+    var out = '', last = 0, labelFacets = [], m, re = /https?:\/\/[^\s]+/g;
+    while ((m = re.exec(text))) {
+      var url = m[0].replace(/[.,;:!?。、！？))】」』]+$/, '');
+      if (!isLabelHostUrl(url)) continue;
+      out += text.slice(last, m.index);
+      var bs = byteLen(out);
+      out += LINK_LABEL;
+      labelFacets.push({
+        index: { byteStart: bs, byteEnd: byteLen(out) },
+        features: [{ $type: 'app.bsky.richtext.facet#link', uri: url }]
+      });
+      last = m.index + url.length;
+    }
+    out += text.slice(last);
+    var facets = labelFacets.concat(detectFacets(out));
+    facets.sort(function (a, b) { return a.index.byteStart - b.index.byteStart; });
+    return { text: out, facets: facets };
+  }
+
   /**
    * 1つの自由テキスト本文をそのまま投稿。(改行も維持／本文中のURLは自動でリンク化)
    * @returns Promise<{ uri, cid, handle, rkey, postUrl }>
@@ -222,7 +253,8 @@
       return Promise.all(blobs.slice(0, 4).map(function (b) { return uploadBlob(service, sess.accessJwt, b); }));
     }).then(function (ups) {
       var imageRefs = Array.isArray(ups) ? ups.map(function (u) { return u && u.blob; }).filter(Boolean) : [];
-      return createPost(service, sess, { text: text, facets: detectFacets(text), imageRefs: imageRefs, alt: o.alt });
+      var rt = buildRichText(text);
+      return createPost(service, sess, { text: rt.text, facets: rt.facets, imageRefs: imageRefs, alt: o.alt });
     }).then(function (res) {
       var rkey = String(res.uri || '').split('/').pop();
       var postUrl = (sess.handle && rkey) ? ('https://bsky.app/profile/' + sess.handle + '/post/' + rkey) : '';
@@ -258,7 +290,8 @@
       return Promise.all(blobs.slice(0, 4).map(function (b) { return uploadBlob(service, sess.accessJwt, b); }));
     }).then(function (ups) {
       var imageRefs = Array.isArray(ups) ? ups.map(function (u) { return u && u.blob; }).filter(Boolean) : [];
-      return createPost(service, sess, { text: parentText, facets: detectFacets(parentText), imageRefs: imageRefs });
+      var rtp = buildRichText(parentText);
+      return createPost(service, sess, { text: rtp.text, facets: rtp.facets, imageRefs: imageRefs });
     }).then(function (res) {
       var rkey = String(res.uri || '').split('/').pop();
       var postUrl = (sess.handle && rkey) ? ('https://bsky.app/profile/' + sess.handle + '/post/' + rkey) : '';
@@ -288,7 +321,8 @@
         : Promise.resolve([]);
       return replyUploads.then(function (ups) {
         var replyImageRefs = Array.isArray(ups) ? ups.map(function (u) { return u && u.blob; }).filter(Boolean) : [];
-        var replyPost = { text: replyText, facets: detectFacets(replyText), reply: replyRef };
+        var rtr = buildRichText(replyText);
+        var replyPost = { text: rtr.text, facets: rtr.facets, reply: replyRef };
         // ★alt は createPost 側が常に空にする(Chami依頼2026-07-18「画像の下に文字が入るのを何も表示しないように」)。
         //   ここで渡しても無視される=全投稿フロー共通の既存仕様に揃える(新規にalt表示機構を作らない)。
         if (replyImageRefs.length) replyPost.imageRefs = replyImageRefs;
@@ -679,6 +713,8 @@
     KNOWN_DISCOUNT_LEADS: KNOWN_DISCOUNT_LEADS,
     blueskyPostWithImage: blueskyPostWithImage,
     detectFacets: detectFacets,
+    buildRichText: buildRichText,
+    LINK_LABEL: LINK_LABEL,
     blueskyPostRaw: blueskyPostRaw,
     blueskyPostThread: blueskyPostThread,
     blueskyPostReply: blueskyPostReply,

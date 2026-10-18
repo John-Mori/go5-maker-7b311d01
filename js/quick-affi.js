@@ -95,9 +95,9 @@
   }
 
   // 定型文の2行目(新作/話題作・N%OFF)は作品情報しだい。取れなかった時は「話題作✨️」で出し、取れなかったことを添える。
-  function post_(link, info) {
+  function post_(link, info, saleLine) {
     var core = window.Go5MovieAttrsCore;
-    els.post.value = (link && core && core.affiPostText) ? core.affiPostText(info, link) : '';
+    els.post.value = (link && core && core.affiPostText) ? core.affiPostText(info, link) + (saleLine ? '\n\n' + saleLine : '') : '';
     els.postCopy.disabled = !els.post.value;
     els.postNote.textContent = !link ? '' : (info ? '' : '作品情報(発売日/割引)を取れなかったので「話題作✨️」で出しています。');
   }
@@ -124,7 +124,8 @@
     els.go.disabled = true; els.go.textContent = '作成中…';
     els.out.value = ''; els.dest.textContent = ''; status_('', ''); post_('', null);
     var infoP = window.Go5FreshWorkInfo ? window.Go5FreshWorkInfo(url).catch(function () { return null; }) : Promise.resolve(null);
-    Promise.all([window.Go5IssueAffShort(url, '', true), infoP]).then(function (got) {
+    var saleP = window.Go5SaleLineText ? window.Go5SaleLineText().catch(function () { return ''; }) : Promise.resolve('');
+    Promise.all([window.Go5IssueAffShort(url, '', true), infoP, saleP]).then(function (got) {
       var r = got[0];
       els.result.hidden = false;
       els.out.value = r.url || '';
@@ -135,7 +136,7 @@
       var dest = (r.dest && r.dest !== r.url) ? r.dest : '';
       els.dest.textContent = (r.url ? '' : r.out + (dest ? ' / ' : '')) + (dest ? '転送先: ' + dest : '');
       if (r.aff) status_(r.aff, r.affMsg);
-      post_(r.url || '', got[1]);
+      post_(r.url || '', got[1], got[2]);
       if (r.issued) lastIssued = url;
     }).then(function () {
       busy = false; els.go.disabled = false; els.go.textContent = label;

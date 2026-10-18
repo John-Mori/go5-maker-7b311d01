@@ -1006,6 +1006,16 @@
       if (onReady) onReady(r.link);
     }, retry_);
   }
+  // 投稿モードと同じセール行(文言=DISCOUNT_LEAD_・URL=選択中のセール案内)。即アフィからも使う(Chami 2026-10-18 msg 1561277829524492381)。
+  //   未登録/取得失敗は投稿モードと同じく行ごと出さない(4秒待って諦める=ensureDiscountReadyP_)。
+  function saleLineText_() {
+    if (!discountListOn_()) return Promise.resolve('');
+    return ensureDiscountReadyP_().then(function () {
+      var d = cachedDiscountLink_();
+      return d ? DISCOUNT_LEAD_() + '\n' + d : '';
+    });
+  }
+  try { window.Go5SaleLineText = saleLineText_; } catch (e) {}
   function recomposePcText_() { if (els.pcText) els.pcText.value = composePostText(); }
 
   // 記載開始日(=そのセールURLを登録した日 e.at)の表示。未設定は「(未設定)」。JSTローカル日付で出す。
@@ -1331,12 +1341,18 @@
   function firstUrl(t) { var m = String(t).match(/https?:\/\/[^\s]+/); return m ? m[0] : ''; }
   function escapeHtml(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
   function highlightLinks(h) {
-    h = h.replace(/(https?:\/\/[^\s]+)/g, '<span class="lnk">$1</span>');     // URL
+    h = h.replace(/(https?:\/\/[^\s]+)/g, function (u) {     // URL(DMM/FANZA/DLsite行きは投稿時に【リンク】へ置換される=プレビューも同じ見せ方)
+      return '<span class="lnk">' + (noShortDest_(u.replace(/&amp;/g, '&')) ? LINK_LABEL_ : u) + '</span>';
+    });
     h = h.replace(/(^|\s)(#[^\s#<]+)/g, '$1<span class="lnk">$2</span>');     // ハッシュタグ
     return h;
   }
   var graphemeSeg_ = null; // 毎キー作り直さず使い回す
+  var LINK_LABEL_ = (window.BlueskyCore && window.BlueskyCore.LINK_LABEL) || '【リンク】';
+  // Blueskyへ出る本文の字数。DMM/FANZA/DLsite行きURLは投稿時に「【リンク】」(5字)へ置換されるので、置換後で数える。
   function countGraphemes(s) {
+    s = String(s == null ? '' : s);
+    if (window.BlueskyCore && window.BlueskyCore.buildRichText) s = window.BlueskyCore.buildRichText(s).text;
     try { if (typeof Intl !== 'undefined' && Intl.Segmenter) { var seg = graphemeSeg_ || (graphemeSeg_ = new Intl.Segmenter('ja', { granularity: 'grapheme' })); var n = 0, it = seg.segment(s)[Symbol.iterator](); while (!it.next().done) n++; return n; } } catch (e) {}
     return Array.from(s).length;
   }
@@ -1348,7 +1364,7 @@
   }
   function over300Msg_(s, base) {
     var n = longAffLinkChars_(s);
-    return n ? base + '(うちアフィリンクが' + n + '字。作品リンクは短縮しない運用のため、本文を詰めるかセール一覧リンクを外してください)' : base;
+    return base;  // アフィリンクは【リンク】(5字)で数えるので、超過の原因は本文そのもの
   }
   function photoFile() { var p = $('photo'), f = p && p.files && p.files[0]; return f || (window.Go5ForegroundFile && window.Go5ForegroundFile()) || null; }
 
@@ -1607,8 +1623,8 @@
     if (els.pvBody) els.pvBody.innerHTML = html;
 
     if (els.count) {
-      var _ct = composePostText(), n = countGraphemes(_ct), _la = n > 300 ? longAffLinkChars_(_ct) : 0;
-      els.count.textContent = n + ' / 300' + (_la ? '(アフィリンク' + _la + '字込み)' : '');
+      var _ct = composePostText(), n = countGraphemes(_ct);
+      els.count.textContent = n + ' / 300';
       els.count.classList.toggle('over', n > 300);
     }
 
