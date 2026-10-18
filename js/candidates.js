@@ -3304,13 +3304,15 @@
     if (_idbOk && !known && !refReady) {
       var loadSeq = ++_refOpenSeq;
       showRefLoadState_(ov, it, false, onSaved);
-      var slowTimer = setTimeout(function () {
-        if (loadSeq === _refOpenSeq && !ov.hidden) showRefLoadState_(ov, it, false, onSaved);
-      }, 4000);
+      // ★iOSでIDB読取が詰まる/失敗すると、読込中表示のまま編集できなかった(Chami実機2026-10-18)。
+      //   短い待ちで返らなければ、画像操作だけ止めた編集モーダルを先に開く(文字は同期LSの正本から読める)。
+      var openPartial = setTimeout(function () {
+        if (loadSeq === _refOpenSeq && !ov.hidden) openRefImgModal_(it, onSaved, 'imgsPending');
+      }, 2500);
       ensureRefLoaded_(cid).then(function (ok) {
-        clearTimeout(slowTimer);
+        clearTimeout(openPartial);
         if (loadSeq !== _refOpenSeq) return; // 閉じた/別作品を開いた後なら古い結果を出さない
-        if (!ok) { showRefLoadState_(ov, it, true, onSaved); return; }
+        if (!ok) { openRefImgModal_(it, onSaved, 'imgsPending'); return; }
         // 直接読めた1件は全体ハイドレートを待たずカード側にも即時反映する。
         try {
           var page = document.getElementById('pageCand'), live = page && liveRefButton_(page, cid);
@@ -3330,6 +3332,9 @@
     // 「動画生成へ」は遷移ボタンでもある。画像を触っていないのに保存画像列を書き直さない。
     // 明示的な追加・並べ替え・削除があった時だけ画像IDBを更新する。
     var imagesDirty = false;
+    // 画像レコードの読取が未確認のまま開いた(=iOSのIDB詰まり)。確認できるまで画像の追加・並べ替え・削除を止め、
+    // 保存は文字(cand_text)だけにする=未確認の空画像列で既存画像を上書きしない。
+    var imgsPending = refReady === 'imgsPending';
     var marksOrderCommitted = false;
     function commitImageMarkOrder_() {
       if (!imagesDirty || marksOrderCommitted) return;
@@ -3382,6 +3387,7 @@
     function drawPreview() {
       var n = pending.imgs.length;
       if (pending.idx >= n) pending.idx = Math.max(0, n - 1);
+      if (!n && imgsPending) { previewEl.innerHTML = '<div class="hint" aria-live="polite" style="text-align:center;padding:18px;border:1px dashed var(--line);border-radius:8px;">⏳ 保存済みの画像を確認中…(コメント・URLは先に編集・保存できます)</div>'; return; }
       if (!n) { previewEl.innerHTML = '<div class="hint" style="text-align:center;padding:18px;border:1px dashed var(--line);border-radius:8px;">画像は未保存です(貼り付けで追加・複数枚OK)</div>'; return; }
       previewEl.innerHTML =
         '<div class="cand-refimg-stage">' +
@@ -3396,11 +3402,12 @@
         openImgZoom_(pending.imgs.slice(), pending.idx, {
           markCid: cid, // 動画生成用画像だけ「通常/使用済み/除外」3択を出す(他のopenImgZoom_呼び出しには付けない)
           onReorder: function (i) {
-            if (i <= 0 || i >= pending.imgs.length) return pending.imgs.slice();
+            if (imgsPending || i <= 0 || i >= pending.imgs.length) return pending.imgs.slice();
             var img = pending.imgs.splice(i, 1)[0]; pending.imgs.unshift(img); pending.idx = 0; imagesDirty = true; drawPreview(); // 旧1枚目は2枚目へずれる(保存で確定)
             return pending.imgs.slice();
           },
           onPasteAdd: function (done) {
+            if (imgsPending) { done(null, '保存済みの画像を確認中です。確認後に追加できます'); return; }
             pasteImageFromClipboard_(function (durl, err) {
               if (err || !durl) { done(null, err || '画像がコピーされていません'); return; }
               pending.imgs.unshift(durl); pending.idx = 0; imagesDirty = true; drawPreview(); // 先頭＝1ページ目(保存で確定)
@@ -3470,7 +3477,7 @@
       var files = [], fl = this.files || [], fi;
       for (fi = 0; fi < fl.length; fi++) files.push(fl[fi]);
       this.value = '';
-      if (!files.length) return;
+      if (!files.length || imgsPending) return;
       body.querySelector('#refImgMsg').textContent = '画像を処理中…(' + files.length + '枚)';
       // 1枚ずつ順に処理。(大量選択時のメモリ圧迫を防ぐ・選択順も保たれる)
       var added = 0, failed = 0, batch = [];
@@ -3492,6 +3499,7 @@
       })(0);
     });
     body.querySelector('#refImgPaste').addEventListener('click', function () {
+      if (imgsPending) return;
       body.querySelector('#refImgMsg').textContent = '画像を貼り付け中…';
       pasteImageFromClipboard_(function (durl, err) {
         if (mySeq !== _refOpenSeq) return; // モーダルが開き直された＝破棄
@@ -3501,6 +3509,7 @@
       });
     });
     body.querySelector('#refImgClear').addEventListener('click', function () {
+      if (imgsPending) return;
       var n = pending.imgs.length;
       if (!n) { drawPreview(); return; }
       if (!window.confirm(n > 1 ? ('表示中の画像(' + (pending.idx + 1) + '/' + n + ')を削除しますか？') : '本当に画像を削除しますか？')) return;
@@ -3633,7 +3642,43 @@
         if (saveOp.fail()) showSaveFailure_();
       });
     });    wirePaste_(body);
+    if (imgsPending) waitPendingImgs_();
     ov.hidden = false;
+    function setImgOpsLocked_(locked) {
+      ['#refImgFile', '#refImgPaste', '#refImgClear'].forEach(function (sel) { var el = body.querySelector(sel); if (el) el.disabled = locked; });
+      var pick = body.querySelector('.cand-refimg-pick');
+      if (pick) pick.style.opacity = locked ? '0.45' : '';
+    }
+    // 画像レコードの確認を裏で待つ。確認できたら画像欄へ反映し、画像操作を解禁する。
+    function waitPendingImgs_() {
+      setImgOpsLocked_(true);
+      drawPreview();
+      ensureRefLoaded_(cid).then(function (ok) {
+        if (mySeq !== _refOpenSeq) return; // 閉じた/開き直した後の遅着は捨てる
+        if (!ok) {
+          previewEl.innerHTML = '<div class="hint" style="text-align:center;padding:14px;border:1px dashed var(--line);border-radius:8px;">⚠️ 保存済みの画像を確認できませんでした(コメント・URLは保存できます)<br><button type="button" class="ghost refimg-img-retry" style="width:auto;margin-top:8px;">画像をもう一度確認</button></div>';
+          var retry = previewEl.querySelector('.refimg-img-retry');
+          if (retry) retry.addEventListener('click', waitPendingImgs_);
+          return;
+        }
+        var got = refImgOf(cid) || {};
+        curImgs = Array.isArray(got.imgs) ? got.imgs.filter(Boolean) : (got.img ? [got.img] : []);
+        pending.imgs = curImgs.slice(); pending.idx = 0; // 確認前は画像を触れない=上書きしてよいのは確認済みの列だけ
+        // 移行前の端末は文字もIDB側にしか無いことがある。まだ触っていない欄だけ埋める。
+        var cEl = body.querySelector('#refImgComment'), tEl = body.querySelector('#refImgTwitter');
+        if (got.comment && cEl && cEl.value === pending.comment) { cEl.value = got.comment; pending.comment = got.comment; }
+        if (got.twitterUrl && tEl && tEl.value === pending.twitterUrl) { tEl.value = got.twitterUrl; pending.twitterUrl = got.twitterUrl; }
+        if (got.memo && !pending.memo && !body.querySelector('#refImgMemoInline')) { pending.memo = got.memo; addMemoBox_(got.memo); }
+        if (!urls2Wrap.children.length) refUrls2_(got).forEach(function (u) { addUrl2Row_(u); });
+        imgsPending = false;
+        setImgOpsLocked_(false);
+        drawPreview();
+        try {
+          var page = document.getElementById('pageCand'), live = page && liveRefButton_(page, cid);
+          if (live) updateCardRefThumb_(live.closest ? live.closest('.cand-card') : null, cid);
+        } catch (e) {}
+      });
+    }
   }
 
   // (メモ＋X/Bluesky URL の小モーダル openMemoUrlModal_ は廃止=投稿編集モーダル本体に統合・Chami依頼2026-08-09)
