@@ -41,8 +41,11 @@ test('予約投稿で投稿完了 → 投稿履歴と予約タブに予定時刻
   await picker.locator('#integ-pick').click();
   await expect(page.locator('#draftPickedSlot')).toContainText('選択中：');
   const slotAt = await page.evaluate((id) => JSON.parse(localStorage.getItem('go5_draft_post_' + id) || '{}').pubSlot.scheduled_at, draftId);
-  const d = new Date(String(slotAt).replace(' ', 'T'));
-  const hm = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  // 時刻の解釈はページ側(Asia/Tokyo)で行う=CIランナーのTZ(UTC)に引きずられない。
+  const { slotMs, hm } = await page.evaluate((at) => {
+    const d = new Date(String(at).replace(' ', 'T'));
+    return { slotMs: d.getTime(), hm: String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0') };
+  }, slotAt);
   await page.locator('#draftYtUrl').fill('https://youtu.be/planvid0001');
   page.on('dialog', (dl) => dl.accept());
   await page.locator('#draftModalComplete').click();
@@ -67,7 +70,7 @@ test('予約投稿で投稿完了 → 投稿履歴と予約タブに予定時刻
 
   // 予定時刻は同期キー(hist_post_time_v1)にも載る=別端末・シート由来の行でも同じ時刻になる。
   const plannedMs = await page.evaluate((vid) => (JSON.parse(localStorage.getItem('hist_post_time_v1') || '{}')['yt:' + vid] || {}).plannedMs, vid);
-  expect(plannedMs).toBe(d.getTime());
+  expect(plannedMs).toBe(slotMs);
 
   // 予約タブ(⏰予約)の「YouTube公開待ち」も「公開待ち」だけでなく予定時刻を出す。
   //   投稿履歴ページで抽出した分が acc1(月詠み)の箱へ入らず、癒やし倉庫(acc3)として載ること。
