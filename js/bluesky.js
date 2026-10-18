@@ -1352,7 +1352,7 @@
   // Blueskyへ出る本文の字数。DMM/FANZA/DLsite行きURLは投稿時に「【リンク】」(5字)へ置換されるので、置換後で数える。
   function countGraphemes(s) {
     s = String(s == null ? '' : s);
-    if (window.BlueskyCore && window.BlueskyCore.buildRichText) s = window.BlueskyCore.buildRichText(s).text;
+    if (typeof window !== 'undefined' && window.BlueskyCore && window.BlueskyCore.buildRichText) s = window.BlueskyCore.buildRichText(s).text;
     try { if (typeof Intl !== 'undefined' && Intl.Segmenter) { var seg = graphemeSeg_ || (graphemeSeg_ = new Intl.Segmenter('ja', { granularity: 'grapheme' })); var n = 0, it = seg.segment(s)[Symbol.iterator](); while (!it.next().done) n++; return n; } } catch (e) {}
     return Array.from(s).length;
   }
