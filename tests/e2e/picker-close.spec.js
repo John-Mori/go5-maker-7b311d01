@@ -23,10 +23,12 @@ async function openWithPicker(page, draftId) {
 }
 
 test.describe('公開枠カレンダーの自動クローズ', () => {
-  test.beforeEach(async ({ context }) => {
+  test.beforeEach(async ({ context, baseURL }) => {
+    // 外部通信だけ止める。本番スモーク(BASE_URL=github.io)では画面自体の配信元も通す(localhost固定だとStock.htmlまで止まりCIが常に赤だった)。
+    const self = baseURL ? new URL(baseURL).origin : '';
     await context.route('**/*', (route) => {
       const u = new URL(route.request().url());
-      if (u.hostname === '127.0.0.1' || u.hostname === 'localhost' || u.protocol === 'data:' || u.protocol === 'blob:') return route.continue();
+      if (u.origin === self || u.hostname === '127.0.0.1' || u.hostname === 'localhost' || u.protocol === 'data:' || u.protocol === 'blob:') return route.continue();
       return route.abort();
     });
   });
