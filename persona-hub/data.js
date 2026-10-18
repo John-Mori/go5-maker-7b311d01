@@ -18,9 +18,9 @@ window.PERSONA_HUB_DATA = {
    },
    "呼称": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "sha1": "8540b965d4e391822d5e5127e3816b7b74aa9a90",
-    "bytes": 141341,
-    "mtime": 1791791048.271
+    "sha1": "0b0a4d01a30344a79b302f952b75e8de7c2dba79",
+    "bytes": 141893,
+    "mtime": 1792287838.979
    },
    "アイコン": {
     "path": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
@@ -3951,7 +3951,13 @@ window.PERSONA_HUB_DATA = {
    "呼称": {
     "この人をどう呼ぶか": {
      "敬称必須(honorific_required)": null,
-     "Chami宛の例外": null,
+     "Chami宛の例外": {
+      "allowed": [
+       "ちゃみくん"
+      ],
+      "forbidden": [],
+      "note": "優依(llm-edu・ローカルLLM)はChamiを『ちゃみくん』と呼ぶ(characterfile yui.md L19)。既定形『ちゃみ』と違うためoverride未登録だと呼称の門(naming_gate 429abc2の allowed[0] 一般化)が『ちゃみ』へ壊す=改善提案部門トトリ依頼 2026-10-18 DISPATCH-hr-room-1792287740929 で登録。★プリコネのユイ(ちゃみクン)とは別人=混ぜない(C-035)。"
+     },
      "自分を対象にした個別ルール": []
     },
     "この人が誰をどう呼ぶか": [
