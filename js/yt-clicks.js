@@ -1438,6 +1438,12 @@
     var original = btn.textContent; btn.disabled = true; btn.textContent = '短縮中…';
     treeShortStatus_(row, true, 'アフィリンクと短縮先を確認中…');
     window.Go5MakeShort(built.link, { account: account }).then(function (res) {
+      // 作品リンクは短縮しない(2026-10-18 Chami決定)=アフィリンクをそのまま入れる。
+      if (res && res.noShort) {
+        inp.value = built.link; inp.dispatchEvent(new Event('input', { bubbles: true }));
+        treeShortStatus_(row, true, '✅ アフィリンクOK(作品リンクは短縮しません)');
+        return;
+      }
       var shortUrl = (res && (res.shortUrl || res.shareUrl)) || '';
       var destination = (res && res.destinationUrl) || '';
       var domainOk = !!(expectedBase && shortUrl.indexOf(expectedBase + '/') === 0);
@@ -1722,6 +1728,8 @@
       var errEl = $('veditError'); if (errEl) errEl.hidden = true;
       var orig = btn.textContent; btn.disabled = true; btn.textContent = '生成中…';
       window.Go5MakeShort(aff.link).then(function (res) {
+        // 作品リンクは短縮しない(2026-10-18 Chami決定)=作品クリック計測URLは新しく作らない。既に入っている値は消さない。
+        if (res && res.noShort) { showModalErr_('作品リンクは短縮しない運用になったので、作品クリック計測URLは新しく作りません(既存の値はそのまま)'); return; }
         var r2 = (res && res.shortUrl) || '', share = (res && res.shareUrl) || r2;
         if (!r2) { showModalErr_('短縮に失敗しました。(r2ワーカーに接続できませんでした)'); return; }
         $('veditWorkShort').value = share; // 欄には短い表示URLを表示
@@ -2080,6 +2088,7 @@
         var retry_ = function () { if (tries < 3) setTimeout(attempt_, tries * 1500); };
         try {
           window.Go5MakeShort(toShorten, { account: acc2 }).then(function (res) {
+            if (res && res.noShort) return; // 作品リンクは短縮しない(2026-10-18 Chami決定)=新しい計測コードは作らない。再試行もしない
             if (!(res && res.shortUrl && isR2(res.shortUrl))) { retry_(); return; }
             it.workShortUrl = res.shortUrl; it.workShareUrl = res.shareUrl || res.shortUrl;
             if (typeof persist === 'function') persist();

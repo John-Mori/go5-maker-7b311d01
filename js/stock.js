@@ -3317,6 +3317,18 @@
           //   worker瞬断時に"生アフィリンク"を shortUrl/shareUrl として返す(bluesky.js:1950)。生URLを成功と
           //   誤認すると①_shortMintCache が汚れてリトライが二度と走らず欄が永久に空(REQ-28ef251ba4/65c7897f2f)
           //   ②X本文プレースホルダへ生アフィリンクが充填される(§6.1のP0作法違反)。r2以外はキャッシュせずリトライへ。
+          // 作品リンクは短縮しない(Chami決定 2026-10-18 5Sec軍議 msg 1561272541387948148)=アフィリンクのまま埋める。
+          //   計測キーではないので正本フィールドへは保存せず、リトライもしない。
+          if (r && r.noShort) {
+            var afId = ''; try { afId = localStorage.getItem('fanza_af_id') || ''; } catch (e) {}
+            var built = (afId && window.ensureAffiliateLink) ? window.ensureAffiliateLink(aff, afId) : null;
+            var link = (built && built.ok && built.link) ? built.link : aff;
+            _shortMintCache[aff] = { shortUrl: link, shareUrl: link };
+            applyShare_(_shortMintCache[aff]);
+            var xr = $('draftXReply'); if (xr && _modalMeta === meta && pillarSplitOn_(meta)) xr.value = link;
+            saveStaleXText_(meta);
+            return;
+          }
           var go5 = window.Go5Short || {};
           if (r && r.shortUrl && go5.ourBase && go5.ourBase(r.shortUrl)) {
             _shortMintCache[aff] = { shortUrl: r.shortUrl, shareUrl: (r.shareUrl || r.shortUrl) };
@@ -3332,12 +3344,21 @@
   //   ★作品側 mintDraftWorkShort_ と対。openPostModal_ の saved.xText 分岐は composeXForModal_ を通らないため、
   //     セール側だけが日本語プレースホルダのまま凍結して残っていた(Chami報告2026-08-13「まだ短縮URLリンクが置換されない」)。
   //   本文全体は作り直さない(＝手編集を壊さない)。別作品へ切り替わっていたら書かない。未発番なら発番完了後に差し替える。
+  // 作品/セールのリンクは短縮しなくなったので(2026-10-18)、合成の時点で埋まり置換が起きないことがある。
+  //   その時も保存済み本文(saved.xText)がプレースホルダのまま古ければ今の表示で更新する(無い=未編集は保存しない)。
+  function saveStaleXText_(meta) {
+    try {
+      var _sv = JSON.parse(localStorage.getItem('go5_draft_post_' + meta.id) || '{}'), _xt = $('draftXText');
+      if (_modalMeta === meta && _sv && _sv.xText && _xt && _sv.xText !== _xt.value) saveDraftPost_();
+    } catch (e) {}
+  }
   function mintDraftSaleShort_(meta) {
     if (!window.__go5FillSalePlaceholderInText) return;
     var el = $('draftXText'); if (!el) return;
     var applySale_ = function (nv) {
       if (_modalMeta !== meta) return;
-      var cur = $('draftXText'); if (!cur || !nv || nv === cur.value) return;
+      var cur = $('draftXText'); if (!cur || !nv) return;
+      if (nv === cur.value) { saveStaleXText_(meta); return; }
       var saleLink = arguments[1] || '';
       // 非同期発番の間に作品URL側が先に置換されることがある。nvは開始時点の古い本文なので、
       // 発番済みURLだけを「今の本文」へ適用し、2処理の完了順による巻き戻しを防ぐ。
@@ -3351,7 +3372,7 @@
       } catch (e) {}
     };
     var filled = window.__go5FillSalePlaceholderInText(el.value, applySale_);
-    if (filled && filled !== el.value) applySale_(filled);
+    if (filled) applySale_(filled);
   }
 
   function openPostModal_(meta) {
@@ -3497,7 +3518,10 @@
     if (xl) xl.textContent = split ? '子の文(返信)' : 'X 投稿';
     if (xt) xt.rows = split ? 4 : 9;
     if (lb) lb.textContent = split ? 'X投稿リンク(X親の投稿URL・記録用。Bluesky未投稿ならこれが説明欄へ入る)' : 'X投稿リンク(Xに投稿後に貼ると説明欄へ短縮URLが入る)';
-    var xi = $('draftXReply'); if (xi) xi.value = split ? (saved.workShareUrl || saved.workShortUrl || (meta.affiliateUrl || meta.workUrl || '').trim()) : ''; // 短縮前/失敗時は生リンク(踏める)
+    // 作品リンクは短縮しない(2026-10-18 Chami決定)ので、DMM/FANZA行きはアフィリンクを優先。保存済みの短縮コードは消さずに残す。
+    var affRaw = (meta.affiliateUrl || meta.workUrl || '').trim();
+    var replyLink = (affRaw && window.isNoShortDestUrl && window.isNoShortDestUrl(affRaw)) ? affRaw : (saved.workShareUrl || saved.workShortUrl || affRaw);
+    var xi = $('draftXReply'); if (xi) xi.value = split ? replyLink : ''; // 短縮前/失敗時は生リンク(踏める)
     renderBskyStatus_(saved);
   }
   function renderBskyStatus_(saved) {

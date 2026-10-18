@@ -1,6 +1,7 @@
 /**
  * quick-affi.js — アカウント帯「癒やし倉庫」の右の「即アフィ」ボタンとモーダル(Chami msg 1559417034813608007)。
- * 作品URLを入れたら、アフィリンク化→今のチャンネルのドメインで短縮リンク発行→アフィチェック表示までを1画面で済ませる。
+ * 作品URLを入れたら、アフィリンク化→アフィチェック表示までを1画面で済ませる。
+ *   DMM/FANZA・DLsite行きは短縮せずアフィリンク(al.fanza)をそのまま出す(Chami決定 2026-10-18 5Sec軍議 msg 1561272541387948148)。
  * 中身(アフィ化・短縮・転送先のaf_id照合)は bluesky.js の window.Go5IssueAffShort=AFIリンクタブの単体短縮と同じ芯。
  * 発行後は定型文(⇩気になった方は…/新作N%OFF✨️ 等+短縮リンク)を丸ごとコピペできる欄にも出す(Chami msg 1559480072589803612)。
  *   文面の正本は core/movie-attrs-core.js の affiPostText。割引と発売日は window.Go5FreshWorkInfo で取り直す。
@@ -36,9 +37,9 @@
           '<div class="qa-row"><input id="qaUrl" type="text" inputmode="url" autocomplete="off" placeholder="https://...(DMM/FANZAの作品URL)">' +
             '<button type="button" class="qa-mini" data-act="paste">貼り付け</button></div>' +
           '<div class="qa-domain"></div>' +
-          '<button type="button" class="qa-go">アフィリンク＋短縮リンクを作る</button>' +
+          '<button type="button" class="qa-go">アフィリンクを作る</button>' +
           '<div class="qa-result" hidden>' +
-            '<label class="qa-label" for="qaOut">短縮リンク</label>' +
+            '<label class="qa-label" for="qaOut">アフィリンク</label>' +
             '<div class="qa-row"><input id="qaOut" type="text" readonly>' +
               '<button type="button" class="qa-mini" data-act="copy">コピー</button></div>' +
             '<div class="qa-dest"></div>' +
@@ -130,7 +131,9 @@
       els.out.placeholder = r.url ? '' : '発行できませんでした';
       els.copy.disabled = !r.url;
       // 発行できなかった理由は欄の中に収まらないので、転送先の行に全文で出す。
-      els.dest.textContent = (r.url ? '' : r.out + (r.dest ? ' / ' : '')) + (r.dest ? '転送先: ' + r.dest : '');
+      //   短縮しない時(r.raw)は欄のリンクが転送先そのものなので重ねて出さない。
+      var dest = (r.dest && r.dest !== r.url) ? r.dest : '';
+      els.dest.textContent = (r.url ? '' : r.out + (dest ? ' / ' : '')) + (dest ? '転送先: ' + dest : '');
       if (r.aff) status_(r.aff, r.affMsg);
       post_(r.url || '', got[1]);
       if (r.issued) lastIssued = url;
@@ -141,9 +144,7 @@
 
   function open_() {
     if (!modal) build_();
-    var base = '';
-    try { base = (window.Go5Short && window.Go5Short.base && window.Go5Short.base()) || ''; } catch (e) {}
-    els.domain.textContent = '発行ドメイン: ' + (base ? base.replace(/^https?:\/\//, '').replace(/\/+$/, '') : '未設定(短縮せず元のURLのまま)');
+    els.domain.textContent = 'DMM/FANZAの作品・セールは短縮せず、アフィリンクのまま出します';
     modal.hidden = false;
     setTimeout(function () { try { els.url.focus(); } catch (e) {} }, 30);
   }

@@ -7,45 +7,35 @@ test.describe('単体短縮リンク発行', () => {
     { account: 'acc2', channel: '宵桜艶帖', domain: 'yoz2.com', code: 'reply-yoizakura' },
     { account: 'acc3', channel: '癒やし倉庫', domain: 'xdgh3.com', code: 'reply-iyashi' },
   ]) {
-    test(accountCase.channel + 'はアフィリンクを検証して専用ドメインだけを発行する', async ({ page }) => {
+    // 2026-10-18 Chami決定(5Sec軍議 msg 1561272541387948148)「ピンククリックはもう計測する必要もない、
+    //   短縮リンク化はYouTube→Twitterとかのところだけ」。作品URLは短縮せず al.fanza のアフィリンクをそのまま出す。
+    test(accountCase.channel + 'は作品URLを短縮せずアフィリンク(al.fanza)のまま出す', async ({ page }) => {
       const longUrl = 'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_e2e_manual_short/';
-      let canonicalCalls = 0;
-      let legacyCalls = 0;
-      let savedDestination = '';
+      let workShortenCalls = 0;
       await page.addInitScript(() => {
         localStorage.setItem('current_account', 'acc1');
         localStorage.setItem('fanza_af_id', 'test-affiliate-990');
-        // 旧共通上書きが残っていても、既知2chのドメインを1本へ潰してはいけない。
         localStorage.setItem('short_worker_url', 'https://legacy-short.invalid');
         Object.defineProperty(navigator, 'clipboard', {
           configurable: true,
           value: { writeText: async (value) => { window.__manualCopied = value; } },
         });
       });
-      await page.route('https://' + accountCase.domain + '/api/shorten', async (route) => {
-        const body = new URLSearchParams(route.request().postData() || '');
-        const destination = body.get('url') || '';
-        if (destination.includes('d_e2e_manual_short')) { canonicalCalls++; savedDestination = destination; }
+      await page.route(/https:\/\/(?:5mgl\.com|yoz2\.com|xdgh3\.com|legacy-short\.invalid)\/api\/shorten/, async (route) => {
+        const destination = new URLSearchParams(route.request().postData() || '').get('url') || '';
+        if (destination.includes('d_e2e_manual_short')) workShortenCalls++;
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
           body: JSON.stringify({ short: 'https://' + accountCase.domain + '/' + accountCase.code, url: destination }),
         });
       });
-      await page.route('https://legacy-short.invalid/api/shorten', async (route) => {
-        legacyCalls++;
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({ short: 'https://legacy-short.invalid/wrong-domain', url: longUrl }),
-        });
-      });
 
       await page.goto('index.html', { waitUntil: 'domcontentloaded' });
       await page.locator('#tabAffi').click();
-      // 旧2chは運用画面から隠しただけ。テスト内だけ選択肢を戻し、保持された
-      // ドメイン定義とアフィ検証経路が消えていないことを直接確認する。
+      // 旧2chは運用画面から隠しただけ。テスト内だけ選択肢を戻す。
       await page.locator('#manualShortAccount').evaluate((select, accountCase) => {
+        if (select.querySelector('option[value="' + accountCase.account + '"]')) return;
         const option = document.createElement('option');
         option.value = accountCase.account;
         option.textContent = accountCase.channel;
@@ -53,23 +43,30 @@ test.describe('単体短縮リンク発行', () => {
       }, accountCase);
       await page.locator('#manualShortAccount').selectOption(accountCase.account);
       await expect(page.locator('#manualAffiliateOn')).toBeChecked();
-      await expect(page.locator('#manualShortDomain')).toHaveText('発行ドメイン: ' + accountCase.domain);
       await page.locator('#manualUrl').fill(longUrl);
       await page.locator('#manualShortBtn').click();
 
-      const expected = 'https://' + accountCase.domain + '/' + accountCase.code;
-      await expect(page.locator('#manualOut')).toHaveText(expected);
-      await expect(page.locator('#manualOut')).toHaveAttribute('data-url', expected);
-      await expect(page.locator('#manualAffStatus')).toContainText('アフィリンクOK');
-      const affiliate = new URL(savedDestination);
+      await expect(page.locator('#manualOut')).toHaveAttribute('data-url', /^https:\/\/al\.fanza\.co\.jp\//);
+      const out = await page.locator('#manualOut').getAttribute('data-url');
+      const affiliate = new URL(out || '');
       expect(affiliate.hostname).toBe('al.fanza.co.jp');
       expect(affiliate.searchParams.get('af_id')).toBe('test-affiliate-990');
       expect(affiliate.searchParams.get('lurl')).toBe(longUrl);
-      expect(await page.locator('#manualOut').textContent()).not.toMatch(/計測|\(|\)/);
+      await expect(page.locator('#manualAffStatus')).toContainText('アフィリンクOK・短縮なし');
       await page.locator('#manualCopy').click();
-      await expect.poll(() => page.evaluate(() => window.__manualCopied || '')).toBe(expected);
-      expect(canonicalCalls).toBe(1);
-      expect(legacyCalls).toBe(0);
+      await expect.poll(() => page.evaluate(() => window.__manualCopied || '')).toBe(out);
+      expect(workShortenCalls).toBe(0);
+      // 投稿文の自動挿入・X欄・ドラフトが通る共通の口も、作品/セール一覧は短縮しない。X投稿URLは従来どおり短縮へ回す。
+      const viaCore = await page.evaluate(async () => {
+        const w = await window.Go5MakeShort('https://al.fanza.co.jp/?lurl=https%3A%2F%2Fwww.dmm.co.jp%2F&af_id=test-affiliate-990&ch=link_tool&ch_id=link');
+        const sale = await window.Go5MakeShort('https://www.dmm.co.jp/dc/doujin/-/list/=/sort=ranking/');
+        return { w, sale, noShortX: window.isNoShortDestUrl('https://x.com/a/status/1'), noShortBsky: window.isNoShortDestUrl('https://bsky.app/profile/a/post/b') };
+      });
+      expect(viaCore.w.noShort).toBe(true);
+      expect(viaCore.w.shareUrl).toMatch(/^https:\/\/al\.fanza\.co\.jp\//);
+      expect(viaCore.sale.shareUrl).toBe('https://www.dmm.co.jp/dc/doujin/-/list/=/sort=ranking/');
+      expect(viaCore.noShortX).toBe(false);
+      expect(viaCore.noShortBsky).toBe(false);
     });
   }
 

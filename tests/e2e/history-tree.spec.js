@@ -70,21 +70,22 @@ test.describe('投稿履歴のツリー設定', () => {
     expect(rec.trees[0]).toMatchObject({ name: '続編はこちら', postUrl: 'https://x.com/example/status/1234567890', shortUrl: SHORT_BASE + '/tree01' });
   });
 
-  test('元作品URLをアフィ化し、チャンネルの新ドメインで短縮してからOKを表示する', async ({ page }) => {
-    let destination = '';
-    await page.route(SHORT_BASE + '/api/shorten', async (route) => {
-      const body = route.request().postData() || '';
-      destination = new URLSearchParams(body).get('url') || '';
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ short: SHORT_BASE + '/tree99', url: destination }) });
+  // 作品リンクは短縮しない(Chami決定 2026-10-18 5Sec軍議 msg 1561272541387948148)。アフィ化だけしてそのまま入れる。
+  test('元作品URLをアフィ化し、短縮せずアフィリンクのままOKを表示する', async ({ page }) => {
+    let shortenCalls = 0;
+    await page.route('**/api/shorten', async (route) => {
+      shortenCalls++;
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ short: SHORT_BASE + '/tree99' }) });
     });
     await page.locator('.vedit-btn').first().click();
     const row = page.locator('.vedit-tree-row').first();
     await row.locator('.vedit-tree-short').fill('https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_123456/');
     await row.locator('.vedit-tree-shorten').click();
-    await expect(row.locator('.vedit-tree-short')).toHaveValue(SHORT_BASE + '/tree99');
-    await expect(row.locator('.vedit-tree-status')).toContainText('アフィリンクOK・短縮先OK');
-    expect(destination).toContain('https://al.fanza.co.jp/');
-    expect(new URL(destination).searchParams.get('af_id')).toBe('sample-001');
+    await expect(row.locator('.vedit-tree-status')).toContainText('アフィリンクOK(作品リンクは短縮しません)');
+    const value = await row.locator('.vedit-tree-short').inputValue();
+    expect(value).toContain('https://al.fanza.co.jp/');
+    expect(new URL(value).searchParams.get('af_id')).toBe('sample-001');
+    expect(shortenCalls).toBe(0);
   });
   test('X/Bluesky投稿URLでない値は保存せず、モーダル内で理由を出す', async ({ page }) => {
     await page.locator('.vedit-btn').first().click();

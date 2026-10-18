@@ -927,7 +927,8 @@
   function discCacheLoad_() { try { var o = JSON.parse(localStorage.getItem(DISC_CACHE_KEY) || '{}'); return (o && typeof o === 'object') ? o : {}; } catch (e) { return {}; } }
   // キー組み立ては bluesky-core.js の純粋関数(buildDiscountCacheKey・テスト済)へ委譲。
   function discCacheKeyFor_(entry, af) {
-    var o = { account: acctId(), entryId: entry ? entry.id : '', afId: af, domain: workerBase() };
+    // domainへ '#raw' を付けた=セール一覧も短縮しなくなった(2026-10-18)ので、以前の短縮版キャッシュを使い回さない。
+    var o = { account: acctId(), entryId: entry ? entry.id : '', afId: af, domain: workerBase() + '#raw' };
     return (window.BlueskyCore && window.BlueskyCore.buildDiscountCacheKey) ? window.BlueskyCore.buildDiscountCacheKey(o) : [o.account, o.entryId, o.afId, o.domain].join('|');
   }
   function discCacheGet_(key) { return discCacheLoad_()[key] || ''; }
@@ -944,10 +945,21 @@
   //   キーにする＝作品URL・af_idのどちらが変わってもresolveAffLink()の戻り値が変わるため自動的に
   //   無効化される(割引リンクキャッシュと同じ設計思想)。
   var workShortCache_ = { forLink: '', shareUrl: '' };
-  function cachedWorkShortLink_() {
-    var raw = resolveAffLink();
-    return (raw && workShortCache_.forLink === raw) ? workShortCache_.shareUrl : '';
+  // DMM/FANZA・DLsite行きは短縮しない(makeShortAndShare参照)。判定は affiliate-core.js の純粋関数。
+  function noShortDest_(u) { return !!(u && window.isNoShortDestUrl && window.isNoShortDestUrl(u)); }
+  // 作品リンクの「投稿に載せる形」。短縮しない宛先は生のアフィリンクそのもの(取得待ちを挟まない)。
+  function workShareFor_(link) {
+    if (!link) return '';
+    if (noShortDest_(link)) return affRawFor_(link);
+    return (workShortCache_.forLink === link) ? workShortCache_.shareUrl : '';
   }
+  // 素の作品URLが来てもaf_id付きで出す(付けられない時は渡されたまま)。
+  function affRawFor_(link) {
+    var afId = ''; try { afId = localStorage.getItem('fanza_af_id') || ''; } catch (e) {}
+    var r = (afId && window.ensureAffiliateLink) ? window.ensureAffiliateLink(link, afId) : null;
+    return (r && r.ok && r.link) ? r.link : link;
+  }
+  function cachedWorkShortLink_() { return workShareFor_(resolveAffLink()); }
   function ensureWorkShortLink_(onReady) {
     var raw = resolveAffLink(); if (!raw) return;
     if (workShortCache_.forLink === raw && workShortCache_.shareUrl) { if (onReady) onReady(workShortCache_.shareUrl); return; }
@@ -1328,6 +1340,16 @@
     try { if (typeof Intl !== 'undefined' && Intl.Segmenter) { var seg = graphemeSeg_ || (graphemeSeg_ = new Intl.Segmenter('ja', { granularity: 'grapheme' })); var n = 0, it = seg.segment(s)[Symbol.iterator](); while (!it.next().done) n++; return n; } } catch (e) {}
     return Array.from(s).length;
   }
+  // Blueskyは本文中のURLを全文で300字に数える。作品/セールのアフィリンク(短縮しない宛先)は1本140〜190字あるので、
+  //   超えた時はその内訳を添えて知らせる(短縮しない運用 2026-10-18 Chami決定の副作用)。
+  function longAffLinkChars_(s) {
+    var n = 0; (String(s || '').match(/https?:\/\/[^\s]+/g) || []).forEach(function (u) { if (noShortDest_(u)) n += countGraphemes(u); });
+    return n;
+  }
+  function over300Msg_(s, base) {
+    var n = longAffLinkChars_(s);
+    return n ? base + '(うちアフィリンクが' + n + '字。作品リンクは短縮しない運用のため、本文を詰めるかセール一覧リンクを外してください)' : base;
+  }
   function photoFile() { var p = $('photo'), f = p && p.files && p.files[0]; return f || (window.Go5ForegroundFile && window.Go5ForegroundFile()) || null; }
 
   // ---- アフィリンク自動付与・本文合成 ----
@@ -1399,7 +1421,7 @@
       //   既存どおり自動追記を維持する(XとBlueskyで使い分け・Chami同指示)。
       var caption = stripAutoBlocksSafe_(bskyText || '');
       var link = overrideAffLink !== undefined ? overrideAffLink : resolveAffLink();
-      var short = link ? ((workShortCache_.forLink === link) ? workShortCache_.shareUrl : '') : '';
+      var short = workShareFor_(link);
       var dlink = discountListOn_() ? cachedDiscountLink_() : '';
       // ★置換(のみ)の実体はBlueskyCore.composeXParentText(純粋関数・Nodeテスト対象)に委譲する
       //   (shouldSkipDiscSeedと同じ作法＝本体はcore関数の薄いラッパーにする)。core未読込時のみ素通し。
@@ -1414,7 +1436,7 @@
         ensureDiscountLink_(_notifyDisc);
       }
       if (link && out.indexOf(link) >= 0) {
-        var shortX = (workShortCache_.forLink === link) ? workShortCache_.shareUrl : '';
+        var shortX = workShareFor_(link);
         if (shortX) out = out.split(link).join(shortX);
       }
       return out;
@@ -1584,7 +1606,11 @@
     }
     if (els.pvBody) els.pvBody.innerHTML = html;
 
-    if (els.count) { var n = countGraphemes(composePostText()); els.count.textContent = n + ' / 300'; els.count.classList.toggle('over', n > 300); }
+    if (els.count) {
+      var _ct = composePostText(), n = countGraphemes(_ct), _la = n > 300 ? longAffLinkChars_(_ct) : 0;
+      els.count.textContent = n + ' / 300' + (_la ? '(アフィリンク' + _la + '字込み)' : '');
+      els.count.classList.toggle('over', n > 300);
+    }
 
     var h = (els.handle.value || '').trim().replace(/^@/, '');
     if (els.pvHandle) els.pvHandle.textContent = h ? ('@' + h) : '@(ハンドル未設定)';
@@ -2120,8 +2146,12 @@
   //   独自worker成功時：shortUrl/shareUrlは同じ管理ドメインURL。計測は常にworker側で行う。
   //   worker失敗時：shortUrl/shareUrlは生URL。(長いが有効・計測不能を隠さない)
   //   ★opts.account 指定時はそのチャンネルのドメインで r2 短縮を発行する(未指定=現UIアカウント・従来動作)。
+  //   ★DMM/FANZA・DLsite行き(作品・セール一覧)は短縮せず生のアフィリンクを返す=noShort:true(Chami決定 2026-10-18
+  //     5Sec軍議 msg 1561272541387948148「ピンククリックはもう計測する必要もない、短縮リンク化はYouTube→Twitterとかのところだけ」)。
+  //     ワーカーへは送らない(新しいコードを作らない)。既に発行済みの短縮コード・D1のクリック記録はそのまま残る。
   function makeShortAndShare(longUrl, opts) {
     if (!longUrl) return Promise.resolve({ shortUrl: '', shareUrl: '', destinationUrl: '' });
+    if (noShortDest_(longUrl)) return Promise.resolve({ shortUrl: longUrl, shareUrl: longUrl, destinationUrl: longUrl, noShort: true });
     var account = opts && opts.account;
     return shortenViaWorker(longUrl, 0, account).then(function (r2) {
       if (r2 && r2.short) return { shortUrl: r2.short, shareUrl: r2.short, destinationUrl: r2.destination || '' };
@@ -2686,7 +2716,8 @@
     var expectedBase = workerBase(account).replace(/\/+$/, '');
     // ドメイン枠はあるが未設定のチャンネルは、旧チャンネルの
     // 5mgl/yoz2へ落とさず、画面の案内どおり変換済みの元URLをそのまま使う。
-    if (!expectedBase) {
+    // DMM/FANZA・DLsite行き(作品・セール一覧)も短縮しない=アフィリンクをそのまま出す(2026-10-18 Chami決定・makeShortAndShare参照)。
+    if (!expectedBase || noShortDest_(targetUrl)) {
       if (useAffiliate) rememberManualAffiliateShort_(account, targetUrl, targetUrl);
       return Promise.resolve({ issued: true, tried: true, raw: true, url: targetUrl, out: targetUrl, dest: targetUrl,
         aff: useAffiliate ? 'ok' : 'off', affMsg: useAffiliate ? 'アフィリンクOK・短縮なし' : (notFanza ? NOT_FANZA_MSG_ + '・短縮なし' : 'アフィリンクなし・短縮なし(元URL)') });
@@ -3000,7 +3031,7 @@
     els.postNow.addEventListener('click', function () {
       if (!els.text.value.trim()) { setPostStatus('本文を入力してください。'); return; }
       var text = composePostText();
-      if (countGraphemes(text) > 300) { setPostStatus('300文字を超えています。短くしてください。'); return; }
+      if (countGraphemes(text) > 300) { setPostStatus(over300Msg_(text, '300文字を超えています。短くしてください。')); return; }
       var c = creds(); if (!c.handle || !c.appPw) { setPostStatus('⚙設定でハンドルとアプリパスワードを入れてください。'); return; }
       if (!window.BlueskyCore) { setPostStatus('投稿モジュール未読込。'); return; }
       if (!window.confirm('プレビュー通りに Bluesky へ投稿します。よろしいですか？')) return;
@@ -3405,7 +3436,8 @@
       //   http(s)URL」を全て短縮版(あれば)か取得中の目印へ落とす=X欄には短縮していないリンクを一切出さない。
       if (window.BlueskyCore && window.BlueskyCore.sanitizeXLinks) {
         var _san = window.BlueskyCore.sanitizeXLinks(base, {
-          isShort: function (u) { return !!(window.isShortenedUrl && window.isShortenedUrl(u, shortHostList_())); },
+          // 現在のセール一覧リンク(短縮しない宛先なら生のまま)も通す。前作の残り等それ以外の生リンクは従来どおり落とす。
+          isShort: function (u) { return !!(window.isShortenedUrl && window.isShortenedUrl(u, shortHostList_())) || (noShortDest_(u) && u === cachedDiscountLink_()); },
           workRaw: rawLink,
           workShort: cachedWorkShortLink_(),
           pending: X_LINK_PENDING
@@ -3499,7 +3531,7 @@
           var text = composeXText();
           xTxt.value = text;
           updateXCount_(text);
-          if (xStatus) xStatus.textContent = '✅ 短縮URLを挿入しました。';
+          if (xStatus) xStatus.textContent = res.noShort ? '✅ 作品リンクは短縮せず、アフィリンクのまま入れました。' : '✅ 短縮URLを挿入しました。';
         }).catch(function () {
           if (xStatus) xStatus.textContent = '⚠️ 短縮リンクの取得に失敗しました。';
         }).then(function () { xShortBtn.disabled = false; });

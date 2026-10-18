@@ -244,8 +244,20 @@ function hasRealAffiliateIdDlsite(rawUrl) {
   return !!v && v !== '【アフィID】';
 }
 
+/**
+ * 短縮しない宛先か(DMM/FANZA・DLsite=作品/セール一覧へ直接飛ぶリンク)。
+ * Chami決定(2026-10-18 5Sec軍議 msg 1561272541387948148)「ピンククリックはもう計測する必要もない、
+ *   短縮リンク化はYouTube→Twitterとかのところだけ」。X/YouTube/Blueskyの自分の投稿URLは従来どおり短縮する。
+ * @param {string} rawUrl
+ * @returns {boolean}
+ */
+function isNoShortDestUrl(rawUrl) {
+  return isFanzaHostUrl(rawUrl) || isDlsiteUrl(rawUrl);
+}
+
 // ブラウザ環境向けグローバル公開
 if (typeof window !== 'undefined') {
+  window.isNoShortDestUrl = isNoShortDestUrl;
   window.buildAffiliateLink = buildAffiliateLink;
   window.buildFanzaListLink = buildFanzaListLink;
   window.buildDlsiteAffiliateLink = buildDlsiteAffiliateLink;
@@ -264,7 +276,7 @@ if (typeof window !== 'undefined') {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     buildAffiliateLink, buildFanzaListLink, buildDlsiteAffiliateLink, isDlsiteUrl, isFanzaHostUrl,
-    hasRealAffiliateIdDlsite, buildAnyAffiliateLink,
+    hasRealAffiliateIdDlsite, buildAnyAffiliateLink, isNoShortDestUrl,
     normalizeWorkUrl, isShortenedUrl, hasRealAffiliateId, classifyPromoUrl, ensureAffiliateLink
   };
 }
