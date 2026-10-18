@@ -539,6 +539,9 @@
       out.privacy = String(v.privacy || "");
     }
     if (manualAt && Number(v.manualMs) > 0) { out.manualMs = Number(v.manualMs); out.manualAt = manualAt; }
+    // 予約投稿で選んだ公開枠の予定時刻(投稿完了時に記録)。別時計で持ち、API観測(auto)とは独立にマージする。
+    var plannedSetAt = Math.max(0, Number(v.plannedSetAt) || 0);
+    if (plannedSetAt && Number(v.plannedMs) > 0) { out.plannedMs = Number(v.plannedMs); out.plannedSetAt = plannedSetAt; }
     if (resetAt) out.resetAt = resetAt;
     return Object.keys(out).length ? out : null;
   }
@@ -553,6 +556,8 @@
     var out = {}, auto = newerHistoryGroup_(a, b, "autoAt"), manual = newerHistoryGroup_(a, b, "manualAt");
     if (auto && auto.autoAt) { out.autoMs = auto.autoMs; out.autoAt = auto.autoAt; out.autoSource = auto.autoSource; out.privacy = auto.privacy || ""; }
     if (manual && manual.manualAt) { out.manualMs = manual.manualMs; out.manualAt = manual.manualAt; }
+    var planned = newerHistoryGroup_(a, b, "plannedSetAt");
+    if (planned && planned.plannedSetAt) { out.plannedMs = planned.plannedMs; out.plannedSetAt = planned.plannedSetAt; }
     out.resetAt = Math.max(Number(a.resetAt) || 0, Number(b.resetAt) || 0);
     if (!out.resetAt) delete out.resetAt;
     return out;

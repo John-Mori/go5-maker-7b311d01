@@ -243,13 +243,13 @@
       if (ytList.length) {
         html += '<div class="card">' +
           '<div class="field-label" style="margin-bottom:4px;">🎬 YouTube 公開待ち(非公開/予約公開)</div>' +
-          '<div class="hint" style="margin-bottom:12px;">投稿履歴のYouTube URLのうち、まだ公開されていない作品です。(投稿履歴を更新すると最新化・公開されると自動で消えます)予約公開の正確な時刻はYouTube側の仕様で取得できないため「公開待ち」と表示します。</div>' +
+          '<div class="hint" style="margin-bottom:12px;">投稿履歴のYouTube URLのうち、まだ公開されていない作品です。(投稿履歴を更新すると最新化・公開されると自動で消えます)時刻はドラフトで選んだ公開枠の予定時刻(📅)です。公開枠を選ばずに予約した動画は、YouTube側の仕様で時刻を取得できないため「公開待ち」と表示します。</div>' +
           ytList.map(function (y) {
             var label = (window.Go5Acct && Go5Acct.labelOf) ? Go5Acct.labelOf(y.account) : (y.account === 'acc2' ? '宵桜艶帖' : y.account === 'acc3' ? '癒やし倉庫' : '月詠み');
             var cls = y.account === 'acc2' ? 'rsv-badge-acc2' : 'rsv-badge-acc1';
             return '<div class="rsv-tab-row">' +
               '<span class="rsv-badge ' + cls + '">' + label + '</span>' +
-              '<span class="rsv-tab-when">' + (y.publishAt ? fmt(y.publishAt) : '公開待ち') + '</span>' +
+              '<span class="rsv-tab-when">' + (y.publishAt ? fmt(y.publishAt) + (y.planned ? ' <span title="ドラフトで選んだ公開枠の予定時刻">📅</span>' : '') : '公開待ち') + '</span>' +
               '<span class="rsv-tab-text">' + esc((y.title || '(無題)').slice(0, 28)) + '</span>' +
               '<div class="rsv-tab-btns">' +
               (y.ytUrl ? '<a class="ghost rsv-sm-btn" href="' + esc(y.ytUrl) + '" target="_blank" rel="noopener">YouTube↗</a>' : '') +

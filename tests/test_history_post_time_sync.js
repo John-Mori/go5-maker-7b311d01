@@ -37,4 +37,10 @@ merged = JSON.parse(Sync.mergeHistoryPostTimes_(reset, other));
 assert.deepStrictEqual(Object.keys(merged).sort(), [key, 'yt:otherrow001'].sort(), '別動画の日時をwhole-key上書きで落とさない');
 assert.strictEqual(merged['yt:otherrow001'].autoSource, 'publishAt');
 
+// 予約投稿の予定時刻(投稿完了した端末で記録)は、API観測しか持たない別端末の値で落とさない。
+const plannedHere = JSON.stringify({ [key]: { plannedMs: 9000, plannedSetAt: 60 } });
+merged = JSON.parse(Sync.mergeHistoryPostTimes_(plannedHere, newApi));
+assert.strictEqual(merged[key].plannedMs, 9000, '別端末のAPI観測で予定時刻を落とさない');
+assert.strictEqual(merged[key].autoMs, 2000, '予定時刻とAPI観測を両方持つ');
+
 console.log('PASS: history post time per-video clocks merge');

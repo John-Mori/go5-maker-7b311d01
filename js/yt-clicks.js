@@ -1200,12 +1200,21 @@
     var ms = Number(rec.autoMs) > 0 ? Number(rec.autoMs) : null;
     var vid = ytIdOf(itemYt_(ymap, it) || it.ytUrl || '');
     if (ms == null && vid && publishedCache[vid] != null) ms = Number(publishedCache[vid]);
+    var source = rec.autoSource || '';
+    // ★予約投稿の予定時刻(公開枠)。公開前の動画にYouTubeが返す時刻はアップロード時刻(≒投稿完了時刻)で、
+    //   それが予定時刻を上書きしていた(Chami msg 1561261867203039282「投稿完了した時刻が表示される」)。
+    //   再生数が付く前(=まだ公開されていない)で、YouTube側の時刻が予定より前なら予定時刻を正とする。
+    //   予定は hist_post_time_v1(全端末共有)にも載せる=投稿完了した端末以外でも同じ時刻を出す。
+    var plannedMs = Number(rec.plannedMs) > 0 ? Number(rec.plannedMs)
+      : (it.plannedAt ? (Date.parse(String(it.plannedAt).replace(' ', 'T')) || 0) : 0);
+    var live = !!(vid && Number(viewsCache[vid]) > 0);
+    if (plannedMs > 0 && !live && source !== 'publishAt' && (ms == null || ms < plannedMs)) { ms = plannedMs; source = 'planned'; }
     return {
       key: key,
       ms: ms,
       manual: manual,
-      source: manual ? 'manual' : (rec.autoSource || ''),
-      scheduled: !manual && rec.autoSource === 'publishAt' && ms != null && ms > Date.now()
+      source: manual ? 'manual' : source,
+      scheduled: !manual && (source === 'publishAt' || source === 'planned') && ms != null && ms > Date.now()
     };
   }
   function youtubePostTime_(rec) {
@@ -1228,6 +1237,17 @@
       map[key] = rec; changed = true;
     });
     if (changed) saveHistoryPostTimes_(map);
+  }
+  // 投稿完了時の予約投稿の予定時刻を動画単位で残す(同期キー=別端末・シート由来の行でも予定時刻を出す)。
+  function recordPlannedPostTime_(ytUrl, plannedAt) {
+    var vid = ytIdOf(ytUrl || ''), ms = plannedAt ? (Date.parse(String(plannedAt).replace(' ', 'T')) || 0) : 0;
+    if (!vid || !(ms > 0)) return;
+    var map = loadHistoryPostTimes_(), key = 'yt:' + vid, old = map[key] || {};
+    if (Number(old.plannedMs) === ms) return;
+    var rec = {};
+    Object.keys(old).forEach(function (k) { rec[k] = old[k]; });
+    rec.plannedMs = ms; rec.plannedSetAt = Math.max(Date.now(), Number(old.plannedSetAt || 0) + 1);
+    map[key] = rec; saveHistoryPostTimes_(map);
   }
   // ── YouTubeメタ(題名/投稿日時/視聴回数)を localStorage に永続化 ──────────────
   //   在メモリだけだとリロードのたびに再取得＝取得失敗時に題名が消えて不安定。
@@ -2645,7 +2665,8 @@
       var plannedMs = it.plannedAt ? (Date.parse(String(it.plannedAt).replace(' ', 'T')) || NaN) : NaN;
       var schedMs = (sched && sched.publishAt) ? Number(sched.publishAt) : plannedMs; // 予定時刻(予約公開 or カレンダー予定)
       var schedPassed = !isNaN(schedMs) && schedMs <= Date.now(); // 予定時刻を過ぎた=実際には投稿済み
-      var stillScheduled = (!!sched || !!it.plannedAt) && !schedPassed; // 予定時刻がまだ=本当に投稿予定
+      // YouTubeで公開済み(pubあり)の行は、カレンダー予定が未来に残っていても投稿予定にしない(再生数があるのに「予」になっていた)。
+      var stillScheduled = (!!sched || (!!it.plannedAt && pub == null)) && !schedPassed; // 予定時刻がまだ=本当に投稿予定
       var prePostFlag = !!(sched && !schedPassed); // 計測窓の抑止は「本当にまだ投稿前」の時だけ
       var deltaTs = postTime.ms != null ? postTime.ms : (it.ts || (schedPassed ? schedMs : 0)); // 見出し・並びと同じ実効投稿時刻を日別集計にも渡す
       // YouTube動画が紐付いていない投稿(Bluesky単体投稿等)は、YouTube公開日時が原理的に存在しない。
@@ -3278,6 +3299,7 @@
       // Bluesky投稿時の自動記録行(autoRecorded)へ、後の投稿完了でX/柱/予定時刻を空欄だけ追記する。
       ['xPostUrl', 'bskyParentUrl', 'bskyReplyUrl', 'bskyWorkShortUrl', 'pillar'].forEach(function (k) { if (!matched[k] && opts[k]) { matched[k] = String(opts[k]); changed = true; } });
       if (!matched.plannedAt && opts.scheduledAt) { matched.plannedAt = opts.scheduledAt; changed = true; }
+      if (opts.scheduledAt) { try { recordPlannedPostTime_(ytUrl || itemYt_(ymap, matched) || matched.ytUrl, matched.plannedAt); } catch (e) {} }
       if (!matched.ytTitlePlan && opts.ytTitle) { matched.ytTitlePlan = String(opts.ytTitle).replace(/\n+/g, ' ').trim(); changed = true; }
       var wasAuto = !!matched.autoRecorded;
       if (wasAuto && !opts.autoRecorded) { delete matched.autoRecorded; changed = true; } // 投稿完了で確定=以後は通常の行
@@ -3323,7 +3345,7 @@
     // ドラフト一続き(柱分け)の投稿先URL群。pushItemToGas_ が初回upsertで同じ行へ載せる。
     ['xPostUrl', 'bskyParentUrl', 'bskyReplyUrl', 'bskyWorkShortUrl', 'pillar'].forEach(function (k) { if (opts[k]) entry[k] = String(opts[k]); });
     // カレンダー公開枠の予定時刻(予約投稿)。YouTube APIのpublishAtが返る前でも「投稿予定 時刻」を出せる。
-    if (opts.scheduledAt) entry.plannedAt = opts.scheduledAt;
+    if (opts.scheduledAt) { entry.plannedAt = opts.scheduledAt; try { recordPlannedPostTime_(ytUrl, opts.scheduledAt); } catch (e) {} }
     // ジャンル(カテゴリ)のチェックを引き継ぐ＝投稿完了で履歴にジャンルが渡らない穴を塞ぐ(Chami依頼2026-07-30)。
     if (opts.attrs) attrDefs_().forEach(function (a) { if (opts.attrs[a.key]) entry[a.key] = true; });
     if (!entry.workShortUrl && /^https?:\/\//.test(String(entry.workUrl || '').trim())) entry.workShortMintPending = true;
@@ -3990,7 +4012,9 @@
   function loadYtSched_(acc) { try { return JSON.parse(localStorage.getItem(ytSchedKey_(acc)) || '[]') || []; } catch (e) { return []; } }
   function updateYtScheduled_(items, ymap, m, queried) {
     if (!apiKey() || lastErr) return; // キー無し/APIエラー時は誤検知するので更新しない
-    var acc = (window.getCurrentAccount ? window.getCurrentAccount() : 'acc1');
+    // window.getCurrentAccount は index.html(app.js)にしか無く、投稿履歴ページでは常に acc1 扱い=
+    //   宵桜艶帖/癒やし倉庫の公開待ちまで「月詠み」の箱へ入っていた。このファイルの現在chで振り分ける。
+    var acc = acct();
     var qset = {}; (queried || []).forEach(function (id) { qset[id] = true; });
     var seen = {}; var out = [];
     items.forEach(function (it) {
@@ -4001,16 +4025,20 @@
       var futureMs = (rec && rec.publishAt && rec.publishAt > Date.now()) ? rec.publishAt
                    : (rec && rec.published && rec.published > Date.now()) ? rec.published : null;
       // 公開前＝(応答に無い かつ 過去に公開として観測していない) もしくは (公開予定時刻が未来)
+      // 予約公開の時刻はAPIキーでは取れないため、投稿完了時に選んだ公開枠の予定時刻で補う(historyPostTime_と同じ解決)。
+      var pt = historyPostTime_(it, ymap);
+      if (!futureMs && pt.source === 'planned' && pt.ms > Date.now()) futureMs = pt.ms;
       var pre = (!returned && !(vid in publishedCache)) || !!futureMs;
       if (!pre) return;
       seen[vid] = true;
-      out.push({ vid: vid, ytUrl: url, account: acc, title: (titleCache[vid] || it.title || '(無題)'), publishAt: futureMs, ts: it.ts || 0 });
+      out.push({ vid: vid, ytUrl: url, account: acc, title: (titleCache[vid] || it.title || '(無題)'), publishAt: futureMs, planned: !!(futureMs && pt.source === 'planned'), ts: it.ts || 0 });
     });
     try { localStorage.setItem(ytSchedKey_(acc), JSON.stringify(out)); } catch (e) {}
     if (window.Scheduler && window.Scheduler._renderTab) { try { window.Scheduler._renderTab(); } catch (e) {} }
   }
   // 予約タブ(scheduler.js)から参照：両アカウントの公開前YouTube作品をまとめて返す。
-  try { window.YtSchedule = { list: function () { return loadYtSched_('acc1').concat(loadYtSched_('acc2')); } }; } catch (e) {}
+  //   癒やし倉庫(acc3)が抜けていた=acc3の予約公開は予約タブに一度も出なかった。
+  try { window.YtSchedule = { list: function () { return loadYtSched_('acc1').concat(loadYtSched_('acc2'), loadYtSched_('acc3')); } }; } catch (e) {}
 
   // announce=true(手動更新ボタン)のときは、完了時に成功/失敗を明確に表示する。
   // ── 点検(自己修復)と再生数/クリック取得の間引き ───────────────────────────
