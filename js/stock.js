@@ -3258,7 +3258,19 @@
     //   置換対象リンクを得られず literal のまま残っていた(Chami報告2026-08-13「短縮URLが反映されない」)。
     if (window.__go5ComposeXTextForBskyText) base = window.__go5ComposeXTextForBskyText(masterBody_(meta), (meta && (meta.affiliateUrl || meta.workUrl)) || '');
     else base = masterBody_(meta);
-    return applyPromo_(base, meta);
+    return dropSaleLines_(applyPromo_(base, meta));
+  }
+  // 子の文にはセールの文の行(例「⇩オータムセール🌰最大99%OFF!」)を出さない。投稿本文(Bluesky)側は触らない
+  //   (Chami msg 1561255009562132584「オータムセールの文がドラフトモードの子の文はいらない」)。
+  //   セールリンクの見出し+リンク(「大幅割引セール中の同人祭ページ」+(セール紹介短縮用URL)/URL)は従来どおり残す(Chami報告2026-08-13)。
+  function dropSaleLines_(t) {
+    var core = window.BlueskyCore, lines = String(t || '').split('\n');
+    var isLink = function (l) { return /https?:\/\//.test(l) || /セール中短縮リンク/.test(l) || !!(core && core.hasSaleLinkPlaceholder && core.hasSaleLinkPlaceholder(l)); };
+    return lines.filter(function (l, i) {
+      if (!/セール|sale/i.test(l) || isLink(l)) return true;
+      for (var j = i + 1; j < lines.length; j++) { if (lines[j].trim()) return isLink(lines[j]); }
+      return false;
+    }).join('\n');
   }
   // 後方互換(呼び出し元が残っていても壊さない)。YouTube説明欄も同じ販促解決を通す。
   function resolveYtDescYen_(text, meta) { return applyPromo_(text, meta); }

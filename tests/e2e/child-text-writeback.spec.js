@@ -1,7 +1,7 @@
 // 投稿モードの子の文は、そのchの投稿本文(bsky_text__accN)だけを正にする
 // (Chami msg 1561150497170399334「ドラフトの子の文はここの投稿本文を参照して」)。
 // v1055の書き戻し(子の文の手直し→投稿本文)で、テンプレ帳を反映した投稿本文が上書きされていた。
-// (acc3でも%OFF入りのセール行は残す。そちらは child-text-sale-line.spec.js で見る)
+// (子の文にセール案内の行は出さない。そちらは child-text-sale-line.spec.js で見る)
 const { test, expect } = require('@playwright/test');
 
 test('子の文は投稿本文から作られ、手直ししても投稿本文を上書きしない', async ({ page }) => {
@@ -20,7 +20,7 @@ test('子の文は投稿本文から作られ、手直ししても投稿本文�
   await page.reload({ waitUntil: 'domcontentloaded' });
   const master = () => page.evaluate((a) => localStorage.getItem(window.Go5Acct.key('bsky_text', a)), account);
 
-  const fromMaster = /^⇩気になった方はコチラから💕 #PR #漫画\n(.+\n)?⇩オータムセール🌰開催中!$/; // 2行目(話題作等)は自動で入る
+  const fromMaster = /^⇩気になった方はコチラから💕 #PR #漫画(\n.+)?$/; // 2行目(話題作等)は自動で入る・セール行は出さない
   await page.locator('.stk-mode[data-id="stk_wb_a"]').click();
   await expect(page.locator('#draftXText')).toHaveValue(fromMaster);
   await page.locator('#draftXText').fill('この投稿だけ直した');
@@ -35,6 +35,6 @@ test('子の文は投稿本文から作られ、手直ししても投稿本文�
     localStorage.setItem(window.Go5Acct.key('bsky_text', a), '新しい本文\n⇩ハロウィンセール🎃');
     document.dispatchEvent(new CustomEvent('go5-body-changed'));
   }, account);
-  await expect(page.locator('#draftXText')).toHaveValue('新しい本文\n⇩ハロウィンセール🎃'); // 見出し行が無い本文は2行目を足さない
+  await expect(page.locator('#draftXText')).toHaveValue('新しい本文'); // 見出し行が無い本文は2行目を足さない・セール行は出さない
   expect(errors).toEqual([]);
 });
