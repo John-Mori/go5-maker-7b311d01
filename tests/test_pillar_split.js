@@ -70,11 +70,11 @@ eq(/\$\('draftCopyX'\)\.addEventListener\('click', function \(\) \{ copyText_\(\
 
 console.log('--- 配線(片側だけの変更で無言の空欄にしない) ---');
 const gas = read('gas/コード.gs');
-['X投稿URL', 'Bluesky親URL', 'Bluesky返信URL', 'Bluesky作品短縮URL', '柱'].forEach((h) => {
+['X投稿URL', 'Bluesky親URL', 'Bluesky返信URL', 'Bluesky作品短縮URL', '柱', 'Bluesky親短縮URL', 'Bluesky返信短縮URL'].forEach((h) => {
   eq(gas.indexOf("'" + h + "'") >= 0, true, `GAS 列 ${h}`);
 });
 const yt = read('js/yt-clicks.js');
-['x_post_url', 'bsky_parent_url', 'bsky_reply_url', 'bsky_work_short_url', 'pillar'].forEach((k) => {
+['x_post_url', 'bsky_parent_url', 'bsky_reply_url', 'bsky_work_short_url', 'bsky_parent_short_url', 'bsky_reply_short_url', 'pillar'].forEach((k) => {
   eq(yt.indexOf('payload.' + k) >= 0 && gas.indexOf('body.' + k) >= 0, true, `送信キー ${k} が yt-clicks と GAS の両方にある`);
 });
 const bs = read('js/bluesky.js');

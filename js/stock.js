@@ -1397,6 +1397,9 @@
       // 柱分け：X親/Bluesky親・返信の実URLとBluesky側の作品短縮URL、柱(x/bsky/both)をシートへ渡す。
       xPostUrl: (pd.xPostUrl || '').trim(),
       bskyParentUrl: pd.bskyParentUrl || '', bskyReplyUrl: pd.bskyReplyUrl || '', bskyWorkShortUrl: pd.bskyWorkShortUrl || '',
+      // Bluesky親・返信の投稿URLを短縮したコードも行へ載せる(短縮URL列は説明欄の1本だけ=もう1本が記録に無かった。
+      //   ad研究室モドリッチ依頼 msg 1561858182907695125「投稿したが踏まれなかった」と「投稿していない」を分ける)。
+      bskyParentShortUrl: pd.bskyParentShortUrl || '', bskyReplyShortUrl: pd.bskyReplyShortUrl || '',
       pillar: pillarOf_(pd),
       videoId: meta.videoId || '',
       ytTitle: (pd.ytTitle || '').trim(), // YouTube題名=投稿履歴のURL自動取得で新着動画と照合する

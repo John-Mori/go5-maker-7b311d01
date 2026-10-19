@@ -2197,6 +2197,8 @@
     if (it.bskyParentUrl) payload.bsky_parent_url = it.bskyParentUrl;
     if (it.bskyReplyUrl) payload.bsky_reply_url = it.bskyReplyUrl;
     if (it.bskyWorkShortUrl) payload.bsky_work_short_url = it.bskyWorkShortUrl;
+    if (it.bskyParentShortUrl) payload.bsky_parent_short_url = it.bskyParentShortUrl; // Bluesky親・返信の短縮コード(発行した全コードを行へ)
+    if (it.bskyReplyShortUrl) payload.bsky_reply_short_url = it.bskyReplyShortUrl;
     if (it.pillar === 'x' || it.pillar === 'bsky' || it.pillar === 'both') payload.pillar = it.pillar;
     try { fetch(gasUrl, { method: 'POST', body: JSON.stringify(payload) }).catch(function () {}); } catch (e) {}
   }
@@ -3306,7 +3308,7 @@
       }
       if (matched.workShortMintPending === true) { delete matched.workShortMintPending; changed = true; }
       // Bluesky投稿時の自動記録行(autoRecorded)へ、後の投稿完了でX/柱/予定時刻を空欄だけ追記する。
-      ['xPostUrl', 'bskyParentUrl', 'bskyReplyUrl', 'bskyWorkShortUrl', 'pillar'].forEach(function (k) { if (!matched[k] && opts[k]) { matched[k] = String(opts[k]); changed = true; } });
+      ['xPostUrl', 'bskyParentUrl', 'bskyReplyUrl', 'bskyWorkShortUrl', 'bskyParentShortUrl', 'bskyReplyShortUrl', 'pillar'].forEach(function (k) { if (!matched[k] && opts[k]) { matched[k] = String(opts[k]); changed = true; } });
       if (!matched.plannedAt && opts.scheduledAt) { matched.plannedAt = opts.scheduledAt; changed = true; }
       if (opts.scheduledAt) { try { recordPlannedPostTime_(ytUrl || itemYt_(ymap, matched) || matched.ytUrl, matched.plannedAt); } catch (e) {} }
       if (!matched.ytTitlePlan && opts.ytTitle) { matched.ytTitlePlan = String(opts.ytTitle).replace(/\n+/g, ' ').trim(); changed = true; }
@@ -3352,7 +3354,7 @@
     if (opts.autoRecorded) entry.autoRecorded = true; // Bluesky投稿時の自動記録(投稿完了前)
     if (opts.ytTitle) entry.ytTitlePlan = String(opts.ytTitle).replace(/\n+/g, ' ').trim(); // ドラフトのYouTube題名=URL自動取得の照合材料
     // ドラフト一続き(柱分け)の投稿先URL群。pushItemToGas_ が初回upsertで同じ行へ載せる。
-    ['xPostUrl', 'bskyParentUrl', 'bskyReplyUrl', 'bskyWorkShortUrl', 'pillar'].forEach(function (k) { if (opts[k]) entry[k] = String(opts[k]); });
+    ['xPostUrl', 'bskyParentUrl', 'bskyReplyUrl', 'bskyWorkShortUrl', 'bskyParentShortUrl', 'bskyReplyShortUrl', 'pillar'].forEach(function (k) { if (opts[k]) entry[k] = String(opts[k]); });
     // カレンダー公開枠の予定時刻(予約投稿)。YouTube APIのpublishAtが返る前でも「投稿予定 時刻」を出せる。
     if (opts.scheduledAt) { entry.plannedAt = opts.scheduledAt; try { recordPlannedPostTime_(ytUrl, opts.scheduledAt); } catch (e) {} }
     // ジャンル(カテゴリ)のチェックを引き継ぐ＝投稿完了で履歴にジャンルが渡らない穴を塞ぐ(Chami依頼2026-07-30)。
