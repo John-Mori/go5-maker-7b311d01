@@ -5430,6 +5430,7 @@
         var cid = w && String(w.cid || '');
         if (!cid || !/^[a-z0-9_]+$/.test(cid)) return;
         if (known[cid]) { dup++; return; }
+        if (['acc1', 'acc2', 'acc3'].some(function (a) { return !!postedItemForCid_(cid, a); })) { dup++; seen[cid] = t; return; } // 投稿済み(posted_cids権威)は入れない
         items.push({ url: w.url || '', cid: cid, title: w.title || '', author: w.author || '', thumb: w.thumb || '', listPrice: w.listPrice, price: w.price, discountPct: w.discountPct || 0, date: w.date || '', genres: w.genres || [], floor: w.floor || '', service: w.service || '', addedAt: Number(w.addedAt) || t, source: String(w.source || 'grok_fanza'), postVerified: w.postVerified !== false, sourcePost: w.sourcePost || '' });
         known[cid] = 1; seen[cid] = t; added++;
       });
@@ -6542,6 +6543,7 @@
     if (it.addedAt) sub.push('<span class="cand-added">追加 ' + esc(fmtTs(it.addedAt)) + '</span>');
     var ws = deriveWorkState_(it.date);
     var badgesHtml = (ws ? stateBadgeHtml_(ws) : '') + ((!it.isTwitter && it.url) ? workKindBadgeHtml_(it.url) : '') + (isAiWork_(it.genres, it.floor, it.ai) ? '<span class="fp-kind fp-kind-ai">AI</span>' : '')
+      + (it.source === 'grok_fanza' ? '<span class="fp-kind fp-kind-grok" title="Grok×Xの自動収集で入った候補">🤖Grok自動</span>' : '')
       + (it.postVerified === false ? '<span class="fp-kind fp-kind-unv" title="自動収集で、元ポストを確かめられなかった候補(作品自体はFANZAで実在確認済み)">⚠出所未確認</span>' : '');
     var genresHtml = (it.genres && it.genres.length)
       ? '<div class="fz-genres" style="margin-top:4px;">' + it.genres.slice(0, 5).map(function (g) { return '<span class="fz-genre">' + esc(g) + '</span>'; }).join('') + '</div>'

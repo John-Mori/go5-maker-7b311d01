@@ -547,6 +547,7 @@ input.cand-refimg-line,textarea.cand-refimg-line,.cand-refimg-line{width:100%;bo
 .fp-kind-books{color:#5b8fd6;border-color:#5b8fd6;}
 .fp-kind-doujin{color:#b56db0;border-color:#b56db0;}
 .fp-kind-ai{color:#4d9fff;border-color:#4d9fff;}
+.fp-kind-grok{color:#2b6cb0;border-color:#4a90d9;background:rgba(74,144,217,.12);}
 .fp-kind-unv{color:#c77700;border-color:#e09a2a;background:rgba(224,154,42,.12);}
 .fanza-price-row .fp-cur{color:var(--ink);font-weight:700;}
 .fanza-snap-row{font-size:.74rem;color:var(--sub);padding:0 0 1px 0;font-variant-numeric:tabular-nums;white-space:nowrap;}/* 当時価格行も改行しない。左padding=0で旧作バッジ左端をカテゴリ列と揃える */
