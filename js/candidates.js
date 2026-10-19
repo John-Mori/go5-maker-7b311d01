@@ -386,8 +386,8 @@
   // 組込タブ(buzz/main/all)の表示名だけの上書き。{buzz,main,all}。絵文字は固定・テキストのみ差し替え。
   //   端末ローカル(storage-keys 未登録=既定で非同期)。直接 localStorage を使い schedulePoolSync_(cand_tabs監視)を誤発火させない。
   var K_TABLABELS = 'cand_tab_labels';
-  var BUILTIN_TAB_DEFAULTS = { buzz: 'バズ', main: '手動追加', all: '全候補' }; // ★main の既定は「手動追加」(Chami依頼)
-  var BUILTIN_TAB_EMOJI = { buzz: '🦋', main: '💡', all: '📚' };
+  var BUILTIN_TAB_DEFAULTS = { buzz: 'バズ', auto: '自動追加', main: '手動追加', all: '全候補' }; // ★main の既定は「手動追加」(Chami依頼)
+  var BUILTIN_TAB_EMOJI = { buzz: '🦋', auto: '🤖', main: '💡', all: '📚' };
   function builtinTabLabels_() { try { return JSON.parse(localStorage.getItem(K_TABLABELS) || '{}') || {}; } catch (e) { return {}; } }
   // 組込タブの表示ラベル(テキストのみ)。上書きが無ければ既定を返す。_activeTab 値や分岐には一切関与しない=表示専用。
   function builtinTabLabel_(id) {
@@ -808,7 +808,7 @@
   }
   var _suppressNextClick = false; // タブ並べ替え(ドラッグ/長押し)直後のクリック(タブ切替)を1回だけ抑止
   // 並べ替え対象外の固定タブ。(🦋バズ・💡候補)左端の2つは動かさない。
-  function isFixedCandTab_(id) { return id === 'main' || id === 'buzz' || id === 'all'; }
+  function isFixedCandTab_(id) { return id === 'main' || id === 'buzz' || id === 'auto' || id === 'all'; }
 
   var SORTS = [
     { key: 'added_desc', label: '追加日が新しい順' },
@@ -4515,6 +4515,7 @@
     if (_sortTab !== _activeTab) { _sort = defaultSortForTab_(_activeTab); _sortTab = _activeTab; }
     var tabs = lsGet(K_TABS, '[]');
     var tabBtns = '<button class="cand-tab cand-tab-buzz' + (_activeTab === 'buzz' ? ' active' : '') + '" data-ct="buzz" type="button">🦋 ' + esc(builtinTabLabel_('buzz')) + '</button>' +
+      '<button class="cand-tab' + (_activeTab === 'auto' ? ' active' : '') + '" data-ct="auto" type="button">🤖 ' + esc(builtinTabLabel_('auto')) + '</button>' +
       '<button class="cand-tab' + (_activeTab === 'main' ? ' active' : '') + '" data-ct="main" type="button">💡 ' + esc(builtinTabLabel_('main')) + '</button>' +
       '<button class="cand-tab' + (_activeTab === 'all' ? ' active' : '') + '" data-ct="all" type="button">📚 ' + esc(builtinTabLabel_('all')) + '</button>' +
       tabs.map(function (t) {
@@ -4538,6 +4539,7 @@
     if (_activeTab === 'buzz') renderBuzz();
     else if (_activeTab === 'all') renderAll_();
     else if (_activeTab === 'main') renderMain('main');
+    else if (_activeTab === 'auto') renderMain('auto'); // 🤖自動追加=Grok自動収集の受け箱(cand_items__auto・Chami依頼2026-10-20)
     else {
       var tab = null; tabs.forEach(function (t) { if (t.id === _activeTab) tab = t; });
       if (!tab) { _activeTab = 'main'; renderMain('main'); }
@@ -4619,6 +4621,7 @@
         if (c && !seen[c]) { seen[c] = true; cids.push({ cid: c, source: src }); }
       }
       (candItemsRead_(K_ITEMS) || []).forEach(function (it) { pushCid_(it, 'main'); });
+      (candItemsRead_(itemsKey('auto')) || []).forEach(function (it) { pushCid_(it, 'list'); });
       tabs.forEach(function (t) {
         if (t.excludeFromAll) return;
         if (isMakerTab_(t)) { makerIdsOf(t).forEach(function (id) { if (makerIds.indexOf(id) < 0) makerIds.push(id); }); return; }
@@ -4726,6 +4729,7 @@
     var seen = {}, stored = [], srcByCid = {}, makerIds = [];
     function addItems(a, src) { (a || []).forEach(function (it) { if (it && it.cid != null && !seen[it.cid]) { seen[it.cid] = true; stored.push(it); srcByCid[it.cid] = src; } }); }
     addItems(candItemsRead_(K_ITEMS), 'main');
+    addItems(candItemsRead_(itemsKey('auto')), 'list');
     tabs.forEach(function (t) {
       if (t.excludeFromAll) return;
       if (isMakerTab_(t)) makerIdsOf(t).forEach(function (id) { if (makerIds.indexOf(id) < 0) makerIds.push(id); });
@@ -5406,6 +5410,20 @@
     var seen = lsGet(CAND_INBOX_SEEN, '{}'); if (seen && typeof seen === 'object') Object.keys(seen).forEach(function (c) { known[c] = 1; });
     return known;
   }
+  // v1068までの取り込みは手動追加(cand_items)へ入れていた。Grok由来(source=grok_fanza)だけを🤖自動追加へ移す。
+  //   手動追加(cand_items)側は墓標(cand_del)を打つ=他端末の古い手動追加から union で戻らない。墓標はタブ別なので自動追加側は消えない。
+  function moveGrokItemsToAuto_(autoKey) {
+    var main = candItemsRead_(K_ITEMS), keep = [], mv = [];
+    main.forEach(function (x) { if (x && x.source === 'grok_fanza') mv.push(x); else keep.push(x); });
+    if (!mv.length) return 0;
+    var auto = candItemsRead_(autoKey), have = {};
+    auto.forEach(function (x) { if (x && x.cid) have[x.cid] = 1; });
+    mv.forEach(function (x) { if (!have[x.cid]) { auto.push(x); have[x.cid] = 1; } });
+    candItemsWrite_(autoKey, auto);
+    candItemsWrite_(K_ITEMS, keep);
+    mv.forEach(function (x) { if (x && x.cid) tombstoneCid_('main', String(x.cid)); });
+    return mv.length;
+  }
   function importCandInbox_(force) {
     var now = new Date().getTime();
     if (_candInboxBusy || (!force && now - _candInboxAt < 10 * 60 * 1000)) return Promise.resolve(null);
@@ -5422,8 +5440,9 @@
       return r.ok ? r.json() : null;
     }).then(function (doc) {
       var rows = (doc && Array.isArray(doc.items)) ? doc.items : [];
-      if (!rows.length) return { added: 0, dup: 0 };
-      var known = candInboxKnownCids_(), items = candItemsRead_(K_ITEMS), seen = lsGet(CAND_INBOX_SEEN, '{}');
+      var autoKey = itemsKey('auto'), moved = moveGrokItemsToAuto_(autoKey);
+      if (!rows.length) return { added: 0, dup: 0, moved: moved };
+      var known = candInboxKnownCids_(), items = candItemsRead_(autoKey), seen = lsGet(CAND_INBOX_SEEN, '{}');
       if (!seen || typeof seen !== 'object' || Array.isArray(seen)) seen = {};
       var added = 0, dup = 0, t = new Date().getTime();
       rows.forEach(function (w) {
@@ -5434,15 +5453,15 @@
         items.push({ url: w.url || '', cid: cid, title: w.title || '', author: w.author || '', thumb: w.thumb || '', listPrice: w.listPrice, price: w.price, discountPct: w.discountPct || 0, date: w.date || '', genres: w.genres || [], floor: w.floor || '', service: w.service || '', addedAt: Number(w.addedAt) || t, source: String(w.source || 'grok_fanza'), postVerified: w.postVerified !== false, sourcePost: w.sourcePost || '' });
         known[cid] = 1; seen[cid] = t; added++;
       });
-      if (!added) return { added: 0, dup: dup };
-      var lsOk = candItemsWrite_(K_ITEMS, items);
+      if (!added) return { added: 0, dup: dup, moved: moved };
+      var lsOk = candItemsWrite_(autoKey, items);
       lsSet(CAND_INBOX_SEEN, seen);
       klog_('candidate_added', 'work', 'grok_inbox', { added: added, dup: dup });
-      return confirmCandDurable_(K_ITEMS, String(items[items.length - 1].cid || ''), lsOk).then(function (durable) {
+      return confirmCandDurable_(autoKey, String(items[items.length - 1].cid || ''), lsOk).then(function (durable) {
         if (durable !== 'fail') flushSync_();
-        if (_activeTab === 'main' && $('candList')) {
-          showCandAddNotice_(null, '📥 自動収集の候補を' + added + '件追加しました' + (dup ? '(重複' + dup + '件除外)' : ''));
-          renderCandList('main');
+        if ((_activeTab === 'auto' || _activeTab === 'main') && $('candList')) {
+          showCandAddNotice_(null, '🤖 自動追加へ' + added + '件入れました' + (dup ? '(重複・投稿済み' + dup + '件除外)' : ''));
+          renderCandList(_activeTab);
         }
         return { added: added, dup: dup, durable: durable };
       });
@@ -5453,13 +5472,13 @@
   function renderMain(tabId) {
     tabId = tabId || 'main';
     var body = $('candBody');
-    var isMain = (tabId === 'main');
+    var isMain = (tabId === 'main'), isAuto = (tabId === 'auto'), isBuiltin = isMain || isAuto;
     var header = '<div class="card" style="padding:10px 12px;">' +
       '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
       sortControlHtml_() +
       '<button id="candReload" type="button" class="ghost" title="価格・販売数を取り直す" style="flex:0 0 auto;width:auto;margin:0;font-size:15px;padding:6px 10px;">🔁</button>' +
       '<button id="candPcRun" type="button" class="ghost" title="PCへ「今すぐ販売数を取得」を要求(PCの電源が必要)" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">▶ 今すぐ取得</button>' +
-      (isMain
+      (isBuiltin
         ? '<button id="candEditBuiltin" type="button" class="ghost" title="タブ名を変更" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">✏️ 名前</button>'
         : '<button id="candEditTab" type="button" class="ghost" title="タブ名を変更・タブを削除" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">✏️ 編集</button>') +
       '<button id="candAddOpen" type="button" class="primary" style="flex:0 0 auto;width:auto;margin:0;font-size:12px;padding:6px 12px;">➕ ' + (isMain ? '追加' : 'このタブに追加') + '</button>' +
@@ -5496,13 +5515,15 @@
       wireBuiltinRename_('main'); // 組込タブ(手動追加)の改名。candEditForm へフォームを出す。
       var teianBtn = $('candTeianOpen'); // 提案ページへ遷移(同オリジン・同タブ)。Chami依頼2026-08-23。
       if (teianBtn) teianBtn.addEventListener('click', function () { location.href = kouhoTeianHref_(); });
+    } else if (isAuto) {
+      wireBuiltinRename_('auto');
     } else {
       var tab = null; lsGet(K_TABS, '[]').forEach(function (t) { if (t.id === tabId) tab = t; });
       var eb = $('candEditTab'); if (eb && tab) eb.addEventListener('click', function () { showEditTabForm(tab); });
     }
     wirePaste_(body);
     renderCandList(tabId);
-    if (isMain) importCandInbox_(false);
+    if (isBuiltin) importCandInbox_(false);
   }
   // Twitter(X)のURLを判定・正規化。status付き→cid=tw_<id>、それ以外のx/twitterURLも許容。
   function parseTwitterUrl_(raw) {

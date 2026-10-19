@@ -20,7 +20,7 @@ function inboxDoc() {
   return { ok: true, items };
 }
 
-test('受け箱の候補を cid 重複なしで本命タブへ取り込み、出所未確認に印を付ける', async ({ page }) => {
+test('受け箱の候補を cid 重複なしで🤖自動追加タブへ取り込み、出所未確認に印を付ける', async ({ page }) => {
   const doc = inboxDoc();
   const rows = doc.items;
   const verified = rows.filter((r) => r.postVerified !== false);
@@ -42,35 +42,48 @@ test('受け箱の候補を cid 重複なしで本命タブへ取り込み、出
     localStorage.clear();
     localStorage.setItem('sync2_url', SYNC);
     localStorage.setItem('sync2_token', 'e2e-token');
-    localStorage.setItem('cand_items', JSON.stringify([{ cid: inList.cid, title: '既に一覧に在る', url: inList.url, addedAt: Date.now() }]));
+    localStorage.setItem('cand_items', JSON.stringify([{ cid: inList.cid, title: '既に一覧に在る', url: inList.url, addedAt: Date.now() },
+      { cid: 'd_e2e_oldgrok', title: '旧版で手動追加へ入ったGrok候補', url: 'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_e2e_oldgrok/', addedAt: 1792000000000, source: 'grok_fanza' }]));
     localStorage.setItem('cand_del', JSON.stringify({ [deleted.cid]: Date.now() }));
     localStorage.setItem('cand_inbox_seen', JSON.stringify({ [seenOnly.cid]: Date.now() })); // 前に取り込んで消した等
   }, { SYNC, inList, deleted, seenOnly });
   await page.reload({ waitUntil: 'domcontentloaded' });
 
-  const want = rows.length - 2; // 一覧に在る/削除済み/取り込み済みの3件は足さない→既存1+新規(rows-3)
-  await expect.poll(async () => page.evaluate(() => JSON.parse(localStorage.getItem('cand_items') || '[]').length)).toBe(want);
+  const want = rows.length - 3 + 1; // 一覧に在る/削除済み/取り込み済みの3件は足さない→新規(rows-3)+旧版から移したGrok1件
+  await expect.poll(async () => page.evaluate(() => JSON.parse(localStorage.getItem('cand_items__auto') || '[]').length)).toBe(want);
   expect(inboxHits).toBeGreaterThan(0);
 
-  const items = await page.evaluate(() => JSON.parse(localStorage.getItem('cand_items') || '[]'));
+  // 手動追加には手で足した分だけが残る。移したGrok候補は手動追加の墓標で union から戻らない
+  const mainItems = await page.evaluate(() => JSON.parse(localStorage.getItem('cand_items') || '[]'));
+  expect(mainItems.map((x) => x.cid)).toEqual([inList.cid]);
+  expect(mainItems[0].title).toBe('既に一覧に在る'); // 既存は上書きしない
+  const mainDel = await page.evaluate(() => JSON.parse(localStorage.getItem('cand_del') || '{}'));
+  expect(Object.keys(mainDel)).toContain('d_e2e_oldgrok');
+
+  const items = await page.evaluate(() => JSON.parse(localStorage.getItem('cand_items__auto') || '[]'));
   const cids = items.map((x) => x.cid);
   expect(new Set(cids).size).toBe(cids.length);             // cid重複なし
   expect(cids).not.toContain(deleted.cid);                  // 削除済みは湧かない
   expect(cids).not.toContain(seenOnly.cid);                 // 取り込み済みは二度入れない
-  expect(items.find((x) => x.cid === inList.cid).title).toBe('既に一覧に在る'); // 既存は上書きしない
+  expect(cids).not.toContain(inList.cid);                   // 手動追加に在る作品は自動追加へ入れない
+  expect(cids).toContain('d_e2e_oldgrok');
   for (const c of unverified) expect(items.find((x) => x.cid === c).postVerified).toBe(false);
   console.log('inbox=' + rows.length + ' imported=' + (want - 1) + ' total=' + items.length + ' unverified=' + unverified.join(','));
 
-  // 一覧の見分け: 出所未確認の行にだけバッジ
+  // タブの並び: 🤖自動追加は 手動追加 の左。開くと全件に🤖印、出所未確認の行にだけ⚠
+  const order = await page.locator('.cand-tab[data-ct]').evaluateAll((els) => els.map((e) => e.getAttribute('data-ct')));
+  expect(order.indexOf('auto')).toBe(order.indexOf('main') - 1);
+  await page.locator('.cand-tab[data-ct="auto"]').click();
+  await expect(page.locator('.cand-card .fp-kind-grok')).toHaveCount(Math.min(want, 20));
   await expect(page.locator('.fp-kind-unv')).toHaveCount(unverified.length);
   const verifiedTitle = rows.find((r) => r.postVerified !== false && r.cid !== inList.cid && r.cid !== deleted.cid).title;
   await expect(page.locator('.cand-card', { hasText: verifiedTitle }).locator('.fp-kind-unv')).toHaveCount(0);
 
   // 取り込んだ cid は端末に覚える。もう一度読んでも増えない
   const seen = await page.evaluate(() => Object.keys(JSON.parse(localStorage.getItem('cand_inbox_seen') || '{}')));
-  for (const c of cids) if (c !== inList.cid) expect(seen).toContain(c);
+  for (const c of cids) if (c !== 'd_e2e_oldgrok') expect(seen).toContain(c);
   const again = await page.evaluate(() => window.Go5CandInbox.importNow());
   expect(again.added).toBe(0);
-  const after = await page.evaluate(() => JSON.parse(localStorage.getItem('cand_items') || '[]').length);
+  const after = await page.evaluate(() => JSON.parse(localStorage.getItem('cand_items__auto') || '[]').length);
   expect(after).toBe(want);
 });
