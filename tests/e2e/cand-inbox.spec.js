@@ -137,3 +137,59 @@ test('Grok候補に元ポストのXリンクと画像を付ける(前の版で�
   const n1 = await page.evaluate(() => JSON.parse(localStorage.getItem('cand_inbox_imgs') || '{}').d_e2e_src1);
   expect(n1).toBeTruthy();
 });
+
+// 重い端末=全体の画像展開がいつまでも終わらない状態。旧版は約30秒で諦めて画像が入らなかった(Chami 2026-10-20「画像まで入れてくれ」)
+async function holdHydrate(page) {
+  await page.addInitScript(() => {
+    var api;
+    Object.defineProperty(window, 'Go5Idb', {
+      configurable: true,
+      get: function () { return api; },
+      set: function (v) {
+        api = v;
+        ['entries', 'entriesPrefix', 'entriesByPrefixes', 'entriesByPrefixesSettled'].forEach(function (k) {
+          if (typeof v[k] === 'function') v[k] = function () { return new Promise(function () {}); };
+        });
+      }
+    });
+  });
+}
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC', 'base64');
+const srcItem = (cid) => ({
+  url: 'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=' + cid + '/', cid, title: '展開待ち作品 ' + cid, author: 'e2e', thumb: '', price: 550,
+  addedAt: 1792000000000, source: 'grok_fanza', postVerified: true, sourcePost: 'https://x.com/e2e_acct/status/900000000000000099',
+  sourceImgs: ['https://pbs.twimg.com/media/' + cid + '.jpg'],
+});
+
+test('全体の画像展開が終わらない端末でも、元ポストの画像を投稿編集へ入れる', async ({ page }) => {
+  const it = srcItem('d_e2e_slowhyd');
+  await page.route('https://pbs.twimg.com/**', (route) => route.fulfill({ status: 200, contentType: 'image/png', headers: { 'access-control-allow-origin': '*' }, body: PNG }));
+  await page.route(SYNC + '/**', (route) => new URL(route.request().url()).pathname === '/api/cand-inbox'
+    ? route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, items: [it] }) }) : route.abort());
+  await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
+  await page.evaluate((SYNC) => { localStorage.clear(); localStorage.setItem('sync2_url', SYNC); localStorage.setItem('sync2_token', 'e2e-token'); }, SYNC);
+  await holdHydrate(page);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await expect.poll(async () => page.evaluate((cid) => window.Go5Cand.refImgs(cid).length, it.cid), { timeout: 20000 }).toBe(1);
+  const items = await page.evaluate(() => JSON.parse(localStorage.getItem('cand_items__auto') || '[]'));
+  expect(items[0].sourceImgs).toEqual(it.sourceImgs); // 候補にも画像URLを持たせる(投稿編集を開いた時の取り込み口)
+});
+
+test('一括の取り込みが済んでいないGrok候補は、投稿編集を開いた時に元ポストの画像を入れる', async ({ page }) => {
+  const it = srcItem('d_e2e_openfill');
+  await page.route('https://pbs.twimg.com/**', (route) => route.fulfill({ status: 200, contentType: 'image/png', headers: { 'access-control-allow-origin': '*' }, body: PNG }));
+  await page.route(SYNC + '/**', (route) => route.abort()); // 受け箱は読めない=一括の取り込みは走らない
+  await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
+  await page.evaluate(({ SYNC, it }) => {
+    localStorage.clear(); localStorage.setItem('sync2_url', SYNC); localStorage.setItem('sync2_token', 'e2e-token');
+    localStorage.setItem('cand_items__auto', JSON.stringify([Object.assign({ twitterUrl: it.sourcePost }, it)]));
+  }, { SYNC, it });
+  await holdHydrate(page);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.locator('.cand-tab[data-ct="auto"]').click();
+  await page.locator('[data-refimg="' + it.cid + '"]').click();
+  await expect(page.locator('#refImgMsg')).toContainText('元ポストの画像を入れました', { timeout: 15000 });
+  await expect(page.locator('#refImgPreview img')).toHaveCount(1);
+  await expect(page.locator('#refImgTwitter')).toHaveValue(it.sourcePost);
+  expect(await page.evaluate((cid) => window.Go5Cand.refImgs(cid).length, it.cid)).toBe(1);
+});

@@ -3332,8 +3332,9 @@
     // 「動画生成へ」は遷移ボタンでもある。画像を触っていないのに保存画像列を書き直さない。
     // 明示的な追加・並べ替え・削除があった時だけ画像IDBを更新する。
     var imagesDirty = false;
-    // 画像レコードの読取が未確認のまま開いた(=iOSのIDB詰まり)。確認できるまで画像の追加・並べ替え・削除を止め、
-    // 保存は文字(cand_text)だけにする=未確認の空画像列で既存画像を上書きしない。
+    // 画像レコードの読取が未確認のまま開いた(=iOSのIDB詰まり・重い端末)。この間の pending.imgs は「今回足した画像」だけ。
+    // 保存済みの列は確認できた時点で後ろへつなぐ=未確認の空画像列で既存画像を上書きしない。
+    // ★旧版は確認できるまで画像の追加自体を止めていたため、確認が返らない端末では後から入れられなかった(Chami 2026-10-20)。
     var imgsPending = refReady === 'imgsPending';
     var marksOrderCommitted = false;
     function commitImageMarkOrder_() {
@@ -3387,7 +3388,7 @@
     function drawPreview() {
       var n = pending.imgs.length;
       if (pending.idx >= n) pending.idx = Math.max(0, n - 1);
-      if (!n && imgsPending) { previewEl.innerHTML = '<div class="hint" aria-live="polite" style="text-align:center;padding:18px;border:1px dashed var(--line);border-radius:8px;">⏳ 保存済みの画像を確認中…(コメント・URLは先に編集・保存できます)</div>'; return; }
+      if (!n && imgsPending) { previewEl.innerHTML = '<div class="hint" aria-live="polite" style="text-align:center;padding:18px;border:1px dashed var(--line);border-radius:8px;">⏳ 保存済みの画像を確認中…(画像の追加・コメント・URLは先にできます)</div>'; return; }
       if (!n) { previewEl.innerHTML = '<div class="hint" style="text-align:center;padding:18px;border:1px dashed var(--line);border-radius:8px;">画像は未保存です(貼り付けで追加・複数枚OK)</div>'; return; }
       previewEl.innerHTML =
         '<div class="cand-refimg-stage">' +
@@ -3397,17 +3398,17 @@
         // ★1行固定・絵文字なし(Chami依頼2026-08-09)。長い時ははみ出さず省略。
         '<div class="hint" style="text-align:center;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11px;">' +
           (n > 1 ? (pending.idx + 1) + '/' + n + '(スワイプで切替/表示中の画像が動画生成で使用)' : '画像 1枚') +
-        '</div>';
+        '</div>' +
+        (imgsPending ? '<div class="hint" aria-live="polite" style="text-align:center;font-size:11px;">⏳ 保存済みの画像を確認中(確認後、この後ろに並びます)</div>' : '');
       previewEl.querySelector('img').addEventListener('click', function () {
         openImgZoom_(pending.imgs.slice(), pending.idx, {
           markCid: cid, // 動画生成用画像だけ「通常/使用済み/除外」3択を出す(他のopenImgZoom_呼び出しには付けない)
           onReorder: function (i) {
-            if (imgsPending || i <= 0 || i >= pending.imgs.length) return pending.imgs.slice();
+            if (i <= 0 || i >= pending.imgs.length) return pending.imgs.slice();
             var img = pending.imgs.splice(i, 1)[0]; pending.imgs.unshift(img); pending.idx = 0; imagesDirty = true; drawPreview(); // 旧1枚目は2枚目へずれる(保存で確定)
             return pending.imgs.slice();
           },
           onPasteAdd: function (done) {
-            if (imgsPending) { done(null, '保存済みの画像を確認中です。確認後に追加できます'); return; }
             pasteImageFromClipboard_(function (durl, err) {
               if (err || !durl) { done(null, err || '画像がコピーされていません'); return; }
               pending.imgs.unshift(durl); pending.idx = 0; imagesDirty = true; drawPreview(); // 先頭＝1ページ目(保存で確定)
@@ -3477,7 +3478,7 @@
       var files = [], fl = this.files || [], fi;
       for (fi = 0; fi < fl.length; fi++) files.push(fl[fi]);
       this.value = '';
-      if (!files.length || imgsPending) return;
+      if (!files.length) return;
       body.querySelector('#refImgMsg').textContent = '画像を処理中…(' + files.length + '枚)';
       // 1枚ずつ順に処理。(大量選択時のメモリ圧迫を防ぐ・選択順も保たれる)
       var added = 0, failed = 0, batch = [];
@@ -3499,7 +3500,6 @@
       })(0);
     });
     body.querySelector('#refImgPaste').addEventListener('click', function () {
-      if (imgsPending) return;
       body.querySelector('#refImgMsg').textContent = '画像を貼り付け中…';
       pasteImageFromClipboard_(function (durl, err) {
         if (mySeq !== _refOpenSeq) return; // モーダルが開き直された＝破棄
@@ -3509,7 +3509,6 @@
       });
     });
     body.querySelector('#refImgClear').addEventListener('click', function () {
-      if (imgsPending) return;
       var n = pending.imgs.length;
       if (!n) { drawPreview(); return; }
       if (!window.confirm(n > 1 ? ('表示中の画像(' + (pending.idx + 1) + '/' + n + ')を削除しますか？') : '本当に画像を削除しますか？')) return;
@@ -3551,8 +3550,11 @@
       };
       // 画像未編集なら、小さい文字正本(cand_text)だけを保存する。候補画像IDBを再保存しないため、
       // メモリ未反映・iOS遷移中断があっても「動画生成へ」が保存画像を消す操作にならない。
-      var saveForMove = persistWithReclaim_(function () {
-        return imagesDirty ? refImgSave(it.cid, pending) : candTextSave_(it.cid, pending);
+      // 確認前に足した画像は、保存済みの列を確認してつないでから保存する。確認が取れなければ文字だけ保存(遷移は続行)。
+      var saveForMove = (imgsPending && imagesDirty ? confirmPendingImgs_() : Promise.resolve(true)).then(function (confirmed) {
+        return persistWithReclaim_(function () {
+          return (imagesDirty && confirmed) ? refImgSave(it.cid, pending) : candTextSave_(it.cid, pending);
+        });
       });
       saveForMove.then(function (ok) {
         // 保存失敗はログにだけ残し、遷移は止めない(渡すデータはメモリ側=無傷)。
@@ -3619,6 +3621,19 @@
         }
         return;
       }
+      if (imgsPending && imagesDirty) {
+        saveMsg.textContent = '保存済みの画像を確認してから保存中…';
+        confirmPendingImgs_().then(function (confirmed) {
+          if (confirmed) { doSave_(); return; }
+          // 確認できないまま画像列を書くと既存画像を消し得る。文字だけ確定し、足した画像は画面に残して再度の保存を待つ。
+          Promise.resolve(candTextSave_(it.cid, pending)).then(function () {
+            if (saveOp.fail()) showSaveFailure_('保存済みの画像を確認できず、足した画像はまだ保存していません(コメント・URLは保存済み)。もう一度「保存」を押してください');
+          });
+        });
+        return;
+      }
+      doSave_();
+      function doSave_() {
       saveMsg.textContent = '保存中…';
       var saveResult;
       try {
@@ -3641,29 +3656,23 @@
       }, function () {
         if (saveOp.fail()) showSaveFailure_();
       });
+      }
     });    wirePaste_(body);
-    if (imgsPending) waitPendingImgs_();
+    // 画像レコードを確認し、保存済みの列を「今回足した画像」の後ろへつなぐ。確認後は通常の編集と同じになる。
+    var _confirmP = null;
+    if (imgsPending) waitPendingImgs_(0); else maybeFillGrok_();
     ov.hidden = false;
-    function setImgOpsLocked_(locked) {
-      ['#refImgFile', '#refImgPaste', '#refImgClear'].forEach(function (sel) { var el = body.querySelector(sel); if (el) el.disabled = locked; });
-      var pick = body.querySelector('.cand-refimg-pick');
-      if (pick) pick.style.opacity = locked ? '0.45' : '';
-    }
-    // 画像レコードの確認を裏で待つ。確認できたら画像欄へ反映し、画像操作を解禁する。
-    function waitPendingImgs_() {
-      setImgOpsLocked_(true);
-      drawPreview();
-      ensureRefLoaded_(cid).then(function (ok) {
-        if (mySeq !== _refOpenSeq) return; // 閉じた/開き直した後の遅着は捨てる
-        if (!ok) {
-          previewEl.innerHTML = '<div class="hint" style="text-align:center;padding:14px;border:1px dashed var(--line);border-radius:8px;">⚠️ 保存済みの画像を確認できませんでした(コメント・URLは保存できます)<br><button type="button" class="ghost refimg-img-retry" style="width:auto;margin-top:8px;">画像をもう一度確認</button></div>';
-          var retry = previewEl.querySelector('.refimg-img-retry');
-          if (retry) retry.addEventListener('click', waitPendingImgs_);
-          return;
-        }
+    function confirmPendingImgs_() {
+      if (!imgsPending) return Promise.resolve(true);
+      if (_confirmP) return _confirmP;
+      _confirmP = ensureRefLoaded_(cid).then(function (ok) {
+        _confirmP = null;
+        if (mySeq !== _refOpenSeq) return false; // 閉じた/開き直した後の遅着は捨てる
+        if (!imgsPending) return true;
+        if (!ok) return false;
         var got = refImgOf(cid) || {};
         curImgs = Array.isArray(got.imgs) ? got.imgs.filter(Boolean) : (got.img ? [got.img] : []);
-        pending.imgs = curImgs.slice(); pending.idx = 0; // 確認前は画像を触れない=上書きしてよいのは確認済みの列だけ
+        pending.imgs = pending.imgs.concat(curImgs); // 表示中の位置(足した画像の中)はそのまま
         // 移行前の端末は文字もIDB側にしか無いことがある。まだ触っていない欄だけ埋める。
         var cEl = body.querySelector('#refImgComment'), tEl = body.querySelector('#refImgTwitter');
         if (got.comment && cEl && cEl.value === pending.comment) { cEl.value = got.comment; pending.comment = got.comment; }
@@ -3671,12 +3680,43 @@
         if (got.memo && !pending.memo && !body.querySelector('#refImgMemoInline')) { pending.memo = got.memo; addMemoBox_(got.memo); }
         if (!urls2Wrap.children.length) refUrls2_(got).forEach(function (u) { addUrl2Row_(u); });
         imgsPending = false;
-        setImgOpsLocked_(false);
         drawPreview();
         try {
           var page = document.getElementById('pageCand'), live = page && liveRefButton_(page, cid);
           if (live) updateCardRefThumb_(live.closest ? live.closest('.cand-card') : null, cid);
         } catch (e) {}
+        return true;
+      }, function () { _confirmP = null; return false; });
+      return _confirmP;
+    }
+    // 確認が返らない間は裏で数回やり直す(押さなくても画像欄が戻る)。それでも駄目な時だけ手動の再確認を出す。
+    function waitPendingImgs_(tries) {
+      drawPreview();
+      confirmPendingImgs_().then(function (ok) {
+        if (mySeq !== _refOpenSeq) return;
+        if (ok) { maybeFillGrok_(); return; }
+        if (tries < 5) { setTimeout(function () { if (mySeq === _refOpenSeq && imgsPending) waitPendingImgs_(tries + 1); }, 4000); return; }
+        if (pending.imgs.length) { drawPreview(); return; } // 足した画像は消さずに見せ続ける(保存時にもう一度確認する)
+        previewEl.innerHTML = '<div class="hint" style="text-align:center;padding:14px;border:1px dashed var(--line);border-radius:8px;">⚠️ 保存済みの画像を確認できませんでした(画像の追加・コメント・URLはできます)<br><button type="button" class="ghost refimg-img-retry" style="width:auto;margin-top:8px;">画像をもう一度確認</button></div>';
+        var retry = previewEl.querySelector('.refimg-img-retry');
+        if (retry) retry.addEventListener('click', function () { waitPendingImgs_(5); });
+      });
+    }
+    // Grok自動追加の作品で画像がまだ空なら、その場で元ポストの画像を入れる(一括の取り込みを待たない)。
+    function maybeFillGrok_() {
+      if (it.source !== 'grok_fanza' || !grokSrcImgs_(it.sourceImgs).length || grokDone_()[cid] || refImgsOf_(cid).length) return;
+      var msgEl = body.querySelector('#refImgMsg');
+      if (msgEl && !msgEl.textContent) msgEl.textContent = '元ポストの画像を取り込み中…';
+      fillOneGrokRef_(cid, it.sourceImgs, it.twitterUrl || it.sourcePost || '').then(function (r) {
+        if (mySeq !== _refOpenSeq) return;
+        if (msgEl && msgEl.textContent === '元ポストの画像を取り込み中…') msgEl.textContent = '';
+        if (r !== 'saved') return;
+        var got = refImgsOf_(cid);
+        // 取り込みは保存済みの列として扱う=この後の保存で消さない。画面で足した画像があればその後ろへ。
+        pending.imgs = (imagesDirty ? pending.imgs : []).concat(got);
+        curImgs = got.slice();
+        drawPreview();
+        if (msgEl) msgEl.textContent = '元ポストの画像を入れました(' + got.length + '枚)';
       });
     }
   }
@@ -5430,15 +5470,24 @@
   //   ★既存の画像を上書きしない=一括展開が済み、その作品の画像が端末内に0枚(R2マーカーも無い)と分かった時だけ入れる。
   //   取り込んだcidは cand_inbox_imgs に覚える=後でChamiが画像を消しても戻さない。
   var CAND_INBOX_IMGS = 'cand_inbox_imgs';
+  // 受け箱の画像URLは PC が公開埋め込みで取った pbs.twimg.com の写真だけを通す(他所のURLを候補へ持ち込まない)。
+  function grokSrcImgs_(arr) {
+    return (Array.isArray(arr) ? arr : []).map(function (u) { return String(u || ''); })
+      .filter(function (u) { return /^https:\/\/pbs\.twimg\.com\//.test(u); }).slice(0, 4);
+  }
   function backfillGrokSource_(autoKey, rows) {
     var byCid = {};
-    rows.forEach(function (w) { if (w && w.cid && w.sourcePost) byCid[String(w.cid)] = String(w.sourcePost); });
+    rows.forEach(function (w) { if (w && w.cid) byCid[String(w.cid)] = w; });
     var items = candItemsRead_(autoKey), n = 0;
     items.forEach(function (x) {
-      if (!x || x.source !== 'grok_fanza' || x.twitterUrl) return;
-      var u = x.sourcePost || byCid[x.cid] || '';
-      if (!u) return;
-      x.twitterUrl = u; if (!x.sourcePost) x.sourcePost = u; n++;
+      if (!x || x.source !== 'grok_fanza') return;
+      var w = byCid[x.cid], ch = false;
+      var u = x.sourcePost || (w && w.sourcePost) || '';
+      if (!x.twitterUrl && u) { x.twitterUrl = String(u); if (!x.sourcePost) x.sourcePost = String(u); ch = true; }
+      // 画像URLも候補に持たせる=投稿編集を開いた時にその場で取り込める(一括の取り込みが端末の重さで遅れても)。
+      var imgs = grokSrcImgs_(w && w.sourceImgs);
+      if (!grokSrcImgs_(x.sourceImgs).length && imgs.length) { x.sourceImgs = imgs; ch = true; }
+      if (ch) n++;
     });
     if (n) candItemsWrite_(autoKey, items);
     return n;
@@ -5454,34 +5503,71 @@
       return new Promise(function (resolve) { fileToScaledDataUrl(blob, function (d) { resolve(d || null); }); });
     }).catch(function () { if (timer) clearTimeout(timer); return null; });
   }
+  function grokDone_() { var d = lsGet(CAND_INBOX_IMGS, '{}'); return (d && typeof d === 'object' && !Array.isArray(d)) ? d : {}; }
+  function grokDoneMark_(cid, v) { var d = grokDone_(); d[cid] = v; lsSet(CAND_INBOX_IMGS, d); }
+  // 1作品ぶんの取り込み。★全体の画像展開(_candidateHydrated)は待たない=重い端末で展開が遅れると
+  //   旧版は約30秒で諦めて入らなかった(Chami 2026-10-20「画像まで入れてくれ」)。この作品の画像レコード
+  //   1件だけを直接読み、空と確認できた時だけ入れる=既存画像の上書きはしない。
+  //   戻り値: 'saved'=入れた / 'had'=既に画像あり・取り込み済み / 'later'=まだ確認できない / 'fail'=取れなかった
+  var _grokFillJobs = {};
+  function fillOneGrokRef_(cid, srcImgs, tw) {
+    cid = String(cid || ''); srcImgs = grokSrcImgs_(srcImgs);
+    if (!cid || !srcImgs.length) return Promise.resolve('fail');
+    if (_grokFillJobs[cid]) return _grokFillJobs[cid];
+    function hasAny_() { return refImgsOf_(cid).length || isR2Marker_(_imgMem.ref[cid]) || isR2Marker_(legacyRefOf_(cid)); }
+    var job = ensureRefLoaded_(cid).then(function (ok) {
+      if (grokDone_()[cid]) return 'had';
+      if (hasAny_()) { grokDoneMark_(cid, 'had'); return 'had'; }
+      if (!ok) return 'later';
+      return Promise.all(srcImgs.map(fetchImgScaled_)).then(function (imgs) {
+        imgs = imgs.filter(Boolean);
+        if (!imgs.length) return 'fail'; // 取れない時は覚えない=次の取り込みで再挑戦
+        if (grokDone_()[cid]) return 'had';
+        if (hasAny_()) { grokDoneMark_(cid, 'had'); return 'had'; }
+        var cur = refImgOf(cid) || {};
+        return Promise.resolve(refImgSave(cid, { imgs: imgs, comment: cur.comment || '', memo: cur.memo || '', twitterUrl: cur.twitterUrl || tw || '', urls2: refUrls2_(cur) })).then(function (saved) {
+          if (saved === false) return 'fail';
+          grokDoneMark_(cid, new Date().getTime());
+          klog_('ref_image_saved_grok', 'work', cid, { imgs: imgs.length });
+          try { refRefreshCard_(cid); } catch (e) {}
+          return 'saved';
+        });
+      });
+    }).catch(function () { return 'fail'; });
+    _grokFillJobs[cid] = job.then(function (r) { delete _grokFillJobs[cid]; return r; });
+    return _grokFillJobs[cid];
+  }
   function fillGrokRefImgs_(autoKey, rows, tries) {
-    if (!_candidateHydrated) { if (tries < 10) setTimeout(function () { fillGrokRefImgs_(autoKey, rows, tries + 1); }, 3000); return; }
-    var done = lsGet(CAND_INBOX_IMGS, '{}'); if (!done || typeof done !== 'object' || Array.isArray(done)) done = {};
-    var inAuto = {}; candItemsRead_(autoKey).forEach(function (x) { if (x && x.cid) inAuto[x.cid] = x; });
+    tries = tries | 0;
+    var done = grokDone_(), inAuto = {};
+    candItemsRead_(autoKey).forEach(function (x) { if (x && x.cid) inAuto[x.cid] = x; });
     var todo = rows.filter(function (w) {
       var cid = w && String(w.cid || '');
-      if (!cid || done[cid] || !inAuto[cid] || !Array.isArray(w.sourceImgs) || !w.sourceImgs.length) return false;
-      if (refImgsOf_(cid).length || isR2Marker_(_imgMem.ref[cid]) || isR2Marker_(legacyRefOf_(cid))) { done[cid] = 'had'; return false; }
-      return true;
+      return !!(cid && !done[cid] && inAuto[cid] && grokSrcImgs_(w.sourceImgs).length);
     });
-    lsSet(CAND_INBOX_IMGS, done);
+    if (!todo.length) return Promise.resolve();
+    var later = false;
     return todo.reduce(function (p, w) {
       return p.then(function () {
         var cid = String(w.cid);
-        return Promise.all(w.sourceImgs.slice(0, 4).map(fetchImgScaled_)).then(function (imgs) {
-          imgs = imgs.filter(Boolean);
-          if (!imgs.length) return; // 取れない時は覚えない=次の取り込みで再挑戦
-          if (refImgsOf_(cid).length) { done[cid] = 'had'; lsSet(CAND_INBOX_IMGS, done); return; }
-          var cur = refImgOf(cid) || {}, tw = cur.twitterUrl || inAuto[cid].twitterUrl || w.sourcePost || '';
-          return Promise.resolve(refImgSave(cid, { imgs: imgs, comment: cur.comment || '', memo: cur.memo || '', twitterUrl: tw, twitterUrl2: cur.twitterUrl2 || '' })).then(function (ok) {
-            if (ok === false) return;
-            done[cid] = new Date().getTime(); lsSet(CAND_INBOX_IMGS, done);
-            klog_('ref_image_saved_grok', 'work', cid, { imgs: imgs.length });
-            try { refRefreshCard_(cid); } catch (e) {}
-          });
+        return fillOneGrokRef_(cid, w.sourceImgs, inAuto[cid].twitterUrl || w.sourcePost || '').then(function (r) {
+          if (r === 'later' || r === 'fail') later = true;
         });
       });
-    }, Promise.resolve()).catch(function () {});
+    }, Promise.resolve()).then(function () {
+      if (later && tries < 8) scheduleGrokRefill_(autoKey, rows, tries + 1);
+    }).catch(function () {});
+  }
+  // 確認できなかった分は、全体展開の完了か時間経過(15秒→最大2分)のどちらか早い方でやり直す。
+  function scheduleGrokRefill_(autoKey, rows, tries) {
+    var fired = false;
+    function go() {
+      if (fired) return; fired = true;
+      try { document.removeEventListener('go5-candidate-images-hydrated', go); } catch (e) {}
+      fillGrokRefImgs_(autoKey, rows, tries);
+    }
+    try { document.addEventListener('go5-candidate-images-hydrated', go); } catch (e) {}
+    setTimeout(go, Math.min(120000, 15000 * tries));
   }
   function importCandInbox_(force) {
     var now = new Date().getTime();
@@ -5510,7 +5596,7 @@
         if (!cid || !/^[a-z0-9_]+$/.test(cid)) return;
         if (known[cid]) { dup++; return; }
         if (['acc1', 'acc2', 'acc3'].some(function (a) { return !!postedItemForCid_(cid, a); })) { dup++; seen[cid] = t; return; } // 投稿済み(posted_cids権威)は入れない
-        items.push({ url: w.url || '', cid: cid, title: w.title || '', author: w.author || '', thumb: w.thumb || '', listPrice: w.listPrice, price: w.price, discountPct: w.discountPct || 0, date: w.date || '', genres: w.genres || [], floor: w.floor || '', service: w.service || '', addedAt: Number(w.addedAt) || t, source: String(w.source || 'grok_fanza'), postVerified: w.postVerified !== false, sourcePost: w.sourcePost || '', twitterUrl: w.sourcePost || '' });
+        items.push({ url: w.url || '', cid: cid, title: w.title || '', author: w.author || '', thumb: w.thumb || '', listPrice: w.listPrice, price: w.price, discountPct: w.discountPct || 0, date: w.date || '', genres: w.genres || [], floor: w.floor || '', service: w.service || '', addedAt: Number(w.addedAt) || t, source: String(w.source || 'grok_fanza'), postVerified: w.postVerified !== false, sourcePost: w.sourcePost || '', twitterUrl: w.sourcePost || '', sourceImgs: grokSrcImgs_(w.sourceImgs) });
         known[cid] = 1; seen[cid] = t; added++;
       });
       if (!added) { fillGrokRefImgs_(autoKey, rows, 0); return { added: 0, dup: dup, moved: moved }; }
