@@ -4811,7 +4811,7 @@
         reconcileCards_(listEl, visible, function (cid) {
           return mainSet[String(cid)] ? '<button type="button" class="cand-hide-btn cand-to-main-btn is-done" style="width:auto;" disabled>✅ 手動追加済み</button>'
             : '<button type="button" class="cand-hide-btn cand-to-main-btn" style="width:auto;" data-to-main="' + esc(cid) + '">手動追加へ</button>';
-        }, function (node) { wireCardCommon_(node); });
+        }, function (node) { wireCardCommon_(node); observeCardRefImg_(node); });
         Array.prototype.forEach.call(listEl.children, function (n) { if (n.style) n.style.display = ''; }); // セール絞込で先に隠した使い回しカードを戻す
       }
       wrap.querySelectorAll('[data-candpage]').forEach(function (b) { b.addEventListener('click', function () {
@@ -6230,6 +6230,7 @@
     // 1枚のカードだけを配線する(＝差分更新で「新しく作った」カードにのみ呼ぶ=二重配線しない)。
     //   サムネ/生成画像のタップは pageCand への委任(ensureCardDelegation_)で拾うため、ここでは扱わない。
     var wireOneCard_ = function (node) {
+      observeCardRefImg_(node); // 画面に近づいたカードの画像取得を起こす
       wireCardCommon_(node); // 🔁作品情報ボタン・チャンネル切替行・コメント/メモの1行フィット
       node.querySelectorAll('[data-hidecid]').forEach(function (b) {
         b.addEventListener('click', function () { if (!window.confirm('非表示にしますか？')) return; var h = lsGet(hiddenKey(tabId), '[]'), c = b.getAttribute('data-hidecid'); if (h.indexOf(c) < 0) h.push(c); lsSet(hiddenKey(tabId), h); el._go5CandState = null; renderCandList(tabId); });
@@ -6666,6 +6667,25 @@
     _refProbeQueued[cid] = true;
     _refProbeQueue.push(cid);
     _pumpRefProbe_();
+  }
+  // 段1(2026-09-06許可): カードが画面の手前600pxに入った時に per-cid 取得を起こす。描画時の起動だけだと、
+  //   ガード(キュー済み・失敗印)で止まったカードが⏳のまま残るため、見える直前にもう一度だけ押す。
+  var _refImgIO = null;
+  function ensureRefImgIO_() {
+    if (_refImgIO || !("IntersectionObserver" in window)) return _refImgIO;
+    _refImgIO = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (!entry.isIntersecting) return;
+        _refImgIO.unobserve(entry.target);
+        var cid = entry.target.getAttribute('data-cid');
+        if (cid) ensureRefProbe_(cid);
+      });
+    }, { rootMargin: '600px 0px' });
+    return _refImgIO;
+  }
+  function observeCardRefImg_(node) {
+    var io = ensureRefImgIO_();
+    if (io && node && node.getAttribute) io.observe(node);
   }
   // 動画生成用画像スロットのHTML。★表示は先頭1枚だけ・全幅で大きく出す(2列グリッドの全枚表示は見にくい=元の見せ方へ戻す・
   //   Chami 2026-08-15「画像表示の方法は見にくいので元に戻して」)。全枚数はサムネをタップ→ズームで左右送りして見られる
