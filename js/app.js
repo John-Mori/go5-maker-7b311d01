@@ -1674,7 +1674,12 @@
       try { localStorage.setItem('preview_yt_frame', _ytFrameCb.checked ? '1' : '0'); } catch (e) {}
       _ytApply();
     });
-    window.addEventListener('resize', function () { if (_ytFrameCb.checked) { applyYtFrame_(false); applyYtFrame_(true); } });
+    // iOSはスクロールでツールバーが出入りするたび resize を連打する=1フレームに1回へまとめて測り直す(軽量化2026-10-20)。
+    var _ytResizeRaf = 0;
+    window.addEventListener('resize', function () {
+      if (_ytResizeRaf) return;
+      _ytResizeRaf = requestAnimationFrame(function () { _ytResizeRaf = 0; if (_ytFrameCb.checked) { applyYtFrame_(false); applyYtFrame_(true); } });
+    });
     window.addEventListener('orientationchange', function () { if (_ytFrameCb.checked) setTimeout(function () { applyYtFrame_(false); applyYtFrame_(true); }, 200); });
     // タブ復帰(data-tab→tabMovie)でキャンバスが再レイアウトされたら測り直す。
     try { new MutationObserver(function () { if (_ytFrameCb.checked) { applyYtFrame_(false); applyYtFrame_(true); } }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-tab"] }); } catch (e) {}

@@ -1217,7 +1217,9 @@
       function stamp(prefix, cur, snp) {
         Object.keys(cur).forEach(function (k) {
           if (ts[prefix + k + " d"]) { delete ts[prefix + k + " d"]; ts[prefix + k] = editT(prefix, k); return; } // 復活
-          if (JSON.stringify(cur[k]) !== JSON.stringify(snp[k])) ts[prefix + k] = editT(prefix, k);
+          // 両方が文字列(LSの生値)なら直接比較=stringify比較と同値。数MBの値を毎サイクル2回エスケープし直さない(軽量化2026-10-20)。
+          var same = (typeof cur[k] === "string" && typeof snp[k] === "string") ? cur[k] === snp[k] : JSON.stringify(cur[k]) === JSON.stringify(snp[k]);
+          if (!same) ts[prefix + k] = editT(prefix, k);
           else if (!ts[prefix + k]) ts[prefix + k] = now;
         });
         Object.keys(snp).forEach(function (k) {

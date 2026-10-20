@@ -456,7 +456,13 @@
   // ---- アカウント別フィールドの保存配線 ----
   if (els.enable) els.enable.addEventListener('change', function () { saveA('bsky_enable', els.enable.checked ? '1' : '0'); });
   if (els.unattended) els.unattended.addEventListener('change', function () { saveA('bsky_unattended', els.unattended.checked ? '1' : '0'); });
-  if (els.text) els.text.addEventListener('input', function () { saveA('bsky_text', els.text.value); renderPreview(); updateGasStatus(); });
+  // 保存は打鍵ごとに即時。プレビュー描き直しは打ち止め後120msに1回へまとめる=iOSの入力が引っかからない(軽量化2026-10-20)。
+  var _textPvTimer = 0;
+  if (els.text) els.text.addEventListener('input', function () {
+    saveA('bsky_text', els.text.value);
+    clearTimeout(_textPvTimer);
+    _textPvTimer = setTimeout(function () { _textPvTimer = 0; renderPreview(); updateGasStatus(); }, 120);
+  });
   if (els.workUrl) els.workUrl.addEventListener('input', function () { syncWorkUrl(els.workUrl.value, false); });
   if (els.handle) els.handle.addEventListener('input', function () { saveA('bsky_handle', els.handle.value); renderPreview(); updateGasStatus(); });
   if (els.appPw) els.appPw.addEventListener('input', function () { saveA('bsky_app_pw', els.appPw.value); renderPreview(); updateGasStatus(); });

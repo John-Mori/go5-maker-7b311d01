@@ -2622,7 +2622,7 @@
     var hasYt = !!(meta.youtubeUrl);
     var btnBase = 'width:auto;margin:0;padding:5px 10px;font-size:.76rem;border-radius:6px;cursor:pointer;white-space:nowrap;';
     return '<div class="stk-row" data-item-id="' + esc(id) + '" style="display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid #2a3346;">' +
-      (thumbUrl ? '<img src="' + esc(thumbUrl) + '" alt="" style="width:48px;height:85px;object-fit:cover;border-radius:5px;flex:0 0 auto;">'
+      (thumbUrl ? '<img loading="lazy" decoding="async" src="' + esc(thumbUrl) + '" alt="" style="width:48px;height:85px;object-fit:cover;border-radius:5px;flex:0 0 auto;">'
                 : '<div class="stk-thumb-ph" title="サムネイル未取得" style="width:48px;height:85px;border-radius:5px;background:linear-gradient(160deg,#17243a,#0e1422);border:1px solid #31405a;display:flex;align-items:center;justify-content:center;color:#7a8fa3;font-size:.6rem;line-height:1.2;text-align:center;flex:0 0 auto;">確認中</div>') +
       '<div style="flex:1 1 0;min-width:0;">' +
         '<div class="stk-title" style="font-size:.86rem;font-weight:700;color:#eef2f7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(meta.label) + '</div>' +
@@ -2649,7 +2649,7 @@
       ? '<span style="color:#e6a23c;font-weight:700;">⚠ 保存に失敗。下の「もう一度保存」で再確認できます</span>'
       : '<span style="color:var(--accent);">⏳ 保存中…(この端末と雲へ確認しています)</span>';
     return '<div class="stk-row" style="display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid #2a3346;opacity:.92;">' +
-      (thumbUrl ? '<img src="' + esc(thumbUrl) + '" alt="" style="width:48px;height:85px;object-fit:cover;border-radius:5px;flex:0 0 auto;">'
+      (thumbUrl ? '<img loading="lazy" decoding="async" src="' + esc(thumbUrl) + '" alt="" style="width:48px;height:85px;object-fit:cover;border-radius:5px;flex:0 0 auto;">'
                 : '<div class="stk-thumb-ph" style="width:48px;height:85px;border-radius:5px;background:linear-gradient(160deg,#17243a,#0e1422);border:1px solid #31405a;display:flex;align-items:center;justify-content:center;color:#7a8fa3;font-size:.6rem;text-align:center;flex:0 0 auto;">保存中</div>') +
       '<div style="flex:1 1 0;min-width:0;">' +
         '<div class="stk-title" style="font-size:.86rem;font-weight:700;color:#eef2f7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(meta.label) + '</div>' +
@@ -2701,7 +2701,7 @@
     //     ドラフト側btnBase(703行)や draftPostModal(1206行コメント)と同じ既知の罠=INC-47系。ここが幅騒動の元凶だった。
     var btnBase = 'width:auto;margin:0;padding:4px 8px;font-size:.72rem;border-radius:6px;cursor:pointer;white-space:nowrap;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;gap:3px;';
     return '<div class="stk-row" data-item-id="' + esc(id) + '" style="display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid #2a3346;opacity:.92;">' +
-      (thumbUrl ? '<img src="' + esc(thumbUrl) + '" alt="" style="width:40px;height:71px;object-fit:cover;border-radius:5px;flex:0 0 auto;">'
+      (thumbUrl ? '<img loading="lazy" decoding="async" src="' + esc(thumbUrl) + '" alt="" style="width:40px;height:71px;object-fit:cover;border-radius:5px;flex:0 0 auto;">'
                 : '<div class="stk-thumb-ph" style="width:40px;height:71px;border-radius:5px;background:#0e1422;flex:0 0 auto;"></div>') +
       '<div style="flex:1 1 0;min-width:0;">' +
         '<div class="stk-title" style="font-size:.84rem;font-weight:700;color:#cbd5e3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(meta.label) + '</div>' +
@@ -2802,11 +2802,18 @@
   // 作成履歴(details)の開閉状態を再描画をまたいで保持する。render毎に<details>を作り直すと
   //   open属性が消えて閉じる=「削除を押すと作成履歴が閉じる」の真因(Chami報告2026-08-13③)。
   var _archOpen = false;
+  // ★軽量化(2026-10-20): 署名の元は META_KEY / go5_stock_del / ARCHIVE_KEY の生文字列だけ。
+  //   3つとも前回と同じなら前回の署名を返す=作成履歴(最大約4.8MB)を描画・同期通知のたびに解析し直さない。
+  var _sigMemo = null;
   function stockViewSig_(acct) {
     try {
+      var rm = localStorage.getItem(META_KEY), rd = localStorage.getItem('go5_stock_del'), ra = localStorage.getItem(ARCHIVE_KEY);
+      if (_sigMemo && _sigMemo.acct === acct && _sigMemo.rm === rm && _sigMemo.rd === rd && _sigMemo.ra === ra) return _sigMemo.sig;
       var m = loadMeta().filter(function (x) { return (x.account || 'acc1') === acct; });
       var a = loadArchive().filter(function (x) { return (x.account || 'acc1') === acct; });
-      return JSON.stringify([m, a]);
+      var sig = JSON.stringify([m, a]);
+      _sigMemo = { acct: acct, rm: rm, rd: rd, ra: ra, sig: sig };
+      return sig;
     } catch (e) { return ''; }
   }
   function render() {
