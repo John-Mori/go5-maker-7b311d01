@@ -699,6 +699,12 @@
       ' title="この作品のGoogleドライブ保存先フォルダを開く">' + DRIVE_ICON_SVG + '</a>';
   }
   // 編集モーダルのX/Bskyラジオ用：この行の現在の投稿先。明示指定＞URL判定＞既定X(Chami:これから原則X投稿)。
+  // 出先別af_id(2026-10-21): Bluesky行はそのchのBluesky用af_id(空欄=fanza_af_id)、X行は fanza_af_id。正本は bluesky.js の Go5AfIdFor。
+  function afIdForPlat_(plat, acc) {
+    try { if (window.Go5AfIdFor) return window.Go5AfIdFor(plat === 'bsky' ? 'bsky' : 'x', acc) || ''; } catch (e) {}
+    try { return (localStorage.getItem('fanza_af_id') || '').trim(); } catch (e) { return ''; }
+  }
+  function veditPlat_() { var b = $('veditPlatBsky'); return (b && b.checked) ? 'bsky' : 'x'; }
   function platOf_(it) {
     if (it && it.platform === 'x') return 'x';
     if (it && it.platform === 'bsky') return 'bsky';
@@ -1419,7 +1425,7 @@
       treeShortStatus_(row, false, 'エラー：既に短縮済みのURLは転送先のアフィIDを再確認できません。元の作品URLを貼って短縮し直してください。');
       return;
     }
-    var afId = ''; try { afId = localStorage.getItem('fanza_af_id') || ''; } catch (e) {}
+    var afId = afIdForPlat_(veditPlat_(), _treeContextAccount); // 投稿先(X/Bsky)・chのaf_id(出先別af_id)
     if (!afId) { treeShortStatus_(row, false, 'エラー：詳細設定のFANZAアフィリエイトIDが未設定です。'); return; }
     if (typeof window.ensureAffiliateLink !== 'function' || typeof window.hasRealAffiliateId !== 'function' || typeof window.Go5MakeShort !== 'function') {
       treeShortStatus_(row, false, 'エラー：アフィリンク・短縮機能を読み込めません。ページを再読み込みしてください。'); return;
@@ -1722,7 +1728,7 @@
       var wurl = ($('veditWork').value || '').trim();
       if (!/^https?:\/\//.test(wurl)) { showModalErr_('先に「作品URL(DMM/FANZAの商品ページURL)」を入れてください'); return; }
       if (typeof window.buildAffiliateLink !== 'function' || typeof window.Go5MakeShort !== 'function') { showModalErr_('短縮機能が未読み込みです。🦋投稿タブを一度開いてから再度お試しください。'); return; }
-      var afId = ''; try { afId = localStorage.getItem('fanza_af_id') || ''; } catch (e) {}
+      var afId = afIdForPlat_(veditPlat_(), _treeContextAccount); // 投稿先(X/Bsky)・chのaf_id(出先別af_id)
       var aff = window.buildAffiliateLink(wurl, afId);
       if (!aff || !aff.ok || !aff.link) { showModalErr_('作品URLからアフィリンクを作れませんでした(URLを確認してください)'); return; }
       var errEl = $('veditError'); if (errEl) errEl.hidden = true;
@@ -2074,7 +2080,7 @@
       var toShorten = wurl;
       // FANZA/DMMの作品ページURL(アフィリンクでない)なら、先にアフィリンク化してから短縮する。
       if (window.buildAffiliateLink && /(^|\.)dmm\.co\.jp|(^|\.)dlsite|fanza/.test(wurl) && !/al\.(fanza|dmm)/.test(wurl)) {
-        var afId = ''; try { afId = localStorage.getItem('fanza_af_id') || ''; } catch (e) {}
+        var afId = afIdForPlat_(platOf_(it), accountOverride || it.account || acct()); // 出先別af_id
         var aff = window.buildAffiliateLink(wurl, afId);
         if (aff && aff.ok && aff.link) toShorten = aff.link;
       }

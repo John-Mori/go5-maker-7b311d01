@@ -867,7 +867,29 @@
   var DISC_ON_KEY = 'bsky_discount_list_on';
   function discountListOn_() { return true; } // 常時ON(標準投稿形式の一部・2026-07-14 Chami指定でトグルUI廃止=セール行は常に添える)
   function setDiscountListOn_(on) { try { localStorage.setItem(DISC_ON_KEY, on ? '1' : '0'); } catch (e) {} }
-  function curAfId_() { try { return (localStorage.getItem('fanza_af_id') || '').trim(); } catch (e) { return ''; } }
+  // ★出先別af_id(2026-10-21 三笘 msg 1562215078760292413・DMMアフィでBluesky books-healing=002が承認)。
+  //   X(と既定)は従来の fanza_af_id。Blueskyはチャンネル別 fanza_af_id_bsky__<acc>、空欄なら fanza_af_id(=未承認chは従来の経路)。
+  //   値は⚙AFIリンクタブで持つ(コードに002等を焼かない)。forX=true でX用、それ以外はBluesky用(acc省略=今のch)。
+  function xAfId_() { try { return (localStorage.getItem('fanza_af_id') || '').trim(); } catch (e) { return ''; } }
+  function bskyAfId_(acc) {
+    var v = ''; try { v = (localStorage.getItem('fanza_af_id_bsky__' + (acc || acctId())) || '').trim(); } catch (e) {}
+    return v || xAfId_();
+  }
+  function curAfId_(forX, acc) { return forX ? xAfId_() : bskyAfId_(acc); }
+  // URLを包む時のaf_id。DLsiteは出先で分けない(従来どおり fanza_af_id)。
+  function afFor_(url, forX, acc) { return (window.isDlsiteUrl && window.isDlsiteUrl(url)) ? xAfId_() : curAfId_(forX, acc); }
+  // Bluesky本文に手で貼られたX用af_idの生FANZAリンクを、Bluesky用af_idへ付け替える(他人のaf_idは触らない)。
+  function swapAfForBsky_(link, acc) {
+    var xa = xAfId_(), ba = bskyAfId_(acc);
+    if (!xa || !ba || xa === ba) return link;
+    try {
+      var u = new URL(link);
+      if (!/(^|\.)fanza\.co\.jp$/.test(u.hostname) || u.searchParams.get('af_id') !== xa) return link;
+      u.searchParams.set('af_id', ba);
+      return u.toString();
+    } catch (e) { return link; }
+  }
+  try { window.Go5AfIdFor = function (dest, acc) { return dest === 'x' ? xAfId_() : bskyAfId_(acc); }; } catch (e) {}
 
   // ---- 🔥 セール案内URLの複数管理(名前付き・追加/選択/保存/削除・選択は永続) ----
   //   Chami依頼2026-07-20:「セール中の案内URLはキャンペーン/季節で増減するので、追加・選択・保存・
@@ -963,11 +985,11 @@
   }
   // 素の作品URLが来てもaf_id付きで出す(付けられない時は渡されたまま)。
   function affRawFor_(link) {
-    var afId = ''; try { afId = localStorage.getItem('fanza_af_id') || ''; } catch (e) {}
+    var afId = xAfId_(); // X欄用=X側のaf_id
     var r = (afId && window.ensureAffiliateLink) ? window.ensureAffiliateLink(link, afId) : null;
     return (r && r.ok && r.link) ? r.link : link;
   }
-  function cachedWorkShortLink_() { return workShareFor_(resolveAffLink()); }
+  function cachedWorkShortLink_() { return workShareFor_(resolveAffLink(true)); }
   // 【Bluesky向け】作品リンクの短縮版(自前ドメイン)。未取得なら''=呼び出し側が ensureWorkShortLink_ で取得を始め、
   //   それまでは生アフィリンクのまま(投稿直前は measureWorkLink_ が最終的に短縮へ差し替える)。
   //   Blueskyだけ再び短縮する(Chami 2026-10-21「ただのリンクにするくらいなら短縮リンクにしてピンククリック計測しよか」)。
@@ -1009,7 +1031,7 @@
   //   それ以外(既に短縮済み等)はBluesky側と同じキャッシュ。呼び出し元: X mode の composePostTextWith_・
   //   __go5ComposeXTextForBskyText・__go5FillSalePlaceholderInText・composeXTextRaw_(sanitizeXLinks.isShort)。
   function xDiscountLink_() {
-    var af = curAfId_(); if (!af) return '';
+    var af = curAfId_(true); if (!af) return '';
     var entry = discCurrentEntry_(); if (!entry || !entry.url) return '';
     if (noShortDest_(entry.url) && window.ensureAffiliateLink) {
       var built = window.ensureAffiliateLink(entry.url, af);
@@ -1395,9 +1417,9 @@
   function photoFile() { var p = $('photo'), f = p && p.files && p.files[0]; return f || (window.Go5ForegroundFile && window.Go5ForegroundFile()) || null; }
 
   // ---- アフィリンク自動付与・本文合成 ----
-  function resolveAffLink() {
+  function resolveAffLink(forX) { // forX=true でX用af_id・それ以外はBluesky用(出先別af_id)
     var url = (els.workUrl.value || '').trim(); if (!url) return '';
-    var afId = ''; try { afId = localStorage.getItem('fanza_af_id') || ''; } catch (e) {}
+    var afId = curAfId_(forX);
     if (typeof buildAffiliateLink === 'function') { var r = buildAffiliateLink(url, afId); if (r && r.ok) return r.link; }
     return url;
   }
@@ -1415,7 +1437,7 @@
     //   ★剥がした結果が空になる時だけ本文をそのまま使う(空表示防止・stripAutoBlocksSafe_)。
     var caption = stripAutoBlocksSafe_(els.text.value);
     if (!AUTO_APPEND_ENABLED) return caption;
-    var link = resolveAffLink();
+    var link = resolveAffLink(forX);
     var PH = (window.BlueskyCore && window.BlueskyCore.WORK_LINK_PLACEHOLDER) || '紹介用短縮リンク';
     var out;
     var onReady_ = function () { renderPreview(); if (els.pcModal && !els.pcModal.hidden) recomposePcText_(); }; // X欄はgo5-work-short-readyイベントで自律的に追従する
@@ -1472,7 +1494,7 @@
       //   本文に無かった行がXにだけ増えるため廃止した。Bluesky側(composePostText/renderPreview)は
       //   既存どおり自動追記を維持する(XとBlueskyで使い分け・Chami同指示)。
       var caption = stripAutoBlocksSafe_(bskyText || '');
-      var link = overrideAffLink !== undefined ? overrideAffLink : resolveAffLink();
+      var link = overrideAffLink !== undefined ? overrideAffLink : resolveAffLink(true);
       var short = workShareFor_(link);
       var dlink = discountListOn_() ? xDiscountLink_() : ''; // X向け=DMM行きセール一覧は生アフィリンク(短縮しない)
       // ★置換(のみ)の実体はBlueskyCore.composeXParentText(純粋関数・Nodeテスト対象)に委譲する
@@ -2345,6 +2367,7 @@
     if (countGraphemes(parentText) > 300) return Promise.reject(new Error('parent-too-long'));
     var aff = String(o.workLink || '').trim();
     if (!/^https?:\/\//.test(aff)) return Promise.reject(new Error('no-work-link'));
+    aff = swapAfForBsky_(aff, acc); // ドラフトの作品リンク(X用af_idで保存)をこのchのBluesky用af_idへ(出先別af_id)
     var tagged = aff + (aff.indexOf('#') < 0 ? '#go5=bsky' : '&go5=bsky');
     var out = { bskyWorkShortUrl: '', replyText: '', parentUrl: '', replyUrl: '', parentShortUrl: '', replyShortUrl: '', delayMs: 0 };
     return makeShortAndShare(tagged, { account: acc, bsky: true }).then(function (r) { // Bluesky返信の作品リンク=短縮(2026-10-21)
@@ -2396,7 +2419,7 @@
     if (!window.classifyPromoUrl || !window.ensureAffiliateLink) return Promise.resolve({ ok: false, error: 'module_missing' });
     var state = window.classifyPromoUrl(url, shortHostList_());
     if (state.isShortened) return Promise.resolve({ ok: true, link: url, changed: false }); // 既に短縮済み→そのまま
-    var built = window.ensureAffiliateLink(url, curAfId_());
+    var built = window.ensureAffiliateLink(url, afFor_(url, !(opts && opts.bsky)));
     // DMM/FANZA以外は包まず短縮だけ(包むと400で行き止まり)。
     if (!built.ok && built.error === 'not_fanza') built = { ok: true, link: url };
     if (!built.ok) return Promise.resolve({ ok: false, error: built.error });
@@ -2420,7 +2443,7 @@
     try {
       var wurl = captureWorkUrl_();
       if (!wurl || !window.ensureAffiliateLink) return Promise.resolve(null);
-      var built = window.ensureAffiliateLink(wurl, curAfId_());
+      var built = window.ensureAffiliateLink(wurl, afFor_(wurl, !(opts && opts.bsky)));
       if (!built || !built.ok || !built.link) return Promise.resolve(null);
       return makeShortAndShare(built.link, opts).then(function (r) {
         var ourOk = r && r.shortUrl && window.Go5Short && window.Go5Short.ourBase && window.Go5Short.ourBase(r.shortUrl);
@@ -2435,13 +2458,14 @@
       var m = String(text || '').match(WORK_LINK_RE);
       if (!m) return measureWorkFromField_(opts).then(function (ws) { return { text: text, workShort: ws }; });
       var raw = m[0];
-      return makeShortAndShare(raw, opts).then(function (r) {
+      var dest = (opts && opts.bsky) ? swapAfForBsky_(raw) : raw; // Bluesky経路はBluesky用af_idで短縮(出先別af_id)
+      return makeShortAndShare(dest, opts).then(function (r) {
         // 自前ドメイン(5mgl.com/yoz2.com/旧r2)の計測URLが取れた時だけ置換
         //   (da.gd単独やフォールバック長URLでは置換しない=計測できない置換をしない)
         var ourOk = r && r.shortUrl && window.Go5Short && window.Go5Short.ourBase && window.Go5Short.ourBase(r.shortUrl);
         if (!ourOk) return { text: text, workShort: null };
         var disp = r.shareUrl || r.shortUrl;
-        return { text: String(text).replace(raw, disp), workShort: { shortUrl: r.shortUrl, shareUrl: disp, original: raw } };
+        return { text: String(text).replace(raw, disp), workShort: { shortUrl: r.shortUrl, shareUrl: disp, original: dest } };
       }).catch(function () { return { text: text, workShort: null }; });
     } catch (e) { return Promise.resolve({ text: text, workShort: null }); }
   }
@@ -2754,7 +2778,7 @@
     var url = String(rawUrl || '').trim();
     account = account || acctId();
     if (!/^https?:\/\//.test(url)) return Promise.resolve({ issued: false, tried: false, url: '', out: 'URLは http:// か https:// で始めてください', aff: '', affMsg: '' });
-    var targetUrl = url, afId = curAfId_(), notFanza = false;
+    var targetUrl = url, afId = afFor_(url, false, account), notFanza = false;
     // DMM/FANZA・DLsite以外(X/Blueskyの投稿URL等)はアフィで包むとFANZAが400を返して行き止まりになる。
     //   止めずに、包まない短縮へ切り替えて「なぜ包まなかったか」を表示する(2026-10-17 分析部門の依頼)。
     if (useAffiliate && typeof window.isFanzaHostUrl === 'function') {
@@ -2855,7 +2879,7 @@
     if (!el) return;
     if (!url || !url.trim()) { el.textContent = ''; return; }
     var afId = '';
-    try { afId = (localStorage.getItem('fanza_af_id') || '').trim(); } catch (e) {}
+    afId = bskyAfId_(); // Bluesky投稿タブの表示=Bluesky用af_id
     var r = window.buildAffiliateLink ? window.buildAffiliateLink(url, afId) : null;
     if (r && r.ok) {
       el.style.color = 'var(--accent)';
@@ -3115,7 +3139,7 @@
   function threadReplyLink_(raw) {
     var url = String(raw || '').trim();
     if (!WORK_LINK_RE.test(url) || !window.ensureAffiliateLink) return Promise.resolve(url);
-    var built = window.ensureAffiliateLink(url, curAfId_());
+    var built = window.ensureAffiliateLink(url, afFor_(url, false));
     var link = (built && built.ok && built.link) ? built.link : url;
     var acc = acctId();
     if (!shortWorkerReady(acc)) return Promise.resolve(link);
@@ -3479,7 +3503,7 @@
     // 生リンク→短縮/取得中の目印への差し替えまでを担う中核(例外を投げうる。fail-openはcomposeXTextで受ける)。
     function composeXTextRaw_() {
       var base = composeXBaseText_(); // X向け=作品・セールのDMM/FANZA行きは生アフィリンク(Bluesky側の短縮URLは使わない)
-      var rawLink = resolveAffLink();
+      var rawLink = resolveAffLink(true);
       // 短縮URLオーバーライド時：本文内の生リンクを差し替え(手動プレビュー用。実際のコピー時は
       // measureWorkLink_ が同じ計測付き短縮へ差し替えるため、押し忘れても生リンクのままにはならない)
       if (_xOverrideShort && rawLink && base.indexOf(rawLink) >= 0) {
@@ -3581,7 +3605,7 @@
     // 📎 短縮URLを挿入：link-worker 経由で作品URLを短縮し、生リンクを差し替える
     if (xShortBtn) {
       xShortBtn.addEventListener('click', function () {
-        var raw = resolveAffLink();
+        var raw = resolveAffLink(true);
         if (!raw) { if (xStatus) xStatus.textContent = '先に作品URLを入力してください。'; return; }
         xShortBtn.disabled = true;
         if (xStatus) xStatus.textContent = '短縮リンクを取得中…';

@@ -57,6 +57,7 @@
     //   core/sync.js が per-cid の newer-ts union で統合する(whole-key LWWだと別端末の宣言を丸ごと潰す)。
     /^cand_posted_(on|off)$/,                  // 「このchで投稿した/していない」の手動宣言=全端末で同じ投稿済み判定に連動
     // 本文・YouTube説明欄・アフィURL とその Qセーブ/元に戻す/やり直しスタック(アカウント別)：
+    /^fanza_af_id_bsky__acc[0-9]+$/,           // Bluesky用af_id(チャンネル別・空欄=fanza_af_idを使う・2026-10-21 出先別af_id)
     /^bsky_enable(__|$)/,
     /^bsky_unattended(__|$)/,
     /^bsky_text(_|__|$)/,        // bsky_text / bsky_text_quick(_at) / bsky_text_undostack / _redostack

@@ -23,6 +23,7 @@ const SHOULD_SYNC = [
   'yt_desc__acc1', 'yt_desc_quick__acc2', 'yt_desc_undostack__acc1', 'yt_tags__acc1',
   'affi_urls__acc1', 'affi_urls_quick__acc2', 'affi_urls_undostack__acc1',
   'bsky_gas_url', 'fanza_af_id', 'fanza_worker_url', 'ytdesc_tpl_v3',
+  'fanza_af_id_bsky__acc1', 'fanza_af_id_bsky__acc3', // 出先別af_id(Bluesky用・ch別・2026-10-21)
   'sch_state_v1', 'go5_image_manifest_v1', 'go5_tree_links_v1', 'cand_today_v1',
   'rank_mode', 'rank_metric', 'rank_window',   // ★v621でsyncへ昇格(Chami核2026-08-04・どの端末でも同じランキング表示)
   'field_bskyThreadText', 'field_bskyThreadReplyUrl', // 🧵一括投稿の親文/返信URL=投稿タブの中身(Chami msg 1559250741233713345)

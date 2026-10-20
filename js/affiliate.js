@@ -225,6 +225,53 @@
     renderResults();
   });
 
+  // 出先別af_id(2026-10-21 三笘 msg 1562215078760292413): Bluesky用はchごと(fanza_af_id_bsky__accN)。空欄=①を使う。
+  //   読み出しの正本は bluesky.js の Go5AfIdFor。短縮キャッシュは包んだURL(af_id込み)がキーなので出先ごとに別短縮になる。
+  var BSKY_AF_ACCS = ['acc3', 'acc1', 'acc2'];
+  function renderBskyAfRows_() {
+    var box = document.getElementById('afIdBskyRows');
+    if (!box) return;
+    box.textContent = '';
+    BSKY_AF_ACCS.forEach(function (acc) {
+      var name = (window.Go5Acct && Go5Acct.labelOf) ? Go5Acct.labelOf(acc) : acc;
+      var handle = '';
+      try { handle = (localStorage.getItem('bsky_handle__' + acc) || '').trim(); } catch (e) {}
+      var row = document.createElement('label');
+      row.className = 'affi-bsky-row';
+      row.style.cssText = 'display:flex;align-items:center;gap:8px;margin-top:4px';
+      var cap = document.createElement('span');
+      cap.style.cssText = 'min-width:9em;font-size:13px';
+      cap.textContent = name + (handle ? ' (@' + handle + ')' : '');
+      var inp = document.createElement('input');
+      inp.type = 'text';
+      inp.autocomplete = 'off';
+      inp.id = 'afIdBsky-' + acc;
+      inp.setAttribute('data-acc', acc);
+      inp.placeholder = '空欄=①と同じ';
+      inp.style.flex = '1';
+      try { inp.value = localStorage.getItem('fanza_af_id_bsky__' + acc) || ''; } catch (e) {}
+      inp.addEventListener('input', function () {
+        var v = inp.value.trim();
+        try {
+          if (v) localStorage.setItem('fanza_af_id_bsky__' + acc, v);
+          else localStorage.removeItem('fanza_af_id_bsky__' + acc);
+        } catch (e) { /* ignore */ }
+      });
+      row.appendChild(cap);
+      row.appendChild(inp);
+      box.appendChild(row);
+    });
+  }
+  renderBskyAfRows_();
+  // 同期で他端末の値が入った時・タブを開き直した時に入力欄を最新へ(打鍵中の欄は触らない)
+  window.addEventListener('storage', function (e) {
+    if (e && e.key && /^fanza_af_id_bsky__acc|^bsky_handle__acc/.test(e.key)) {
+      var a = document.activeElement;
+      if (!(a && a.id && a.id.indexOf('afIdBsky-') === 0)) renderBskyAfRows_();
+    }
+  });
+  try { window.Go5RenderBskyAfRows = renderBskyAfRows_; } catch (e) {}
+
   affiUrlsEl.addEventListener('input', function () {
     renderResults();
   });
