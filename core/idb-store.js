@@ -149,8 +149,22 @@
     });
   }
   function get(key) { return getResult(key).then(function (r) { return r.ok ? r.value : null; }); }
-  function set(key, val) { return tap_(withStore("readwrite", function (st) { return st.put(val, key); })); }
-  function del(key) { return tap_(withStore("readwrite", function (st) { return st.delete(key); })); }
+  // ★書き込み世代(軽量化2026-10-21)：set/del の度に進む印。同期は「前回の全読みから印が変わっていない」時だけ
+  //   前回の読取結果を使い回し、画像prefixの全読みと全画像SHA-256を省く。他タブの書き込みも拾えるよう
+  //   localStorage(sync2_idb_wgen・sync2_*は同期対象外)にも印を残す。書込の開始と決着の両方で進める
+  //   =読取と書込の順序がどう前後しても「印は同じなのに中身が変わった」を作らない。
+  var _wgen = 0, WGEN_KEY = "sync2_idb_wgen";
+  function bumpGen_() {
+    _wgen++;
+    try { root.localStorage.setItem(WGEN_KEY, Date.now() + "." + _wgen + "." + Math.random().toString(36).slice(2, 8)); } catch (e) {}
+  }
+  function writeGen() {
+    var s; try { s = root.localStorage.getItem(WGEN_KEY) || ""; } catch (e) { s = "?" + Math.random(); } // 読めない時は毎回別物=使い回さない
+    return _wgen + "|" + s;
+  }
+  function genWrite_(p) { bumpGen_(); return p.then(function (v) { bumpGen_(); return v; }, function (e) { bumpGen_(); throw e; }); }
+  function set(key, val) { return genWrite_(tap_(withStore("readwrite", function (st) { return st.put(val, key); }))); }
+  function del(key) { return genWrite_(tap_(withStore("readwrite", function (st) { return st.delete(key); }))); }
 
   // 全エントリを {key: value} で返す。(起動時のハイドレート用)閉じかけなら1回だけ再オープンして張り直す。
   function readEntries_(prefix, retry) {
@@ -285,7 +299,7 @@
     }
   } catch (e) {}
 
-  var API = { available: available, get: get, getResult: getResult, set: set, del: del, entries: entries, entriesPrefix: entriesPrefix, entriesByPrefixes: entriesByPrefixes, entriesByPrefixesSettled: entriesByPrefixesSettled, requestPersist: requestPersist, isHealthy: function () { return !_unhealthy; } };
+  var API = { available: available, get: get, getResult: getResult, set: set, del: del, entries: entries, entriesPrefix: entriesPrefix, entriesByPrefixes: entriesByPrefixes, entriesByPrefixesSettled: entriesByPrefixesSettled, requestPersist: requestPersist, writeGen: writeGen, isHealthy: function () { return !_unhealthy; } };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   if (root) root.Go5Idb = API;
 })(typeof window !== "undefined" ? window : (typeof globalThis !== "undefined" ? globalThis : this));

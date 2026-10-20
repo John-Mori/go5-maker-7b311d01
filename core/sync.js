@@ -325,6 +325,8 @@
   var _busy = false, _lastErr = "", _lastAt = 0;
   // 同期1回の世代番号。見張りが打ち切った古い同期は、後から完了しても保存・送信・_busy解除をしない。
   var _gen = 0, SYNC_WATCHDOG_MS = 300000;
+  // 無変更サイクルの軽量化(syncOnce の idbStep 参照)。_idbReuse=前回の全読み結果、_hashMemo=dataURL→SHA-256。
+  var IDB_RESCAN_MS = 5 * 60000, _idbReuse = null, _hashMemo = new Map();
   // 進捗(Chami依頼2026-07-14「同期中…が長い・進んでるか分からない」): 画像の送受信を件数で見せる。
   var _prog = { phase: "", done: 0, total: 0 };
   function setProg(phase, done, total) { _prog = { phase: phase, done: done, total: total }; }
@@ -1140,15 +1142,28 @@
     //   存在確定ハッシュは端末に24hだけ記憶(sync2_imgok)して問い合わせを省く=定常状態はほぼ0本。
     //   TTLを設けるのは、R2から画像実体が消える既知症状(②)を最長24hで再検出して再アップするため
     //   (恒久キャッシュにすると「消えたのに存在扱い」で二度と直らなくなる)。
-    var curIdb = {};
-    var idbStep = readSyncIdbEntries_(Idb).then(function (all) {
+    var curIdb = {}, unreadIdb = [];
+    // ★無変更サイクルの軽量化(2026-10-21): IDBの書き込み印(Go5Idb.writeGen)が前回の全読みから変わっていなければ、
+    //   前回の変換結果(curIdb=画像はハッシュ参照)をそのまま使う=画像prefixの全読み・全画像SHA-256・has照会を省く。
+    //   印の外の変化に備え、競合の再試行時と前回の全読みから IDB_RESCAN_MS 経過時は必ず全読みする。
+    var idbGen0 = (Idb && typeof Idb.writeGen === "function") ? Idb.writeGen() : null;
+    var reuse = _idbReuse;
+    var idbStep = (reuse && !retry && idbGen0 !== null && reuse.gen === idbGen0 && (now - reuse.at) < IDB_RESCAN_MS && (now - reuse.at) >= 0)
+      ? Promise.resolve().then(function () { var m = JSON.parse(reuse.json); Object.keys(m).forEach(function (k) { curIdb[k] = m[k]; }); }) // 毎回複製=前回の値をどこで触っても持ち越さない
+      : readSyncIdbEntries_(Idb).then(function (all) {
       // 部分読取に失敗したprefixは「空=削除」と解釈しない。前回の同期snapを現在値として温存し、
       // 成功したprefixだけ同期を進める。失敗領域のローカル変更は次回回復時に送られる。
       var failedPrefixes = (all && all.__go5FailedPrefixes) || [];
+      unreadIdb = failedPrefixes;
       protectUnreadIdb_(all, snapIdb, failedPrefixes);
       // 候補リストミラーはcandMirrorStepで直接読取済み。ここは画像系prefixだけを扱う。
       var keys = Object.keys(all).filter(isSyncIdbKey);
-      if (!keys.length) return;
+      // 使い回してよいのは「全prefixを読めて、全画像がハッシュ参照になった」時だけ。失敗画像(dataURLのまま)が
+      // 残る時は次回も全読み→再送を試みる。
+      var remember = function (complete) {
+        _idbReuse = (complete && !failedPrefixes.length && idbGen0 !== null) ? { gen: idbGen0, at: now, json: JSON.stringify(curIdb) } : null;
+      };
+      if (!keys.length) { remember(true); return; }
       var bag = []; keys.forEach(function (k) { collectDataUrls(all[k], bag); });
       var uniq = {}; bag.forEach(function (u) { uniq[u] = 1; });
       var urls = Object.keys(uniq);
@@ -1156,14 +1171,22 @@
         keys.forEach(function (k) {
           curIdb[k] = mapVal(all[k], function (v) { return typeof v === "string" && /^data:/.test(v); }, function (u) { var h = hByUrl[u]; return h ? { __img: h } : u; });
         });
+        // 次回のハッシュ記憶は今いる画像だけに絞る(消えた画像の文字列を抱え続けない)。
+        var memo = new Map(); urls.forEach(function (u) { var h = _hashMemo.get(u); if (h) memo.set(u, h); }); _hashMemo = memo;
+        remember(urls.every(function (u) { return !!hByUrl[u]; }));
         setProg("", 0, 0);
       };
       var hByUrl = {};
-      if (!urls.length) { keys.forEach(function (k) { curIdb[k] = all[k]; }); return; }
+      if (!urls.length) { keys.forEach(function (k) { curIdb[k] = all[k]; }); remember(true); return; }
       // 「画像を確認」はハッシュ化とhas照会の両方で数字を進める(旧実装は終わるまで 0/N のまま=止まって見えた)。
       var chkDone = 0;
       setProg("画像を確認", 0, urls.length);
-      return Promise.all(urls.map(function (u) { return sha256hex(u).then(function (h) { hByUrl[u] = h; if (live()) setProg("画像を確認", ++chkDone, urls.length); }); })).then(function () {
+      // 同じdataURLのSHA-256は記憶から引く(他の書き込みで全読みになっても、変わっていない画像は計算し直さない)。
+      return Promise.all(urls.map(function (u) {
+        var known = _hashMemo.get(u);
+        return (known ? Promise.resolve(known) : sha256hex(u).then(function (h) { _hashMemo.set(u, h); return h; }))
+          .then(function (h) { hByUrl[u] = h; if (live()) setProg("画像を確認", ++chkDone, urls.length); });
+      })).then(function () {
         var okSet = loadImgOk(), tNow = Date.now(), present = {};
         var unknown = urls.filter(function (u) { var t = okSet[hByUrl[u]]; return !(t && (tNow - t) < IMGOK_TTL_MS); });
         if (!unknown.length) return;                       // 全部確認済み＝リクエスト0本
@@ -1486,13 +1509,26 @@
             }
           } catch (x) {}
         });
-        var dlKeys = Object.keys(midb).filter(function (k) { return !midb[k].d && Idb && Idb.available(); });
+        // ★この端末のIDBが既に同じ状態なら、IDBへ触らない(軽量化2026-10-21)。旧実装は無変更でも毎サイクル
+        //   全レコードを Idb.get＋R2から画像を取り直して全文比較し、墓標は全件 Idb.del していた。
+        //   判定は今回読んだ curIdb(画像はハッシュ参照)との一致だけ=同じハッシュなら中身も同じ。
+        //   読取失敗prefixの値は前回snapの代用なので省かず、従来どおり実物を確かめる。
+        function localSame_(k, e) {
+          if (!isSyncIdbKey(k) || unreadIdb.some(function (p) { return k.indexOf(p) === 0; })) return false;
+          if (e.d) return !has(curIdb, k);
+          if (!has(curIdb, k)) return false;
+          try { return JSON.stringify(curIdb[k]) === JSON.stringify(e.v); } catch (x) { return false; }
+        }
+        var skipIdb = {};
+        Object.keys(midb).forEach(function (k) { if (localSame_(k, midb[k])) skipIdb[k] = 1; });
+        var dlKeys = Object.keys(midb).filter(function (k) { return !midb[k].d && !skipIdb[k] && Idb && Idb.available(); });
         var dlDone = 0; if (dlKeys.length) setProg("画像を受信", 0, dlKeys.length);
         var pulledImgReal = 0, pulledImgKeys = []; // 実際にIDBへ着地した変更キーだけを再描画側へ渡す
         Object.keys(midb).forEach(function (k) {
           var e = midb[k];
-          if (e.d) { if (Idb && Idb.available()) applies.push(Idb.del(k).catch(function () {})); return; }
+          if (e.d) { if (!skipIdb[k] && Idb && Idb.available()) applies.push(Idb.del(k).catch(function () {})); return; }
           newSnapIdb[k] = e.v; ts["idb:" + k] = e.t || ts["idb:" + k]; delete ts["idb:" + k + " d"];
+          if (skipIdb[k]) return;
           if (Idb && Idb.available()) applies.push((function (kk) {
             return Idb.get(kk).catch(function () { return undefined; }).then(function (prev) {
               return downloadImagesIn(e.v).then(function (res) {
@@ -1844,6 +1880,7 @@
   root.Go5Sync._test.mergeCandListMirrorsIntoLs_ = mergeCandListMirrorsIntoLs_; root.Go5Sync._test.readKnownCandListMirrors_ = readKnownCandListMirrors_; root.Go5Sync._test.writeCandListFallback_ = writeCandListFallback_;
   root.Go5Sync._test.slimStockArchive = slimStockArchive; root.Go5Sync._test.applyFastCandidateMerged_ = applyFastCandidateMerged_;
   root.Go5Sync._test.syncIdbPrefixes = SYNC_IDB_PREFIXES.slice();
+  root.Go5Sync._test.forceFullIdbRescan_ = function () { _idbReuse = null; };
   if (typeof module !== "undefined" && module.exports) module.exports = root.Go5Sync;
 
   // ── ⚙詳細設定 UI 配線＋自動同期の起動 ──
