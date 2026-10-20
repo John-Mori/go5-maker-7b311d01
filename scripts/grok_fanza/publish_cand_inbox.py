@@ -20,6 +20,7 @@ import argparse
 import datetime
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -28,8 +29,10 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 BUCKET = "go5-sync-images"
 KEY = "cand_inbox/latest.json"
 DEFAULT_SRC = r"D:\SougouStartFolder\LocalData\grok_fanza\candidates.jsonl"
+# 元ポスト(根)の画像URLの控え={status_id: [pbs.twimg.com/...]}。一度引いた根は二度引かない。
+MEDIA_CACHE = os.path.join(os.path.dirname(DEFAULT_SRC), "root_media.json")
 
-# アプリの cand_items に載せる列。出所の列(acct等)は source/postVerified/sourcePost だけ持ち込む。
+# アプリの cand_items に載せる列。出所の列(acct等)は source/postVerified/sourcePost/sourceImgs だけ持ち込む。
 ITEM_FIELDS = ("url", "cid", "title", "author", "thumb", "listPrice", "price", "discountPct", "addedAt")
 
 
@@ -51,7 +54,30 @@ def load_rows(path: str) -> list:
     return rows
 
 
-def build_doc(rows: list) -> dict:
+def root_media(root_post: str, cache: dict) -> list:
+    """元ポストの写真URL(公開埋め込みで取り直す)。アプリはこれを投稿編集の画像として取り込む。
+    取れない(墓石・通信失敗)時は空を返し、控えには残さない=次の配信で引き直す。"""
+    m = re.search(r"/status/(\d+)", root_post or "")
+    if not m:
+        return []
+    rid = m.group(1)
+    if rid in cache:
+        return cache[rid]
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from grok_fanza_pipe import fetch_tweet  # 根の確認と同じ取り口(cdn.syndication)
+    try:
+        tw = fetch_tweet(rid)
+    except Exception:
+        tw = None
+    if not tw:
+        return []
+    urls = [d.get("media_url_https") for d in tw.get("mediaDetails") or []
+            if d.get("type") == "photo" and d.get("media_url_https")]
+    cache[rid] = urls
+    return urls
+
+
+def build_doc(rows: list, media_cache: dict = None) -> dict:
     items, seen = [], set()
     for r in rows:
         cid = str(r.get("cid") or "").strip()
@@ -64,6 +90,10 @@ def build_doc(rows: list) -> dict:
         it["postVerified"] = r.get("post_verified") is not False
         if r.get("root_post"):
             it["sourcePost"] = r.get("root_post")
+            if media_cache is not None:
+                imgs = root_media(r.get("root_post"), media_cache)
+                if imgs:
+                    it["sourceImgs"] = imgs
         if r.get("acct"):
             it["sourceAcct"] = r.get("acct")
         items.append(it)
@@ -91,10 +121,22 @@ def main() -> int:
     if not os.path.exists(args.src):
         sys.stderr.write(f"候補が無い: {args.src}\n")
         return 1
-    doc = build_doc(load_rows(args.src))
+    try:
+        with open(MEDIA_CACHE, encoding="utf-8") as f:
+            media_cache = json.load(f)
+    except (OSError, ValueError):
+        media_cache = {}
+    doc = build_doc(load_rows(args.src), media_cache)
+    try:
+        with open(MEDIA_CACHE + ".tmp", "w", encoding="utf-8") as f:
+            json.dump(media_cache, f, ensure_ascii=False, indent=1)
+        os.replace(MEDIA_CACHE + ".tmp", MEDIA_CACHE)
+    except OSError:
+        pass
     n = len(doc["items"])
+    n_img = sum(1 for it in doc["items"] if it.get("sourceImgs"))
     unv = [it["cid"] for it in doc["items"] if not it["postVerified"]]
-    print(f"候補 {n} 件(出所未確認 {len(unv)} 件: {', '.join(unv) or 'なし'})")
+    print(f"候補 {n} 件(出所未確認 {len(unv)} 件: {', '.join(unv) or 'なし'}・元ポスト画像あり {n_img} 件)")
 
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:

@@ -87,3 +87,50 @@ test('受け箱の候補を cid 重複なしで🤖自動追加タブへ取り�
   const after = await page.evaluate(() => JSON.parse(localStorage.getItem('cand_items__auto') || '[]').length);
   expect(after).toBe(want);
 });
+
+test('Grok候補に元ポストのXリンクと画像を付ける(前の版で取り込んだ分も埋める)', async ({ page }) => {
+  // 1x1の赤/青。元ポストの写真(pbs.twimg.com)の代わり。同じ中身だと1枚に寄るので色を分ける
+  const RED = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC', 'base64');
+  const BLUE = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYPgPAAEDAQAIicLsAAAAAElFTkSuQmCC', 'base64');
+  const post = (n) => 'https://x.com/e2e_acct/status/90000000000000000' + n;
+  const doc = { ok: true, items: [1, 2].map((i) => ({
+    url: 'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_e2e_src' + i + '/', cid: 'd_e2e_src' + i,
+    title: '元ポスト確認作品' + i, author: 'e2e', thumb: '', price: 550, addedAt: 1792000000000 + i,
+    source: 'grok_fanza', postVerified: true, sourcePost: post(i), sourceAcct: 'e2e_acct',
+    sourceImgs: ['https://pbs.twimg.com/media/e2e_src' + i + '_a.jpg', 'https://pbs.twimg.com/media/e2e_src' + i + '_b.jpg'],
+  })) };
+  let imgHits = 0;
+  await page.route('https://pbs.twimg.com/**', (route) => { imgHits++; return route.fulfill({ status: 200, contentType: 'image/png', headers: { 'access-control-allow-origin': '*' }, body: /_b\.jpg/.test(route.request().url()) ? BLUE : RED }); });
+  await page.route(SYNC + '/**', (route) => new URL(route.request().url()).pathname === '/api/cand-inbox'
+    ? route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(doc) }) : route.abort());
+
+  await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
+  await page.evaluate(({ SYNC, it }) => {
+    localStorage.clear();
+    localStorage.setItem('sync2_url', SYNC);
+    localStorage.setItem('sync2_token', 'e2e-token');
+    // v1069で取り込んだ形=twitterUrl 無し。2件目は今回の受け箱で新しく入る
+    localStorage.setItem('cand_items__auto', JSON.stringify([{ url: it.url, cid: it.cid, title: it.title, addedAt: it.addedAt, source: 'grok_fanza', postVerified: true }]));
+    localStorage.setItem('cand_inbox_seen', JSON.stringify({ [it.cid]: Date.now() }));
+  }, { SYNC, it: doc.items[0] });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+
+  await expect.poll(async () => page.evaluate(() => JSON.parse(localStorage.getItem('cand_items__auto') || '[]').map((x) => x.cid + '=' + (x.twitterUrl || '')).sort().join(' ')))
+    .toBe(doc.items.map((x) => x.cid + '=' + x.sourcePost).join(' '));
+  await expect.poll(async () => page.evaluate(() => Object.keys(JSON.parse(localStorage.getItem('cand_inbox_imgs') || '{}')).sort().join(' ')), { timeout: 20000 })
+    .toBe('d_e2e_src1 d_e2e_src2');
+  expect(imgHits).toBeGreaterThanOrEqual(4);
+
+  await page.locator('.cand-tab[data-ct="auto"]').click();
+  for (const it of doc.items) {
+    const card = page.locator('.cand-card[data-cid="' + it.cid + '"]');
+    await expect(card.locator('a.vlink-sns')).toHaveAttribute('href', it.sourcePost);
+    await expect(card.locator('.cand-refimgs img.cand-refimg-thumb')).toHaveAttribute('title', /全2枚/); // カードは先頭1枚+枚数
+  }
+
+  // 画像を消した後に読み直しても戻さない(一度入れたcidは覚えている)
+  await page.evaluate(() => window.Go5Cand && window.Go5Cand.refImgsSet && window.Go5Cand.refImgsSet('d_e2e_src1', []));
+  await page.evaluate(() => window.Go5CandInbox.importNow());
+  const n1 = await page.evaluate(() => JSON.parse(localStorage.getItem('cand_inbox_imgs') || '{}').d_e2e_src1);
+  expect(n1).toBeTruthy();
+});

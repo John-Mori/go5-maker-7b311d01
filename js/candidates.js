@@ -5424,6 +5424,65 @@
     mv.forEach(function (x) { if (x && x.cid) tombstoneCid_('main', String(x.cid)); });
     return mv.length;
   }
+  // 元ポスト(X)のURLと画像を🤖自動追加の候補へ付ける(Chami 2026-10-20「取ってきた元のXのリンクがない/画像もない」)。
+  //   リンク=カードの「X↗」は it.twitterUrl を読むので sourcePost を写す(v1069までの取り込み分も埋める)。
+  //   画像=受け箱の sourceImgs(PCが公開埋め込みで取った pbs.twimg.com の写真)を投稿編集の画像として1回だけ取り込む。
+  //   ★既存の画像を上書きしない=一括展開が済み、その作品の画像が端末内に0枚(R2マーカーも無い)と分かった時だけ入れる。
+  //   取り込んだcidは cand_inbox_imgs に覚える=後でChamiが画像を消しても戻さない。
+  var CAND_INBOX_IMGS = 'cand_inbox_imgs';
+  function backfillGrokSource_(autoKey, rows) {
+    var byCid = {};
+    rows.forEach(function (w) { if (w && w.cid && w.sourcePost) byCid[String(w.cid)] = String(w.sourcePost); });
+    var items = candItemsRead_(autoKey), n = 0;
+    items.forEach(function (x) {
+      if (!x || x.source !== 'grok_fanza' || x.twitterUrl) return;
+      var u = x.sourcePost || byCid[x.cid] || '';
+      if (!u) return;
+      x.twitterUrl = u; if (!x.sourcePost) x.sourcePost = u; n++;
+    });
+    if (n) candItemsWrite_(autoKey, items);
+    return n;
+  }
+  function fetchImgScaled_(url) {
+    var u = /\?/.test(url) ? url : url + '?name=large';
+    var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    var timer = ctrl ? setTimeout(function () { try { ctrl.abort(); } catch (e) {} }, 15000) : null;
+    var opts = { mode: 'cors', cache: 'force-cache' }; if (ctrl) opts.signal = ctrl.signal;
+    return fetch(u, opts).then(function (r) { return r.ok ? r.blob() : null; }).then(function (blob) {
+      if (timer) clearTimeout(timer);
+      if (!blob || !/^image\//.test(blob.type || '')) return null;
+      return new Promise(function (resolve) { fileToScaledDataUrl(blob, function (d) { resolve(d || null); }); });
+    }).catch(function () { if (timer) clearTimeout(timer); return null; });
+  }
+  function fillGrokRefImgs_(autoKey, rows, tries) {
+    if (!_candidateHydrated) { if (tries < 10) setTimeout(function () { fillGrokRefImgs_(autoKey, rows, tries + 1); }, 3000); return; }
+    var done = lsGet(CAND_INBOX_IMGS, '{}'); if (!done || typeof done !== 'object' || Array.isArray(done)) done = {};
+    var inAuto = {}; candItemsRead_(autoKey).forEach(function (x) { if (x && x.cid) inAuto[x.cid] = x; });
+    var todo = rows.filter(function (w) {
+      var cid = w && String(w.cid || '');
+      if (!cid || done[cid] || !inAuto[cid] || !Array.isArray(w.sourceImgs) || !w.sourceImgs.length) return false;
+      if (refImgsOf_(cid).length || isR2Marker_(_imgMem.ref[cid]) || isR2Marker_(legacyRefOf_(cid))) { done[cid] = 'had'; return false; }
+      return true;
+    });
+    lsSet(CAND_INBOX_IMGS, done);
+    return todo.reduce(function (p, w) {
+      return p.then(function () {
+        var cid = String(w.cid);
+        return Promise.all(w.sourceImgs.slice(0, 4).map(fetchImgScaled_)).then(function (imgs) {
+          imgs = imgs.filter(Boolean);
+          if (!imgs.length) return; // 取れない時は覚えない=次の取り込みで再挑戦
+          if (refImgsOf_(cid).length) { done[cid] = 'had'; lsSet(CAND_INBOX_IMGS, done); return; }
+          var cur = refImgOf(cid) || {}, tw = cur.twitterUrl || inAuto[cid].twitterUrl || w.sourcePost || '';
+          return Promise.resolve(refImgSave(cid, { imgs: imgs, comment: cur.comment || '', memo: cur.memo || '', twitterUrl: tw, twitterUrl2: cur.twitterUrl2 || '' })).then(function (ok) {
+            if (ok === false) return;
+            done[cid] = new Date().getTime(); lsSet(CAND_INBOX_IMGS, done);
+            klog_('ref_image_saved_grok', 'work', cid, { imgs: imgs.length });
+            try { refRefreshCard_(cid); } catch (e) {}
+          });
+        });
+      });
+    }, Promise.resolve()).catch(function () {});
+  }
   function importCandInbox_(force) {
     var now = new Date().getTime();
     if (_candInboxBusy || (!force && now - _candInboxAt < 10 * 60 * 1000)) return Promise.resolve(null);
@@ -5442,6 +5501,7 @@
       var rows = (doc && Array.isArray(doc.items)) ? doc.items : [];
       var autoKey = itemsKey('auto'), moved = moveGrokItemsToAuto_(autoKey);
       if (!rows.length) return { added: 0, dup: 0, moved: moved };
+      backfillGrokSource_(autoKey, rows);
       var known = candInboxKnownCids_(), items = candItemsRead_(autoKey), seen = lsGet(CAND_INBOX_SEEN, '{}');
       if (!seen || typeof seen !== 'object' || Array.isArray(seen)) seen = {};
       var added = 0, dup = 0, t = new Date().getTime();
@@ -5450,11 +5510,12 @@
         if (!cid || !/^[a-z0-9_]+$/.test(cid)) return;
         if (known[cid]) { dup++; return; }
         if (['acc1', 'acc2', 'acc3'].some(function (a) { return !!postedItemForCid_(cid, a); })) { dup++; seen[cid] = t; return; } // 投稿済み(posted_cids権威)は入れない
-        items.push({ url: w.url || '', cid: cid, title: w.title || '', author: w.author || '', thumb: w.thumb || '', listPrice: w.listPrice, price: w.price, discountPct: w.discountPct || 0, date: w.date || '', genres: w.genres || [], floor: w.floor || '', service: w.service || '', addedAt: Number(w.addedAt) || t, source: String(w.source || 'grok_fanza'), postVerified: w.postVerified !== false, sourcePost: w.sourcePost || '' });
+        items.push({ url: w.url || '', cid: cid, title: w.title || '', author: w.author || '', thumb: w.thumb || '', listPrice: w.listPrice, price: w.price, discountPct: w.discountPct || 0, date: w.date || '', genres: w.genres || [], floor: w.floor || '', service: w.service || '', addedAt: Number(w.addedAt) || t, source: String(w.source || 'grok_fanza'), postVerified: w.postVerified !== false, sourcePost: w.sourcePost || '', twitterUrl: w.sourcePost || '' });
         known[cid] = 1; seen[cid] = t; added++;
       });
-      if (!added) return { added: 0, dup: dup, moved: moved };
+      if (!added) { fillGrokRefImgs_(autoKey, rows, 0); return { added: 0, dup: dup, moved: moved }; }
       var lsOk = candItemsWrite_(autoKey, items);
+      fillGrokRefImgs_(autoKey, rows, 0);
       lsSet(CAND_INBOX_SEEN, seen);
       klog_('candidate_added', 'work', 'grok_inbox', { added: added, dup: dup });
       return confirmCandDurable_(autoKey, String(items[items.length - 1].cid || ''), lsOk).then(function (durable) {
