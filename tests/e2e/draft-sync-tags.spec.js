@@ -44,7 +44,7 @@ test('画像走査が停止中でもAの作成・編集・削除がBのドラフ
   const B = await device(browser, baseURL, server);
   try {
     for (const p of [A.page, B.page]) await p.evaluate(() => {
-      Go5Idb.entriesByPrefixesSettled = () => new Promise(() => {});
+      Go5Idb.entriesByPrefixesSettled = Go5Idb.keysPrefix = () => new Promise(() => {});
       Go5Sync.syncNow(); // 全同期の画像走査だけを止める。テキスト同期を止めてはならない。
     });
     await A.page.evaluate(() => document.dispatchEvent(new CustomEvent('video-created', { detail: {

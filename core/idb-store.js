@@ -233,6 +233,20 @@
     return tap_(readEntries_(prefix, retry));
   }
 
+  // 指定した接頭辞のキー一覧だけを返す(値は読まない)。同期が画像を1件ずつ getResult で読むための入口
+  //   (iPhoneクラッシュ対策2026-10-21: 全画像を一度にメモリへ載せない)。失敗は reject=呼び側でその領域を未読扱い。
+  function keysPrefix(prefix) {
+    prefix = String(prefix || "");
+    if (!prefix) return Promise.resolve([]);
+    return tap_(withStore("readonly", function (st) {
+      if (!st.getAllKeys) throw new Error("idb-no-getAllKeys"); // 空配列で返すと「全件削除」と誤解される=必ず失敗にする
+      return st.getAllKeys(IDBKeyRange.bound(prefix, prefix + "￿", false, false));
+    })).then(function (keys) {
+      if (!Array.isArray(keys)) throw new Error("idb-keys-unreadable");
+      return keys.map(String);
+    });
+  }
+
   // 複数prefixは1範囲ずつ逐次取得する。大画像が多いiPhoneで同時に複数cursorを走らせず、
   // 呼び出し側には従来entries()と同じ {key:value} で返す。
   function entriesByPrefixes(prefixes) {
@@ -299,7 +313,7 @@
     }
   } catch (e) {}
 
-  var API = { available: available, get: get, getResult: getResult, set: set, del: del, entries: entries, entriesPrefix: entriesPrefix, entriesByPrefixes: entriesByPrefixes, entriesByPrefixesSettled: entriesByPrefixesSettled, requestPersist: requestPersist, writeGen: writeGen, isHealthy: function () { return !_unhealthy; } };
+  var API = { available: available, get: get, getResult: getResult, set: set, del: del, entries: entries, entriesPrefix: entriesPrefix, entriesByPrefixes: entriesByPrefixes, entriesByPrefixesSettled: entriesByPrefixesSettled, keysPrefix: keysPrefix, requestPersist: requestPersist, writeGen: writeGen, isHealthy: function () { return !_unhealthy; } };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   if (root) root.Go5Idb = API;
 })(typeof window !== "undefined" ? window : (typeof globalThis !== "undefined" ? globalThis : this));

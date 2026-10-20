@@ -279,7 +279,7 @@ test.describe('PC candidate recovery invariants', () => {
       localStorage.setItem('cand_items', JSON.stringify([oldRow]));
       localStorage.setItem('sync2_url', 'https://sync.test');
       localStorage.setItem('sync2_token', 'test-token');
-      Go5Idb.entriesByPrefixesSettled = () => { throw new Error('image scan must not run in candidate fast lane'); };
+      Go5Idb.entriesByPrefixesSettled = Go5Idb.keysPrefix = () => { throw new Error('image scan must not run in candidate fast lane'); };
       const remote = { fmt: 2, ls: { cand_items: { t: 200, v: JSON.stringify([newRow, oldRow]) } }, idb: {} };
       window.fetch = async (url) => {
         if (String(url).endsWith('/api/pull')) {
@@ -313,7 +313,7 @@ test.describe('PC candidate recovery invariants', () => {
       localStorage.setItem('cand_items', JSON.stringify([newRow, oldRow]));
       localStorage.setItem('sync2_url', 'https://sync.test');
       localStorage.setItem('sync2_token', 'test-token');
-      Go5Idb.entriesByPrefixesSettled = () => new Promise(() => {});
+      Go5Idb.entriesByPrefixesSettled = Go5Idb.keysPrefix = () => new Promise(() => {});
       const remote = { fmt: 2, ls: { cand_items: { t: 100, v: JSON.stringify([oldRow]) } }, idb: { 'ref:keep': { t: 1, v: {} } } };
       let pushed = null;
       window.fetch = async (url, init) => {

@@ -1575,6 +1575,9 @@
     }
     Object.keys(all || {}).forEach(function (k) {
       var v = all[k];
+      // IDBから読んだ img と imgs[0] は同じ中身でも別々の文字列になる。同一の文字列を指させて片方を捨てる
+      // (ref: 約300件で画像メモリが約2倍に膨らみ、iPhoneのタブが落ちていた・Chami 2026-10-21)。
+      if (v && typeof v.img === 'string' && Array.isArray(v.imgs) && v.img === v.imgs[0]) v.img = v.imgs[0];
       if (k.indexOf('ref:') === 0) { putLatest_(_imgMem.ref, k.slice(4), v); _refLoaded[k.slice(4)] = true; backfillCandText_(k.slice(4), _imgMem.ref[k.slice(4)]); }
       else if (k.indexOf('bsky:') === 0) putLatest_(_imgMem.bsky, k.slice(5), v);
       else if (k.indexOf('post:') === 0) { var pk = k.slice(5); putLatest_(_imgMem.post, pk, v); _histDirectChecked.post[pk] = true; }

@@ -188,6 +188,17 @@
   }
   function has(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
   function isImgRef(v) { return v && typeof v === "object" && !Array.isArray(v) && typeof v.__img === "string"; }
+  function isDataUrl_(v) { return typeof v === "string" && /^data:/.test(v); }
+  // 同時実行数を絞る待ち行列。iPhoneで画像を一度に何百枚もメモリへ載せない(クラッシュ対策2026-10-21)。
+  function limiter_(n) {
+    var running = 0, q = [];
+    function next() {
+      if (running >= n || !q.length) return;
+      var job = q.shift(); running++;
+      Promise.resolve().then(job.fn).then(job.ok, job.ng).then(function () { running--; next(); });
+    }
+    return function (fn) { return new Promise(function (ok, ng) { q.push({ fn: fn, ok: ok, ng: ng }); next(); }); };
+  }
 
   // hash化された値 → R2 から dataURL を復元。失敗画像は空文字。(表示されないだけ)
   function downloadImagesIn(val) {
@@ -325,8 +336,10 @@
   var _busy = false, _lastErr = "", _lastAt = 0;
   // 同期1回の世代番号。見張りが打ち切った古い同期は、後から完了しても保存・送信・_busy解除をしない。
   var _gen = 0, SYNC_WATCHDOG_MS = 300000;
-  // 無変更サイクルの軽量化(syncOnce の idbStep 参照)。_idbReuse=前回の全読み結果、_hashMemo=dataURL→SHA-256。
-  var IDB_RESCAN_MS = 5 * 60000, _idbReuse = null, _hashMemo = new Map();
+  // 無変更サイクルの軽量化(syncOnce の idbStep 参照)。_idbReuse=前回の全読み結果(画像はハッシュ参照)。
+  //   ★dataURL→SHA-256 の記憶(_hashMemo)は廃止(2026-10-21)。キーが dataURL そのもの=全画像の文字列を
+  //   同期の外でも抱え続け、iPhoneのメモリを画像総量ぶん常時占有していた。
+  var IDB_RESCAN_MS = 5 * 60000, _idbReuse = null;
   // 進捗(Chami依頼2026-07-14「同期中…が長い・進んでるか分からない」): 画像の送受信を件数で見せる。
   var _prog = { phase: "", done: 0, total: 0 };
   function setProg(phase, done, total) { _prog = { phase: phase, done: done, total: total }; }
@@ -1148,8 +1161,119 @@
     //   印の外の変化に備え、競合の再試行時と前回の全読みから IDB_RESCAN_MS 経過時は必ず全読みする。
     var idbGen0 = (Idb && typeof Idb.writeGen === "function") ? Idb.writeGen() : null;
     var reuse = _idbReuse;
+    // ★全読みは「1件ずつ読む→その場でハッシュ参照へ変換→dataURLを捨てる」(iPhoneクラッシュ対策2026-10-21・
+    //   Chami msg 1562186073604489296「問題が繰り返し起きました」)。旧実装は画像prefixを全部 {key:value} で読み、
+    //   全dataURLのSHA-256を同時に走らせた=候補画面が持つ画像に加えて、画像総量の2倍がもう一度メモリへ載り、
+    //   起動直後の初回同期でタブが落ち→再読込→また初回同期…の繰り返しになっていた。
+    //   メモリに残るのはハッシュ参照だけ。R2へ送る画像(通常0件)だけ、送る直前にそのキーを読み直す。
+    function streamIdbStep_() {
+      var failedPrefixes = [], keysByHash = {}, rawLeft = false, total = 0, seen = 0;
+      function hashRecord_(k, v) {
+        var bag = []; collectDataUrls(v, bag);
+        if (!bag.length) { curIdb[k] = v; return; }
+        var hBy = {}, uniqU = [];
+        bag.forEach(function (u) { if (!has(hBy, u)) { hBy[u] = null; uniqU.push(u); } });
+        return uniqU.reduce(function (p, u) {
+          return p.then(function () { return sha256hex(u).then(function (h) { hBy[u] = h; }, function () {}); });
+        }, Promise.resolve()).then(function () {
+          curIdb[k] = mapVal(v, isDataUrl_, function (u) {
+            var h = hBy[u];
+            if (!h) { rawLeft = true; return u; } // ハッシュ化できない画像はdataURLのまま送る=データ保全(旧実装と同じ)
+            (keysByHash[h] = keysByHash[h] || []).push(k);
+            return { __img: h };
+          });
+        });
+      }
+      // 送れなかった画像は、そのハッシュ参照をdataURLへ戻す(旧実装の「失敗画像はdataURLのまま」と同じ結果)。
+      function revertToRaw_(h) {
+        return dataUrlOf_(h).then(function (u) {
+          if (!u) return; // 読み直せない=参照のまま(相手端末は取得失敗で既存画像を保持する)
+          rawLeft = true;
+          (keysByHash[h] || []).forEach(function (k) { if (has(curIdb, k)) curIdb[k] = mapVal(curIdb[k], function (x) { return isImgRef(x) && x.__img === h; }, function () { return u; }); });
+        });
+      }
+      // ハッシュhの画像を持つキーを1件だけ読み直し、dataURLを取り出す(送信する画像だけ・通常0件)。
+      function dataUrlOf_(h) {
+        var ks = keysByHash[h] || [];
+        if (!ks.length) return Promise.resolve(null);
+        return Idb.getResult(ks[0]).then(function (r) {
+          var bag = []; if (r.ok && r.value) collectDataUrls(r.value, bag);
+          return bag.reduce(function (p, u) {
+            return p.then(function (found) { return found || sha256hex(u).then(function (x) { return x === h ? u : null; }, function () { return null; }); });
+          }, Promise.resolve(null));
+        });
+      }
+      setProg("画像を確認", 0, 0);
+      var chain = Promise.resolve();
+      SYNC_IDB_PREFIXES.forEach(function (prefix) {
+        chain = chain.then(function () {
+          return Idb.keysPrefix(prefix).then(function (keys) {
+            keys = keys.filter(isSyncIdbKey); total += keys.length;
+            var prefixFailed = false;
+            return keys.reduce(function (p, k) {
+              return p.then(function () {
+                return Idb.getResult(k).then(function (r) {
+                  if (!r.ok) { prefixFailed = true; return; } // 読めないキーは前回snapで温存(下の protectUnreadIdb_)
+                  if (r.value === null) return;               // 読む間に消えた=無い
+                  return hashRecord_(k, r.value);
+                }).then(function () { if (live()) setProg("画像を確認", ++seen, total); });
+              });
+            }, Promise.resolve()).then(function () { if (prefixFailed) failedPrefixes.push(prefix); });
+          }, function () { failedPrefixes.push(prefix); });
+        });
+      });
+      return chain.then(function () {
+        unreadIdb = failedPrefixes;
+        // 部分読取に失敗したprefixは「空=削除」と解釈しない(旧実装と同じ)。読めなかったキーだけ前回snapで埋める。
+        protectUnreadIdb_(curIdb, snapIdb, failedPrefixes);
+        var hashes = Object.keys(keysByHash);
+        var rememberStream_ = function (complete) {
+          _idbReuse = (complete && !rawLeft && !failedPrefixes.length && idbGen0 !== null) ? { gen: idbGen0, at: now, json: JSON.stringify(curIdb) } : null;
+          setProg("", 0, 0);
+        };
+        var okSet = loadImgOk(), tNow = Date.now(), present = {};
+        var unknown = hashes.filter(function (h) { var t = okSet[h]; return !(t && (tNow - t) < IMGOK_TTL_MS); });
+        if (!unknown.length) { rememberStream_(true); return; } // 全部確認済み＝リクエスト0本
+        var chunks = [], CH = 50;
+        for (var i = 0; i < unknown.length; i += CH) chunks.push(unknown.slice(i, i + CH));
+        var failedUp = [];
+        return chunks.reduce(function (p, ch) {
+          return p.then(function () {
+            return api("/api/img/has?keys=" + ch.join(","), { timeoutMs: IMG_HAS_TIMEOUT_MS })
+              .then(function (r) { return r.json(); }).catch(function () { return { present: [] }; })
+              .then(function (res) { (res.present || []).forEach(function (h) { present[h] = 1; }); });
+          });
+        }, Promise.resolve()).then(function () {
+          var toUp = unknown.filter(function (h) { return !present[h]; });
+          var done = 0; if (toUp.length) setProg("画像を送信", 0, toUp.length);
+          return toUp.reduce(function (p, h) {
+            return p.then(function () {
+              if (!live()) { failedUp.push(h); return; } // 打ち切られた古い同期は送信を続けない
+              return dataUrlOf_(h).then(function (u) {
+                if (!u) { failedUp.push(h); return; }
+                return api("/api/img/" + h, { method: "PUT", headers: { "Content-Type": "text/plain" }, body: u, timeoutMs: IMG_FETCH_TIMEOUT_MS })
+                  .then(function (r) { return r.json(); })
+                  .then(function (j) { if (!j || !j.ok) failedUp.push(h); else present[h] = 1; });
+              }).catch(function () { failedUp.push(h); })
+                .then(function () { setProg("画像を送信", ++done, toUp.length); });
+            });
+          }, Promise.resolve());
+        }).then(function () {
+          var okNow = loadImgOk(); // 存在が確定したものだけ記憶(失敗は記憶しない→次回再挑戦)
+          hashes.forEach(function (h) { if (present[h]) okNow[h] = tNow; });
+          saveImgOk(okNow);
+        }).catch(function (e) {
+          // 何が起きても、R2に在ると確かめられなかった画像は参照で送らない(相手端末で画像が空になるのを防ぐ)。
+          try { root.console && root.console.warn("[go5 sync] 画像の確認/送信で例外。未確認画像はdataURLのまま送る", e); } catch (x) {}
+          unknown.forEach(function (h) { if (!present[h] && failedUp.indexOf(h) < 0) failedUp.push(h); });
+        }).then(function () {
+          return failedUp.reduce(function (p, h) { return p.then(function () { return revertToRaw_(h); }); }, Promise.resolve());
+        }).then(function () { rememberStream_(!failedUp.length); });
+      });
+    }
     var idbStep = (reuse && !retry && idbGen0 !== null && reuse.gen === idbGen0 && (now - reuse.at) < IDB_RESCAN_MS && (now - reuse.at) >= 0)
       ? Promise.resolve().then(function () { var m = JSON.parse(reuse.json); Object.keys(m).forEach(function (k) { curIdb[k] = m[k]; }); }) // 毎回複製=前回の値をどこで触っても持ち越さない
+      : (Idb && Idb.available() && typeof Idb.keysPrefix === "function" && typeof Idb.getResult === "function") ? streamIdbStep_()
       : readSyncIdbEntries_(Idb).then(function (all) {
       // 部分読取に失敗したprefixは「空=削除」と解釈しない。前回の同期snapを現在値として温存し、
       // 成功したprefixだけ同期を進める。失敗領域のローカル変更は次回回復時に送られる。
@@ -1171,8 +1295,6 @@
         keys.forEach(function (k) {
           curIdb[k] = mapVal(all[k], function (v) { return typeof v === "string" && /^data:/.test(v); }, function (u) { var h = hByUrl[u]; return h ? { __img: h } : u; });
         });
-        // 次回のハッシュ記憶は今いる画像だけに絞る(消えた画像の文字列を抱え続けない)。
-        var memo = new Map(); urls.forEach(function (u) { var h = _hashMemo.get(u); if (h) memo.set(u, h); }); _hashMemo = memo;
         remember(urls.every(function (u) { return !!hByUrl[u]; }));
         setProg("", 0, 0);
       };
@@ -1181,12 +1303,11 @@
       // 「画像を確認」はハッシュ化とhas照会の両方で数字を進める(旧実装は終わるまで 0/N のまま=止まって見えた)。
       var chkDone = 0;
       setProg("画像を確認", 0, urls.length);
-      // 同じdataURLのSHA-256は記憶から引く(他の書き込みで全読みになっても、変わっていない画像は計算し直さない)。
-      return Promise.all(urls.map(function (u) {
-        var known = _hashMemo.get(u);
-        return (known ? Promise.resolve(known) : sha256hex(u).then(function (h) { _hashMemo.set(u, h); return h; }))
+      // (keysPrefix の無い旧IDB実装だけが通る経路。ハッシュは1枚ずつ=変換用バイト列を同時に全部作らない)
+      return urls.reduce(function (p, u) {
+        return p.then(function () { return sha256hex(u); })
           .then(function (h) { hByUrl[u] = h; if (live()) setProg("画像を確認", ++chkDone, urls.length); });
-      })).then(function () {
+      }, Promise.resolve()).then(function () {
         var okSet = loadImgOk(), tNow = Date.now(), present = {};
         var unknown = urls.filter(function (u) { var t = okSet[hByUrl[u]]; return !(t && (tNow - t) < IMGOK_TTL_MS); });
         if (!unknown.length) return;                       // 全部確認済み＝リクエスト0本
@@ -1524,12 +1645,15 @@
         var dlKeys = Object.keys(midb).filter(function (k) { return !midb[k].d && !skipIdb[k] && Idb && Idb.available(); });
         var dlDone = 0; if (dlKeys.length) setProg("画像を受信", 0, dlKeys.length);
         var pulledImgReal = 0, pulledImgKeys = []; // 実際にIDBへ着地した変更キーだけを再描画側へ渡す
+        // ★受信は同時2件まで(iPhoneクラッシュ対策2026-10-21)。旧実装は変更キー全部を同時に Idb.get＋R2取得し、
+        //   受信件数が多い周期は全画像の dataURL が一度にメモリへ載ってタブが落ちていた。
+        var dlRun = limiter_(2);
         Object.keys(midb).forEach(function (k) {
           var e = midb[k];
           if (e.d) { if (!skipIdb[k] && Idb && Idb.available()) applies.push(Idb.del(k).catch(function () {})); return; }
           newSnapIdb[k] = e.v; ts["idb:" + k] = e.t || ts["idb:" + k]; delete ts["idb:" + k + " d"];
           if (skipIdb[k]) return;
-          if (Idb && Idb.available()) applies.push((function (kk) {
+          if (Idb && Idb.available()) applies.push(dlRun(function (kk) { return function () {
             return Idb.get(kk).catch(function () { return undefined; }).then(function (prev) {
               return downloadImagesIn(e.v).then(function (res) {
                 // ★R2から画像本体が取れなかった時、既存のローカル画像を空で潰さない(サムネ/参照画像の消失防止・INC 2026-07-15)。
@@ -1563,7 +1687,7 @@
                 });
               });
             }).catch(function () {}).then(function () { setProg("画像を受信", ++dlDone, dlKeys.length); });
-          })(k));
+          }; }(k)));
         });
 
         return Promise.all(applies).then(function () {

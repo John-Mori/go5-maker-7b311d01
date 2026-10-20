@@ -164,6 +164,7 @@ test.describe('投稿履歴の初期表示', () => {
         '  var originalGetResult = Go5Idb.getResult.bind(Go5Idb);',
         '  Go5Idb.entriesByPrefixes = function () { return new Promise(function () {}); };',
         '  Go5Idb.entriesByPrefixesSettled = function () { return new Promise(function () {}); };',
+        '  Go5Idb.keysPrefix = function () { return new Promise(function () {}); };',
         '  Go5Idb.getResult = function (key) {',
         '    if (key === "post:' + videoId + '") return new Promise(function () {});',
         '    return originalGetResult(key);',
@@ -503,6 +504,7 @@ test.describe('候補ページの画像・投稿編集', () => {
         '(function () {',
         '  Go5Idb.entriesByPrefixes = function () { return new Promise(function () {}); };',
         '  Go5Idb.entriesByPrefixesSettled = function () { return new Promise(function () {}); };',
+        '  Go5Idb.keysPrefix = function () { return new Promise(function () {}); };',
         '}());'
       ].join('\n');
       await route.fulfill({ response, body: stalled + '\n' + original });
