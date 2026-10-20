@@ -4789,7 +4789,7 @@
         : ('✅ カタログ取得済み: ' + p.complete + 'サークル・' + p.works + '作品');
     }
     function fallback_() {
-      var q = normalizeWorkSearch_(_workSearchByTab.all || ''), mq = normalizeWorkSearch_(_memoSearchByTab.all || '');
+      var q = effectiveSearchQuery_(_workSearchByTab.all || ''), mq = effectiveSearchQuery_(_memoSearchByTab.all || ''); // 2文字未満は絞り込まない
       var base = stored.slice(), baseSeen = {};
       base.forEach(function (it) { if (it && it.cid != null) baseSeen[String(it.cid)] = true; });
       if (_filterToday) todayItems_().forEach(function (it) { if (it && !baseSeen[String(it.cid)]) { baseSeen[String(it.cid)] = true; base.push(it); } });
@@ -4802,7 +4802,7 @@
     }
     function paint_(items, total, page, pages, fallback) {
       var wrap = $('candPageWrap'); if (!wrap || _activeTab !== 'all') return;
-      var memoQ = normalizeWorkSearch_(_memoSearchByTab.all || '');
+      var memoQ = effectiveSearchQuery_(_memoSearchByTab.all || '');
       var visible = (items || []).filter(function (it) { return candidateKindPass_(it, _filterDoujin, _filterBooks) && todayPass_(it) && !isHiddenByPostedForAll_(it) && (!memoQ || candMemoText_(it).indexOf(memoQ) >= 0); });
       _cardIndex = {}; visible.forEach(function (it) { _cardIndex[it.cid] = it; });
       var startI = (page - 1) * candPageSize_(), pager = candPagerHtml_(page, pages, total, startI, visible.length);
@@ -4828,7 +4828,7 @@
       var page = _candPageByTab.all || 1, size = candPageSize_();
       var wrap = $('candPageWrap'); if (wrap) wrap.setAttribute('aria-busy', 'true');
       var seq = ++_allLoadSeq; // 最後に出した読み込みだけを描く(条件を変える前の遅い返事で絞った一覧を上書きしない)
-      catalogPage_({ sort: _sort, page: page, limit: size, q: _workSearchByTab.all || '', sale: _filterSale ? 1 : 0,
+      catalogPage_({ sort: _sort, page: page, limit: size, q: searchQueryRaw_(_workSearchByTab.all || ''), sale: _filterSale ? 1 : 0,
         priceMax: _priceMax || 0, kind: candidateKindQuery_() || 'all', hideRecent: (_hidePosted.acc1 || _hidePosted.acc2) ? 1 : 0,
         hidePostedAcc1: _hidePosted.allAcc1 ? 1 : 0, hidePostedAcc2: _hidePosted.allAcc2 ? 1 : 0 }, function (j) {
         if (seq !== _allLoadSeq) return;
@@ -4844,13 +4844,15 @@
     function runSearch_() {
       _workSearchByTab.all = searchInput ? (searchInput.value || '').trim() : '';
       _memoSearchByTab.all = memoInput ? (memoInput.value || '').trim() : '';
+      var resEl = el.querySelector('#candWorkSearchResult');
+      if (resEl) resEl.textContent = searchShortHint_(searchInput, memoInput); // 2文字未満は検索なし扱い(案内だけ出す)
       _candPageByTab.all = 1; load_();
     }
     var runBtn = el.querySelector('#candWorkSearchRun'); if (runBtn) runBtn.addEventListener('click', runSearch_);
     [searchInput, memoInput].forEach(function (inp) { if (inp) inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); runSearch_(); } }); });
     var swClear = el.querySelector('#candWorkSearchClear'), smClear = el.querySelector('#candMemoSearchClear');
-    if (swClear) swClear.addEventListener('click', function () { if (searchInput) searchInput.value = ''; _workSearchByTab.all = ''; _candPageByTab.all = 1; load_(); });
-    if (smClear) smClear.addEventListener('click', function () { if (memoInput) memoInput.value = ''; _memoSearchByTab.all = ''; _candPageByTab.all = 1; load_(); });
+    if (swClear) swClear.addEventListener('click', function () { if (searchInput) searchInput.value = ''; runSearch_(); });
+    if (smClear) smClear.addEventListener('click', function () { if (memoInput) memoInput.value = ''; runSearch_(); });
     if (sizeSel) sizeSel.addEventListener('change', function () { var n = parseInt(this.value, 10) || PAGESIZE_DEF; lsSet(K_PAGESIZE, n); _candPageByTab.all = 1; load_(); });
     catalogSeed_(makerIds, stored, srcByCid, function (ok, p) { if (p) progressText_(p); load_(); });
   }
@@ -6088,19 +6090,69 @@
     try { text = text.normalize('NFKC'); } catch (e) {}
     return text.toLowerCase();
   }
+  // ★検索は2文字(コードポイント)以上で絞り込む(Chami 2026-10-21「2文字以上で結果が出るで問題ない」)。
+  //   1文字では全件一致になるだけで、300件×画像入りカードの再描画に打鍵ごとの重さだけが残っていた。
+  //   trim後1文字以下は「検索なし」と同じ扱い=通常の一覧をそのまま出す。サロゲートペア(絵文字等)は1文字と数える。
+  var SEARCH_MIN_CHARS_ = 2;
+  var SEARCH_DEBOUNCE_MS_ = 250; // 入力中は少し待ってから1回だけ描く(打鍵ごとの再描画をしない)
+  function countCodePoints_(s) {
+    s = String(s || ''); var n = 0;
+    for (var i = 0; i < s.length; i++) {
+      var c = s.charCodeAt(i);
+      if (c >= 0xD800 && c <= 0xDBFF && i + 1 < s.length) { var d = s.charCodeAt(i + 1); if (d >= 0xDC00 && d <= 0xDFFF) i++; }
+      n++;
+    }
+    return n;
+  }
+  // 入力値→実際に絞り込みへ使う生の検索語(trim済み)。短すぎれば ''(=絞り込まない)。サーバーへ渡す q もこれ。
+  function searchQueryRaw_(value) {
+    var t = String(value || '').trim();
+    return countCodePoints_(t) >= SEARCH_MIN_CHARS_ ? t : '';
+  }
+  // 入力値→照合用に正規化した検索語。短すぎれば ''。
+  function effectiveSearchQuery_(value) { return normalizeWorkSearch_(searchQueryRaw_(value)); }
+  // 「入力はあるが短くて絞り込んでいない」状態か(結果欄の案内に使う)。
+  function searchTooShort_(value) { var t = String(value || '').trim(); return !!t && !searchQueryRaw_(t); }
+  // 結果欄(#candWorkSearchResult)の文言。絞り込み無しで短い入力だけある時は案内を出す(欄は既存・高さ固定=レイアウト不変)。
+  function searchShortHint_(workInput, memoInput) {
+    return (searchTooShort_(workInput && workInput.value) || searchTooShort_(memoInput && memoInput.value)) ? SEARCH_MIN_CHARS_ + '文字以上で絞り込みます' : '';
+  }
+  // 直近に paintMainPage_ が描いた検索条件(正規化q + 区切り + 正規化mq)。同じなら入力ハンドラは描き直さない。
+  var _candSearchPainted_ = null;
+  // 作品側の照合テキストは正規化(NFKC)が件数×打鍵ぶん走ると重いので、元文字列ごとに結果を覚える。
+  //   キーは元文字列そのもの=タイトル/作者が後から届いて変わればキーも変わる(無効化不要)。肥大化だけ防ぐ。
+  var _workSearchCache_ = Object.create(null), _workSearchCacheN_ = 0;
   function workSearchText_(it) {
-    return normalizeWorkSearch_([
+    var raw = [
       it && it.title,
       it && (it.author || it.makerName),
       it && it.cid
-    ].filter(Boolean).join(' '));
+    ].filter(Boolean).join(' ');
+    var hit = _workSearchCache_[raw];
+    if (hit != null) return hit;
+    if (_workSearchCacheN_ > 5000) { _workSearchCache_ = Object.create(null); _workSearchCacheN_ = 0; }
+    hit = normalizeWorkSearch_(raw); _workSearchCache_[raw] = hit; _workSearchCacheN_++;
+    return hit;
   }
   // メモ/コメント検索の照合テキスト(実データ由来)。cand_text(同期LSの正本)から読むので
   //   ページ分けで画面に出ていない作品も横断して検索できる=全ページ検索。DOMに依存しない。
+  // ★refImgOf は画像URL台帳の選択(imageCdnPick_→旧dataURLの移行アップロード=atob/Blob化)まで起こすため、
+  //   検索の照合で全件に呼ぶと打鍵ごとに数百msの長タスクになっていた(2026-10-21計測)。照合はテキストだけを
+  //   読み(cand_text→メモリ→旧LSの順=refImgOfと同じ優先順)、画像側の副作用を起こさない。
+  //   結果は cand_text のマップ単位で覚え、マップが変わった(保存/同期)時に丸ごと作り直す。
+  var _memoSearchIdx_ = { map: null, byCid: null };
   function candMemoText_(it) {
     if (!it || !it.cid) return '';
-    var r = refImgOf(it.cid) || {};
-    return normalizeWorkSearch_(((r.comment || '') + ' ' + (r.memo || '')).trim());
+    var cid = String(it.cid), map = candTextMap_();
+    if (_memoSearchIdx_.map !== map || !_memoSearchIdx_.byCid) _memoSearchIdx_ = { map: map, byCid: Object.create(null) };
+    var hit = _memoSearchIdx_.byCid[cid];
+    if (hit != null) return hit;
+    var txt = candTextOf_(cid), mem = _imgMem.ref[cid];
+    var r = txt || mem || legacyRefOf_(cid) || {};
+    var s = normalizeWorkSearch_(((r.comment || '') + ' ' + (r.memo || '')).trim());
+    // 旧LS経路(未ハイドレート)は後から値が変わりうるので固定しない。cand_text/メモリ由来だけ覚える。
+    if (txt || mem) _memoSearchIdx_.byCid[cid] = s;
+    return s;
   }
   function workSearchHtml_(tabId) {
     return '<div class="cand-work-search" style="padding:2px 6px 10px;">' +
@@ -6125,8 +6177,8 @@
     var memoClear = root.querySelector('#candMemoSearchClear');
     var result = root.querySelector('#candWorkSearchResult');
     var apply = function () {
-      var query = normalizeWorkSearch_(input.value);
-      var mQuery = normalizeWorkSearch_(memoInput ? memoInput.value : '');
+      var query = effectiveSearchQuery_(input.value); // 2文字未満は絞り込まない(main/全候補タブと同じ規則)
+      var mQuery = effectiveSearchQuery_(memoInput ? memoInput.value : '');
       _workSearchByTab[tabId] = input.value || '';
       _memoSearchByTab[tabId] = memoInput ? (memoInput.value || '') : '';
       var shown = 0, total = 0;
@@ -6147,7 +6199,7 @@
         card.style.display = matches ? '' : 'none';
         if (matches) shown++;
       });
-      if (result) result.textContent = (query || mQuery) ? shown + '件表示 / ' + total + '件中' : '';
+      if (result) result.textContent = (query || mQuery) ? shown + '件表示 / ' + total + '件中' : searchShortHint_(input, memoInput);
     };
     input.addEventListener('input', apply);
     if (memoInput) memoInput.addEventListener('input', apply);
@@ -6260,8 +6312,10 @@
       // ★非同期取得(タイトル/販売数/AI判定)が後から届いても最新で描くため、都度LSを読み直す。
       var fresh2 = candItemsRead_(key), hs2 = {}; lsGet(hiddenKey(tabId), '[]').forEach(function (c) { hs2[c] = true; });
       var qi = document.getElementById('candWorkSearch'), mi = document.getElementById('candMemoSearch');
-      var q = normalizeWorkSearch_(qi ? qi.value : ''), mq = normalizeWorkSearch_(mi ? mi.value : '');
+      // 2文字未満は検索なし扱い(effectiveSearchQuery_)=1文字打っただけでは一覧を変えない。
+      var q = effectiveSearchQuery_(qi ? qi.value : ''), mq = effectiveSearchQuery_(mi ? mi.value : '');
       var searching = !!(q || mq);
+      _candSearchPainted_ = q + '\u0001' + mq; // 入力ハンドラが「前回描いた条件と同じなら描かない」判定に使う
       // 検索中だけは、手動非表示・投稿済み・画像未復元・セール/価格フィルターより前の元データを横断する。
       // PCで画像復元が一時的に遅れても、作品そのものが検索結果から消えて復旧操作不能になる循環を作らない。
       var arr2 = sortItems(fresh2, _sort).filter(function (it) {
@@ -6292,7 +6346,7 @@
       if (!slice.length) listEl.innerHTML = '<p class="hint" style="padding:8px;">' + (searching ? '条件に一致する候補がありません。' : (fresh2.length ? '現在の表示条件に合う候補がありません。検索欄では全候補を横断できます。' : 'まだ候補がありません。上の追加ボタンから登録してください。')) + '</p>';
       else reconcileCards_(listEl, slice, actOf_, wireOneCard_); // カードは差分更新(使い回し)=チラつかない
       var resEl = document.getElementById('candWorkSearchResult');
-      if (resEl) resEl.textContent = (q || mq) ? view.length + '件表示 / ' + arr2.length + '件中' : '';
+      if (resEl) resEl.textContent = (q || mq) ? view.length + '件表示 / ' + arr2.length + '件中' : searchShortHint_(qi, mi);
       [headEl, footEl].forEach(function (z) {
         z.querySelectorAll('[data-candpage]').forEach(function (b) {
           b.addEventListener('click', function () {
@@ -6316,17 +6370,48 @@
       el._go5CandState = stateSig;
       // 検索欄の配線(このタブはページ分けのため実データで絞り込む=wireWorkSearch_ のDOM非表示は使わない)。
       var searchInput = el.querySelector('#candWorkSearch'), memoInput = el.querySelector('#candMemoSearch');
-      var onMainSearch_ = function () {
-        _workSearchByTab[tabId] = searchInput ? (searchInput.value || '') : '';
-        _memoSearchByTab[tabId] = memoInput ? (memoInput.value || '') : '';
+      // ★打鍵ごとに全件照合＋画像入りカード再描画をしない(Chami 2026-10-21「候補の検索が重すぎる」)。
+      //   ・2文字未満は検索なし扱い=条件が前回描画と同じなら何も描かない(1文字目で一覧は動かない)
+      //   ・入力は SEARCH_DEBOUNCE_MS_ 待って1回だけ描く。Enter/クリアは即時
+      //   ・IME変換中(compositionstart〜end)は描かない=入力要素は作り直さないので変換・キャレットが途切れない
+      var searchTimer = null, composing = false;
+      var currentSig_ = function () {
+        return effectiveSearchQuery_(searchInput ? searchInput.value : '') + '\u0001' + effectiveSearchQuery_(memoInput ? memoInput.value : '');
+      };
+      var applyMainSearch_ = function () {
+        if (searchTimer) { clearTimeout(searchTimer); searchTimer = null; }
+        var sig = currentSig_();
+        if (sig === _candSearchPainted_ && document.getElementById('candCardList')) {
+          // 絞り込み条件は変わっていない(短い入力の増減など)=一覧は描き直さず、案内文だけ更新する
+          var resEl = document.getElementById('candWorkSearchResult');
+          if (resEl && sig === '\u0001') resEl.textContent = searchShortHint_(searchInput, memoInput);
+          return;
+        }
         _candPageByTab[tabId] = 1; // 条件が変わったら1ページ目へ
         paintMainPage_();
       };
-      if (searchInput) searchInput.addEventListener('input', onMainSearch_);
-      if (memoInput) memoInput.addEventListener('input', onMainSearch_);
+      var onMainSearch_ = function (ev) {
+        _workSearchByTab[tabId] = searchInput ? (searchInput.value || '') : '';
+        _memoSearchByTab[tabId] = memoInput ? (memoInput.value || '') : '';
+        if (composing || (ev && ev.isComposing)) return; // 変換確定後の input / compositionend で拾う
+        if (searchTimer) clearTimeout(searchTimer);
+        searchTimer = setTimeout(applyMainSearch_, SEARCH_DEBOUNCE_MS_);
+      };
+      var onMainSearchNow_ = function () { // Enter/クリア=待たずに反映
+        _workSearchByTab[tabId] = searchInput ? (searchInput.value || '') : '';
+        _memoSearchByTab[tabId] = memoInput ? (memoInput.value || '') : '';
+        applyMainSearch_();
+      };
+      [searchInput, memoInput].forEach(function (inp) {
+        if (!inp) return;
+        inp.addEventListener('compositionstart', function () { composing = true; if (searchTimer) { clearTimeout(searchTimer); searchTimer = null; } });
+        inp.addEventListener('compositionend', function () { composing = false; onMainSearch_(); });
+        inp.addEventListener('input', onMainSearch_);
+        inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); onMainSearchNow_(); } });
+      });
       var swClear = el.querySelector('#candWorkSearchClear'), smClear = el.querySelector('#candMemoSearchClear');
-      if (swClear) swClear.addEventListener('click', function () { if (searchInput) searchInput.value = ''; onMainSearch_(); try { if (searchInput) searchInput.focus({ preventScroll: true }); } catch (e) { if (searchInput) searchInput.focus(); } });
-      if (smClear) smClear.addEventListener('click', function () { if (memoInput) memoInput.value = ''; onMainSearch_(); try { if (memoInput) memoInput.focus({ preventScroll: true }); } catch (e) { if (memoInput) memoInput.focus(); } });
+      if (swClear) swClear.addEventListener('click', function () { if (searchInput) searchInput.value = ''; onMainSearchNow_(); try { if (searchInput) searchInput.focus({ preventScroll: true }); } catch (e) { if (searchInput) searchInput.focus(); } });
+      if (smClear) smClear.addEventListener('click', function () { if (memoInput) memoInput.value = ''; onMainSearchNow_(); try { if (memoInput) memoInput.focus({ preventScroll: true }); } catch (e) { if (memoInput) memoInput.focus(); } });
       var sizeSel = el.querySelector('#candPageSizeSel');
       if (sizeSel) sizeSel.addEventListener('change', function () { var n = parseInt(this.value, 10) || PAGESIZE_DEF; lsSet(K_PAGESIZE, n); _candPageByTab[tabId] = 1; paintMainPage_(); });
     }
