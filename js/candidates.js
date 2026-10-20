@@ -387,7 +387,7 @@
   //   端末ローカル(storage-keys 未登録=既定で非同期)。直接 localStorage を使い schedulePoolSync_(cand_tabs監視)を誤発火させない。
   var K_TABLABELS = 'cand_tab_labels';
   var BUILTIN_TAB_DEFAULTS = { buzz: 'バズ', auto: '自動追加', main: '手動追加', all: '全候補' }; // ★main の既定は「手動追加」(Chami依頼)
-  var BUILTIN_TAB_EMOJI = { buzz: '🦋', auto: '🤖', main: '💡', all: '📚' };
+  var BUILTIN_TAB_EMOJI = { buzz: '🦋', auto: '', main: '💡', all: '📚' };
   function builtinTabLabels_() { try { return JSON.parse(localStorage.getItem(K_TABLABELS) || '{}') || {}; } catch (e) { return {}; } }
   // 組込タブの表示ラベル(テキストのみ)。上書きが無ければ既定を返す。_activeTab 値や分岐には一切関与しない=表示専用。
   function builtinTabLabel_(id) {
@@ -410,7 +410,7 @@
     var emoji = BUILTIN_TAB_EMOJI[id] || '';
     f.innerHTML = '<div class="card" style="margin:8px 0;">' +
       '<div class="field-label" style="margin-top:0;">✏️ タブ名を変更</div>' +
-      '<label class="hint" style="display:block;margin-bottom:2px;">' + esc(emoji) + ' のタブ名(絵文字はそのまま・文字だけ変わります)</label>' +
+      '<label class="hint" style="display:block;margin-bottom:2px;">' + (emoji ? esc(emoji) + ' のタブ名(絵文字はそのまま・文字だけ変わります)' : 'タブ名') + '</label>' +
       '<input id="candBiName" type="text" autocomplete="off" value="' + esc(builtinTabLabel_(id)) + '">' +
       '<div class="hint" style="margin-top:6px;">空にして保存すると既定(' + esc(BUILTIN_TAB_DEFAULTS[id] || id) + ')に戻ります。</div>' +
       '<div style="display:flex;gap:8px;margin-top:8px;">' +
@@ -4515,7 +4515,7 @@
     if (_sortTab !== _activeTab) { _sort = defaultSortForTab_(_activeTab); _sortTab = _activeTab; }
     var tabs = lsGet(K_TABS, '[]');
     var tabBtns = '<button class="cand-tab cand-tab-buzz' + (_activeTab === 'buzz' ? ' active' : '') + '" data-ct="buzz" type="button">🦋 ' + esc(builtinTabLabel_('buzz')) + '</button>' +
-      '<button class="cand-tab' + (_activeTab === 'auto' ? ' active' : '') + '" data-ct="auto" type="button">🤖 ' + esc(builtinTabLabel_('auto')) + '</button>' +
+      '<button class="cand-tab' + (_activeTab === 'auto' ? ' active' : '') + '" data-ct="auto" type="button">' + esc(builtinTabLabel_('auto')) + '</button>' +
       '<button class="cand-tab' + (_activeTab === 'main' ? ' active' : '') + '" data-ct="main" type="button">💡 ' + esc(builtinTabLabel_('main')) + '</button>' +
       '<button class="cand-tab' + (_activeTab === 'all' ? ' active' : '') + '" data-ct="all" type="button">📚 ' + esc(builtinTabLabel_('all')) + '</button>' +
       tabs.map(function (t) {
@@ -5521,7 +5521,7 @@
       return confirmCandDurable_(autoKey, String(items[items.length - 1].cid || ''), lsOk).then(function (durable) {
         if (durable !== 'fail') flushSync_();
         if ((_activeTab === 'auto' || _activeTab === 'main') && $('candList')) {
-          showCandAddNotice_(null, '🤖 自動追加へ' + added + '件入れました' + (dup ? '(重複・投稿済み' + dup + '件除外)' : ''));
+          showCandAddNotice_(null, '自動追加へ' + added + '件入れました' + (dup ? '(重複・投稿済み' + dup + '件除外)' : ''));
           renderCandList(_activeTab);
         }
         return { added: added, dup: dup, durable: durable };
@@ -6625,7 +6625,7 @@
     if (it.addedAt) sub.push('<span class="cand-added">追加 ' + esc(fmtTs(it.addedAt)) + '</span>');
     var ws = deriveWorkState_(it.date);
     var badgesHtml = (ws ? stateBadgeHtml_(ws) : '') + ((!it.isTwitter && it.url) ? workKindBadgeHtml_(it.url) : '') + (isAiWork_(it.genres, it.floor, it.ai) ? '<span class="fp-kind fp-kind-ai">AI</span>' : '')
-      + (it.source === 'grok_fanza' ? '<span class="fp-kind fp-kind-grok" title="Grok×Xの自動収集で入った候補">🤖Grok自動</span>' : '')
+      + (it.source === 'grok_fanza' ? '<span class="fp-kind fp-kind-grok" title="Grok×Xの自動収集で入った候補">Grok自動</span>' : '')
       + (it.postVerified === false ? '<span class="fp-kind fp-kind-unv" title="自動収集で、元ポストを確かめられなかった候補(作品自体はFANZAで実在確認済み)">⚠出所未確認</span>' : '');
     var genresHtml = (it.genres && it.genres.length)
       ? '<div class="fz-genres" style="margin-top:4px;">' + it.genres.slice(0, 5).map(function (g) { return '<span class="fz-genre">' + esc(g) + '</span>'; }).join('') + '</div>'

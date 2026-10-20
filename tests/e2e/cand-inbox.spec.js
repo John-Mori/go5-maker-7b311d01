@@ -70,11 +70,14 @@ test('受け箱の候補を cid 重複なしで🤖自動追加タブへ取り�
   for (const c of unverified) expect(items.find((x) => x.cid === c).postVerified).toBe(false);
   console.log('inbox=' + rows.length + ' imported=' + (want - 1) + ' total=' + items.length + ' unverified=' + unverified.join(','));
 
-  // タブの並び: 🤖自動追加は 手動追加 の左。開くと全件に🤖印、出所未確認の行にだけ⚠
+  // タブの並び: 🤖自動追加は 手動追加 の左。開くと全件にGrok自動の印、出所未確認の行にだけ⚠
   const order = await page.locator('.cand-tab[data-ct]').evaluateAll((els) => els.map((e) => e.getAttribute('data-ct')));
   expect(order.indexOf('auto')).toBe(order.indexOf('main') - 1);
+  // 🤖はいらない(Chami 2026-10-20)=タブにもカードの印にも出さない
+  await expect(page.locator('.cand-tab[data-ct="auto"]')).toHaveText('自動追加');
   await page.locator('.cand-tab[data-ct="auto"]').click();
   await expect(page.locator('.cand-card .fp-kind-grok')).toHaveCount(Math.min(want, 20));
+  expect(await page.locator('#page-candidates, body').first().innerText()).not.toContain('🤖');
   await expect(page.locator('.fp-kind-unv')).toHaveCount(unverified.length);
   const verifiedTitle = rows.find((r) => r.postVerified !== false && r.cid !== inList.cid && r.cid !== deleted.cid).title;
   await expect(page.locator('.cand-card', { hasText: verifiedTitle }).locator('.fp-kind-unv')).toHaveCount(0);
