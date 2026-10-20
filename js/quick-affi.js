@@ -1,7 +1,8 @@
 /**
  * quick-affi.js — アカウント帯「癒やし倉庫」の右の「即アフィ」ボタンとモーダル(Chami msg 1559417034813608007)。
- * 作品URLを入れたら、アフィリンク化→アフィチェック表示までを1画面で済ませる。
- *   DMM/FANZA・DLsite行きは短縮せずアフィリンク(al.fanza)をそのまま出す(Chami決定 2026-10-18 5Sec軍議 msg 1561272541387948148)。
+ * 作品URLを入れたら、アフィリンク化→今のチャンネルのドメインで短縮リンク発行→アフィチェック表示までを1画面で済ませる。
+ *   (2026-10-18〜21は短縮せずal.fanzaのまま出していたが、Chami 2026-10-21「短縮リンクにしてピンククリック計測しよか」で短縮へ戻した。
+ *    短縮できない時(ドメイン未設定/worker失敗)はアフィリンクのまま出す)
  * 中身(アフィ化・短縮・転送先のaf_id照合)は bluesky.js の window.Go5IssueAffShort=AFIリンクタブの単体短縮と同じ芯。
  * 発行後は定型文(⇩気になった方は…/新作N%OFF✨️ 等+短縮リンク)を丸ごとコピペできる欄にも出す(Chami msg 1559480072589803612)。
  *   文面の正本は core/movie-attrs-core.js の affiPostText。割引と発売日は window.Go5FreshWorkInfo で取り直す。
@@ -37,9 +38,9 @@
           '<div class="qa-row"><input id="qaUrl" type="text" inputmode="url" autocomplete="off" placeholder="https://...(DMM/FANZAの作品URL)">' +
             '<button type="button" class="qa-mini" data-act="paste">貼り付け</button></div>' +
           '<div class="qa-domain"></div>' +
-          '<button type="button" class="qa-go">アフィリンクを作る</button>' +
+          '<button type="button" class="qa-go">アフィリンク＋短縮リンクを作る</button>' +
           '<div class="qa-result" hidden>' +
-            '<label class="qa-label" for="qaOut">アフィリンク</label>' +
+            '<label class="qa-label" for="qaOut">短縮リンク</label>' +
             '<div class="qa-row"><input id="qaOut" type="text" readonly>' +
               '<button type="button" class="qa-mini" data-act="copy">コピー</button></div>' +
             '<div class="qa-dest"></div>' +
@@ -145,7 +146,9 @@
 
   function open_() {
     if (!modal) build_();
-    els.domain.textContent = 'DMM/FANZAの作品・セールは短縮せず、アフィリンクのまま出します';
+    var base = '';
+    try { base = (window.Go5Short && window.Go5Short.base && window.Go5Short.base()) || ''; } catch (e) {}
+    els.domain.textContent = '発行ドメイン: ' + (base ? base.replace(/^https?:\/\//, '').replace(/\/+$/, '') : '未設定(短縮せずアフィリンクのまま)');
     modal.hidden = false;
     setTimeout(function () { try { els.url.focus(); } catch (e) {} }, 30);
   }

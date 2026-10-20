@@ -117,28 +117,27 @@ test('F-1: detectFacets が本文中URLを正しいバイト範囲で指す', fu
 });
 
 // ────────────────────────────────────────────────────────────
-// F-R 作品/セールのDMM/FANZAリンクは本文に「【リンク】」とだけ出し、facetでal.fanzaを指す(2026-10-18 Chami)
+// F-R 本文は文字どおり出す=【リンク】置換はしない(Chami 2026-10-21「短縮リンクじゃなくてまだ【リンク】になるからやめて」)。
+//   作品/セールの短縮URL(自前ドメイン)も、短縮が取れず残った生のal.fanzaも、本文にそのまま載りURL facetで指す。
 // ────────────────────────────────────────────────────────────
-test('F-R: 【リンク】のfacet範囲が文字とちょうど一致し、各々が正しいal.fanzaを指す', function () {
-  var w = 'https://al.fanza.co.jp/?lurl=https%3A%2F%2Fwww.dmm.co.jp%2Fdc%2Fdoujin%2F-%2Fdetail%2F%3D%2Fcid%3Dd_727814%2F&af_id=test-001&ch=toolbar';
-  var sale = 'https://al.fanza.co.jp/?lurl=https%3A%2F%2Fwww.dmm.co.jp%2Fdc%2Fdoujin%2F-%2Flist%2F%3D%2Fcampaign%3Dgain%2F&af_id=test-001&ch=toolbar';
-  var x = 'https://5mgl.com/AbCde';
-  var text = '日本語の本文🎀 #PR\n' + w + '\n\n⭐セール中🎀\n' + sale + '\nX→' + x + ' 以上';
+test('F-R: buildRichTextは本文を書き換えず、短縮URLも生アフィリンクも文字どおりfacet化する(【リンク】を出さない)', function () {
+  var w = 'https://xdgh3.com/AbCde';
+  var sale = 'https://xdgh3.com/r2/SaLe1';
+  var raw = 'https://al.fanza.co.jp/?lurl=https%3A%2F%2Fwww.dmm.co.jp%2Fdc%2Fdoujin%2F-%2Flist%2F%3D%2Fcampaign%3Dgain%2F&af_id=test-001&ch=toolbar';
+  var text = '日本語の本文🎀 #PR\n' + w + '\n\n⭐セール中🎀\n' + sale + '\n短縮失敗時→' + raw + ' 以上';
   var r = buildRichText(text);
-  assert.ok(r.text.indexOf('al.fanza') < 0, 'al.fanza が本文に残っている');
-  assert.ok(r.text.indexOf(x) >= 0, '自分の投稿への短縮リンクは本文のまま');
+  assert.strictEqual(r.text, text, '本文は一切書き換えない');
+  assert.ok(r.text.indexOf('【リンク】') < 0, '【リンク】を出してはいけない');
   var bytes = enc.encode(r.text);
   var links = r.facets.filter(function (f) { return f.features[0].$type === 'app.bsky.richtext.facet#link'; });
   assert.strictEqual(links.length, 3);
   var dec = new TextDecoder();
-  assert.strictEqual(dec.decode(bytes.slice(links[0].index.byteStart, links[0].index.byteEnd)), '【リンク】');
-  assert.strictEqual(links[0].features[0].uri, w);
-  assert.strictEqual(dec.decode(bytes.slice(links[1].index.byteStart, links[1].index.byteEnd)), '【リンク】');
-  assert.strictEqual(links[1].features[0].uri, sale);
-  assert.strictEqual(dec.decode(bytes.slice(links[2].index.byteStart, links[2].index.byteEnd)), x);
-  assert.strictEqual(links[2].features[0].uri, x);
+  [w, sale, raw].forEach(function (u, i) {
+    assert.strictEqual(dec.decode(bytes.slice(links[i].index.byteStart, links[i].index.byteEnd)), u, 'facet範囲がURL文字と一致(' + i + ')');
+    assert.strictEqual(links[i].features[0].uri, u);
+  });
   assert.strictEqual(r.facets.filter(function (f) { return f.features[0].$type === 'app.bsky.richtext.facet#tag'; }).length, 1, '#PR は tag facet のまま');
-  assert.ok(Array.from(r.text).length < 300, '置換後は300字に収まる');
+  assert.strictEqual(typeof require('../js/bluesky-core.js').LINK_LABEL, 'undefined', 'LINK_LABEL は公開しない(置換機構を残さない)');
 });
 
 // ────────────────────────────────────────────────────────────

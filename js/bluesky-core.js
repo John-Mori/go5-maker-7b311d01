@@ -206,34 +206,13 @@
   }
 
 
-  // DMM/FANZA/DLsite行きのURL(アフィリンクal.fanza含む)は短縮しない運用のため長い(140〜190字)。
-  //   Blueskyは本文のURLを全文で300字に数えるので、本文には「【リンク】」とだけ出し、その範囲のfacetでURLを指す
-  //   (Chami 2026-10-18 5Sec軍議 msg 1561274889682559098「【リンク】という形式にするようにして」)。
-  //   他のURL(自分のX/YouTube/Bluesky投稿への短縮リンク等)と#タグは従来どおり detectFacets が拾う。
-  var LINK_LABEL = '【リンク】';
-  function isLabelHostUrl(u) {
-    try { return /(^|\.)(?:dmm|fanza)\.(?:co\.jp|com)$/i.test(new URL(u).hostname) || /(^|\.)dlsite\.com$/i.test(new URL(u).hostname); } catch (e) { return false; }
-  }
-  // @returns {{ text: string, facets: Array }}  text は【リンク】へ置換後の本文
+  // 投稿本文→(本文, facets)。本文は文字どおり出す(URLは短縮URLのまま本文に載る)。URLと#タグは detectFacets が拾う。
+  //   2026-10-18〜21の「DMM/FANZA行きURLを【リンク】へ置換してfacetで指す」方式は、Chami 2026-10-21
+  //   「Blueskyに投稿したら短縮リンクじゃなくてまだ【リンク】になるからやめて」で廃止=作品・セールは自前ドメインで短縮して本文へ載せる。
+  // @returns {{ text: string, facets: Array }}
   function buildRichText(text) {
     text = String(text || '');
-    var out = '', last = 0, labelFacets = [], m, re = /https?:\/\/[^\s]+/g;
-    while ((m = re.exec(text))) {
-      var url = m[0].replace(/[.,;:!?。、！？))】」』]+$/, '');
-      if (!isLabelHostUrl(url)) continue;
-      out += text.slice(last, m.index);
-      var bs = byteLen(out);
-      out += LINK_LABEL;
-      labelFacets.push({
-        index: { byteStart: bs, byteEnd: byteLen(out) },
-        features: [{ $type: 'app.bsky.richtext.facet#link', uri: url }]
-      });
-      last = m.index + url.length;
-    }
-    out += text.slice(last);
-    var facets = labelFacets.concat(detectFacets(out));
-    facets.sort(function (a, b) { return a.index.byteStart - b.index.byteStart; });
-    return { text: out, facets: facets };
+    return { text: text, facets: detectFacets(text) };
   }
 
   /**
@@ -712,7 +691,6 @@
     blueskyPostWithImage: blueskyPostWithImage,
     detectFacets: detectFacets,
     buildRichText: buildRichText,
-    LINK_LABEL: LINK_LABEL,
     blueskyPostRaw: blueskyPostRaw,
     blueskyPostThread: blueskyPostThread,
     blueskyPostReply: blueskyPostReply,

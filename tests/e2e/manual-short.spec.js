@@ -7,11 +7,13 @@ test.describe('単体短縮リンク発行', () => {
     { account: 'acc2', channel: '宵桜艶帖', domain: 'yoz2.com', code: 'reply-yoizakura' },
     { account: 'acc3', channel: '癒やし倉庫', domain: 'xdgh3.com', code: 'reply-iyashi' },
   ]) {
-    // 2026-10-18 Chami決定(5Sec軍議 msg 1561272541387948148)「ピンククリックはもう計測する必要もない、
-    //   短縮リンク化はYouTube→Twitterとかのところだけ」。作品URLは短縮せず al.fanza のアフィリンクをそのまま出す。
-    test(accountCase.channel + 'は作品URLを短縮せずアフィリンク(al.fanza)のまま出す', async ({ page }) => {
+    // 2026-10-21 Chami「ただのリンクにするくらいなら短縮リンクにしてピンククリック計測しよか」(Bluesky投稿用の作品リンクは短縮へ戻す)。
+    //   AFIリンクタブの単体発行=Bluesky本文へ貼る用途なので、アフィ化→chドメインで短縮→転送先=アフィリンク。
+    //   X欄・ドラフトX・投稿履歴が通る Go5MakeShort(opts無し)は 10-18運用のまま=DMM/FANZA行きは短縮せず生アフィリンク。
+    test(accountCase.channel + 'は作品URLをアフィ化してchドメインで短縮する(Bluesky用)・opts無しのGo5MakeShortは短縮しない(X用)', async ({ page }) => {
       const longUrl = 'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_e2e_manual_short/';
       let workShortenCalls = 0;
+      let savedDestination = '';
       await page.addInitScript(() => {
         localStorage.setItem('current_account', 'acc1');
         localStorage.setItem('fanza_af_id', 'test-affiliate-990');
@@ -23,7 +25,7 @@ test.describe('単体短縮リンク発行', () => {
       });
       await page.route(/https:\/\/(?:5mgl\.com|yoz2\.com|xdgh3\.com|legacy-short\.invalid)\/api\/shorten/, async (route) => {
         const destination = new URLSearchParams(route.request().postData() || '').get('url') || '';
-        if (destination.includes('d_e2e_manual_short')) workShortenCalls++;
+        if (destination.includes('d_e2e_manual_short')) { workShortenCalls++; savedDestination = destination; }
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
@@ -46,25 +48,35 @@ test.describe('単体短縮リンク発行', () => {
       await page.locator('#manualUrl').fill(longUrl);
       await page.locator('#manualShortBtn').click();
 
-      await expect(page.locator('#manualOut')).toHaveAttribute('data-url', /^https:\/\/al\.fanza\.co\.jp\//);
-      const out = await page.locator('#manualOut').getAttribute('data-url');
-      const affiliate = new URL(out || '');
+      const shortUrl = 'https://' + accountCase.domain + '/' + accountCase.code;
+      await expect(page.locator('#manualOut')).toHaveText(shortUrl);
+      await expect(page.locator('#manualOut')).toHaveAttribute('data-url', shortUrl);
+      // 短縮の転送先(workerへ渡したURL)はアフィリンク=af_idが自分のもの
+      const affiliate = new URL(savedDestination);
       expect(affiliate.hostname).toBe('al.fanza.co.jp');
       expect(affiliate.searchParams.get('af_id')).toBe('test-affiliate-990');
       expect(affiliate.searchParams.get('lurl')).toBe(longUrl);
-      await expect(page.locator('#manualAffStatus')).toContainText('アフィリンクOK・短縮なし');
+      await expect(page.locator('#manualAffStatus')).toContainText('アフィリンクOK');
+      await expect(page.locator('#manualAffStatus')).not.toContainText('短縮なし');
       await page.locator('#manualCopy').click();
-      await expect.poll(() => page.evaluate(() => window.__manualCopied || '')).toBe(out);
-      expect(workShortenCalls).toBe(0);
-      // 投稿文の自動挿入・X欄・ドラフトが通る共通の口も、作品/セール一覧は短縮しない。X投稿URLは従来どおり短縮へ回す。
+      await expect.poll(() => page.evaluate(() => window.__manualCopied || '')).toBe(shortUrl);
+      expect(workShortenCalls).toBe(1);
+      // 共通の口 Go5MakeShort: opts無し(X欄・ドラフトX・投稿履歴)は作品/セール一覧を短縮しない(noShort)。
+      //   {bsky:true}(Bluesky本文・プレビュー・ドラフト投稿モードの返信・即アフィ)は同じURLでも短縮へ回す。
       const viaCore = await page.evaluate(async () => {
-        const w = await window.Go5MakeShort('https://al.fanza.co.jp/?lurl=https%3A%2F%2Fwww.dmm.co.jp%2F&af_id=test-affiliate-990&ch=link_tool&ch_id=link');
+        const aff = 'https://al.fanza.co.jp/?lurl=https%3A%2F%2Fwww.dmm.co.jp%2Fdc%2Fdoujin%2F-%2Fdetail%2F%3D%2Fcid%3Dd_e2e_manual_short%2F&af_id=test-affiliate-990&ch=link_tool&ch_id=link';
+        const w = await window.Go5MakeShort(aff);
         const sale = await window.Go5MakeShort('https://www.dmm.co.jp/dc/doujin/-/list/=/sort=ranking/');
-        return { w, sale, noShortX: window.isNoShortDestUrl('https://x.com/a/status/1'), noShortBsky: window.isNoShortDestUrl('https://bsky.app/profile/a/post/b') };
+        const wB = await window.Go5MakeShort(aff, { bsky: true });
+        return { w, sale, wB, noShortX: window.isNoShortDestUrl('https://x.com/a/status/1'), noShortBsky: window.isNoShortDestUrl('https://bsky.app/profile/a/post/b') };
       });
       expect(viaCore.w.noShort).toBe(true);
       expect(viaCore.w.shareUrl).toMatch(/^https:\/\/al\.fanza\.co\.jp\//);
       expect(viaCore.sale.shareUrl).toBe('https://www.dmm.co.jp/dc/doujin/-/list/=/sort=ranking/');
+      expect(viaCore.wB.noShort).toBeFalsy();
+      expect(viaCore.wB.shareUrl).toMatch(/^https:\/\/(?:5mgl\.com|yoz2\.com|xdgh3\.com|legacy-short\.invalid)\//);
+      expect(viaCore.wB.shareUrl).not.toContain('al.fanza');
+      expect(workShortenCalls).toBe(2); // 単体発行1回 + {bsky:true}1回。opts無しの2回は短縮APIへ行かない
       expect(viaCore.noShortX).toBe(false);
       expect(viaCore.noShortBsky).toBe(false);
     });
