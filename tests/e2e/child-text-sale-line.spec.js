@@ -1,10 +1,10 @@
-// 投稿本文にセールの文(「⇩オータムセール🌰最大99%OFF!」)があっても、ドラフトモードの子の文には出さない
-// (Chami msg 1561255009562132584「オータムセールの文がドラフトモードの子の文はいらないんだけど」)。
-// v1060はこれを「入らない」と読み違えて逆に入れていた。投稿本文(Bluesky)側はそのまま。
-// セールリンクの見出し+リンクは従来どおり子の文に残す(smoke.spec.js「ドラフト投稿モードのリンク置換」)。
+// 投稿本文にセールの文(「⇩オータムセール🌰最大99%OFF!」)があれば、ドラフトモードの子の文にも出す
+// (Chami msg 1562266602194337793「2」=X用の子の文欄にもセール行を戻す)。
+// v1066(msg 1561255009562132584「いらない」)で外していたが、Blueskyの返信からも消えて改悪になった(msg 1562117265153986710)。
+// 癒やし倉庫(noPromo)でもセール案内の行は残し、作品の割引率(N%オフ)の行だけ外す。投稿本文(Bluesky)側はそのまま。
 const { test, expect } = require('@playwright/test');
 
-test('子の文: セールの文の行は出さず、セールリンクの見出し+リンクは残す', async ({ page }) => {
+test('子の文: セールの文の行もセールリンクの見出し+リンクも残し、N%オフの行だけ外す', async ({ page }) => {
   await page.goto('Stock.html', { waitUntil: 'load' });
   await page.waitForTimeout(800);
   const acc = await page.evaluate(() => {
@@ -21,7 +21,8 @@ test('子の文: セールの文の行は出さず、セールリンクの見出
   await page.locator('.stk-mode[data-id="stk_sale_line"]').click();
   const child = page.locator('#draftXText');
   await expect(child).toHaveValue(/^⇩気になった方はコチラから💕 #PR #漫画/);
-  await expect(child).not.toHaveValue(/オータムセール/);
+  await expect(child).toHaveValue(/⇩オータムセール🌰最大99%OFF!/);
+  await expect(child).not.toHaveValue(/N%オフ/);
   await expect(child).toHaveValue(/⭐大幅割引セール中の同人はこちら 🎀\n/);
   // 投稿本文は変えない
   expect(await page.evaluate((a) => localStorage.getItem(window.Go5Acct.key('bsky_text', a)), acc)).toContain('⇩オータムセール🌰最大99%OFF!');

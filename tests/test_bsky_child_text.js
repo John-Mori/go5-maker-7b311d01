@@ -71,7 +71,9 @@ const imgPath = path.join(__dirname, '..', imgSrc);
 eq(imgSrc === 'assets/bsky-reply-continue-2.jpg' && fs.existsSync(imgPath) && fs.statSync(imgPath).size < 950 * 1024, true, '返信画像=差し替え後の画像・950KB以下');
 const SL = '⇩オータムセール🌰最大99%OFF！';
 eq(Core.resolvePromoTemplate(TPL, { noPromo: true, keepSaleLines: true }).indexOf(SL) > 0, true, '癒やし倉庫(noPromo)でもBluesky返信はセール案内行を残す');
-eq(Core.resolvePromoTemplate(TPL, { noPromo: true }).indexOf(SL), -1, 'Xの子の文(keepSaleLinesなし)は従来どおり外す(v1066)');
+eq(Core.resolvePromoTemplate(TPL, { noPromo: true }).indexOf(SL), -1, 'keepSaleLinesなし(YouTube説明欄等)はnoPromoで%OFF行を外す');
+// 2026-10-21 Chami msg 1562266602194337793「2」: X用の子の文欄にもセール行を戻す(v1066の除去を外した)。
+eq(/function composeXForModal_[\s\S]*?return applyPromo_\(base, meta, true\);/.test(st) && !/dropSaleLines_/.test(st), true, 'Xの子の文もセール案内行を残す(dropSaleLines_へ戻さない)');
 eq(Core.resolvePromoTemplate('見出し\n今だけN%OFF', { noPromo: true, keepSaleLines: true }), '見出し', '作品の割引率(N%)の行はBluesky返信でも外す');
 Promise.all(tasks).then(() => {
   if (fails) { console.log(fails + ' FAIL'); process.exit(1); }
