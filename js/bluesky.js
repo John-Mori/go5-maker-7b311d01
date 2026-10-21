@@ -2253,7 +2253,9 @@
   // ★Bluesky返信には「続きはこちら」+この画像を毎回添付する(2026-10-12 Chami指定・msg 1559121504128471086
   //   「Blueskyの場合は続きはこちらというリプ欄と一緒にこの画像を毎回添付すること」)。全アカウント共通(acc1/2/3)。
   //   画像は事前に ~950KB(Bluesky blob上限)以下へ静的に圧縮済みの固定アセット(compressFileの実行時圧縮は不要)。
-  var BSKY_REPLY_IMG_SRC = 'assets/bsky-reply-continue.jpg';
+  //   2026-10-21 画像差し替え(Chami msg 1562261269606826154「Blueskyの投稿画像はこれに差し替えて」)。
+  //   名前を変えて置く=端末に残った旧画像のキャッシュを拾わない。
+  var BSKY_REPLY_IMG_SRC = 'assets/bsky-reply-continue-2.jpg';
   var BSKY_REPLY_TEXT = '続きはこちら';
   var _replyImgBlobCache = null; // 同一セッション内の二重fetchを避ける(静的アセットなので毎回fetchする必要がない)
   // ★返信文=ドラフトの「子の文(返信)」をそのまま使う(空行も書いたとおり)。中のURLだけBluesky用の作品リンクへ差し替える

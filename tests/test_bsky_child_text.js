@@ -65,6 +65,10 @@ const st = fs.readFileSync(path.join(__dirname, '..', 'js/stock.js'), 'utf8');
 // 2026-10-13 Chami msg 1559480072589803612: 子の文は定型文へ。msg 1559679396363636736 以降は子の文欄の2行目を差し替えて使う(見出しが無い時だけ affiPostText)。
 eq(/draftId: meta\.id, childText: childText, bskyBody: bskyBody \}/.test(st) && /core\.withAffiStatusLine\(xv, info\)/.test(st), true, '投稿モードは子の文欄(控え)と🦋投稿本文を渡す');
 eq(/var bskyBody = applyPromo_\(masterBody_\(meta\), meta, true\);/.test(st), true, '🦋投稿本文=そのchの投稿本文(masterBody_)・セール案内行は残す');
+// 返信の固定画像(2026-10-21 差し替え msg 1562261269606826154)=実在し、Bluesky blob上限(~950KB)以下。
+const imgSrc = (src.match(/var BSKY_REPLY_IMG_SRC = '([^']+)'/) || [])[1] || '';
+const imgPath = path.join(__dirname, '..', imgSrc);
+eq(imgSrc === 'assets/bsky-reply-continue-2.jpg' && fs.existsSync(imgPath) && fs.statSync(imgPath).size < 950 * 1024, true, '返信画像=差し替え後の画像・950KB以下');
 const SL = '⇩オータムセール🌰最大99%OFF！';
 eq(Core.resolvePromoTemplate(TPL, { noPromo: true, keepSaleLines: true }).indexOf(SL) > 0, true, '癒やし倉庫(noPromo)でもBluesky返信はセール案内行を残す');
 eq(Core.resolvePromoTemplate(TPL, { noPromo: true }).indexOf(SL), -1, 'Xの子の文(keepSaleLinesなし)は従来どおり外す(v1066)');
