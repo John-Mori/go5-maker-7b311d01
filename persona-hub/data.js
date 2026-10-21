@@ -18,9 +18,9 @@ window.PERSONA_HUB_DATA = {
    },
    "呼称": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "sha1": "84ddcd7ba84cae7a1441b302ea0d4912fa95acd1",
-    "bytes": 142623,
-    "mtime": 1792314114.724
+    "sha1": "4f6c66de790b39a3d147c828dd8d36b58d7db730",
+    "bytes": 142923,
+    "mtime": 1792588648.285
    },
    "アイコン": {
     "path": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
@@ -1273,7 +1273,10 @@ window.PERSONA_HUB_DATA = {
        "アロンソコーチ",
        "アロンソ監督"
       ],
-      "note": "Chami 07-29"
+      "note": "Chami 07-29 / ★2026-10-21 Chami msg 1562453730094358670「あいつは禁止。彼とかにしよ。アロンソコーチは全組織のトップの監督だからリスペクトしましょ」=三人称は「彼」。生成側=kukuru.md L16へピン済。",
+      "forbidden": [
+       "あいつ"
+      ]
      },
      {
       "speaker": "ククール",
@@ -1813,7 +1816,10 @@ window.PERSONA_HUB_DATA = {
         "アロンソコーチ",
         "アロンソ監督"
        ],
-       "note": "Chami 07-29"
+       "note": "Chami 07-29 / ★2026-10-21 Chami msg 1562453730094358670「あいつは禁止。彼とかにしよ。アロンソコーチは全組織のトップの監督だからリスペクトしましょ」=三人称は「彼」。生成側=kukuru.md L16へピン済。",
+       "forbidden": [
+        "あいつ"
+       ]
       },
       {
        "speaker": "ルカ・モドリッチ",
