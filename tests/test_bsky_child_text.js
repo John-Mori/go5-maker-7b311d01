@@ -33,11 +33,43 @@ eq(f('⇩気になった方はコチラから💕 #PR #漫画', BS), '⇩気に�
 eq(f('', BS), '続きはこちら\nhttps://xdgh3.com/QNcxU', '子の文が空なら従来文');
 eq(f(undefined, BS), '続きはこちら\nhttps://xdgh3.com/QNcxU', '子の文が渡らなければ従来文');
 eq(f('あ'.repeat(290) + '\n\nhttps://x.example/a', BS), '続きはこちら\nhttps://xdgh3.com/QNcxU', '300字超なら従来文(投稿失敗を避ける)');
+// 2026-10-21 インシデント(msg 1562248434251997204): 2本目以降のURLまで作品リンクにして同じ短縮URLが2回出た。
+eq(f('見出し\nhttps://al.fanza.co.jp/?lurl=work\n\nhttps://al.fanza.co.jp/?lurl=sale', BS), '見出し\nhttps://xdgh3.com/QNcxU\n\nhttps://al.fanza.co.jp/?lurl=sale', '作品リンクへ差し替えるのは最初のURLだけ');
+
+console.log('--- 🦋投稿本文(テンプレ)どおりの返信(2026-10-21 インシデント) ---');
+const Core = require(path.join(__dirname, '..', 'js/bluesky-core.js'));
+const makeBody = new Function('window', 'saleLink',
+  "var BSKY_REPLY_TEXT = '続きはこちら';\n" +
+  ['countGraphemes', 'stripAutoBlocks_', 'stripAutoBlocksSafe_', 'hasWorkPH_', 'hasSalePH_', 'fillWorkPH_', 'fillSalePH_', 'bskyReplyFromBody_', 'dupLinkIn_'].map(grab).join('\n') +
+  // セール短縮の取得(ネット)だけ差し替える。埋め方/消し方は本物と同じ(取れなければプレースホルダ語を消す)。
+  "\nfunction finalizeSalePlaceholder_(s) { return Promise.resolve(hasSalePH_(s) ? (saleLink ? fillSalePH_(s, saleLink) : fillSalePH_(s, '\\u0000').split('\\u0000').join('')) : s); }" +
+  '\nreturn { body: bskyReplyFromBody_, dup: dupLinkIn_ };'
+);
+const TPL = '⇩気になった方はコチラから💕 #PR #漫画\n(商品紹介用短縮URL)\n\n⇩オータムセール🌰最大99%OFF！\n(セール用短縮URL)';
+const WORK = 'https://xdgh3.com/Vb3y9', SALE = 'https://xdgh3.com/S4le1';
+const g = makeBody({ BlueskyCore: Core }, SALE);
+const tasks = [
+  g.body(TPL, WORK).then((t) => eq(t, '⇩気になった方はコチラから💕 #PR #漫画\n' + WORK + '\n\n⇩オータムセール🌰最大99%OFF！\n' + SALE, 'テンプレどおり=作品短縮・セール行・セール短縮(足す行なし)')),
+  g.body(TPL.replace(/\n/g, '\r\n'), WORK).then((t) => eq(t.indexOf('⇩オータムセール🌰最大99%OFF！\n' + SALE) > 0, true, 'CRLFの本文でもセール行が残る')),
+  g.body(TPL, WORK).then((t) => eq(g.dup(t), '', 'テンプレどおりの返信に同じURLは無い')),
+  g.body('⇩気になった方はコチラから💕 #PR #漫画\nhttps://x.example/a', WORK).then((t) => eq(t, '', '作品プレースホルダの無い本文は""=子の文へ倒す')),
+  g.body('', WORK).then((t) => eq(t, '', '本文が空なら""')),
+];
+eq(g.dup('a\nxdgh3.com/Vb3y9\n\nhttps://xdgh3.com/Vb3y9'), 'https://xdgh3.com/Vb3y9', '番犬: https有無違いでも同じURLの2回を見つける');
+eq(g.dup('a\n' + WORK + '\n' + SALE), '', '番犬: 別URLは通す');
 
 console.log('--- 配線 ---');
-eq(/out\.replyText = bskyReplyTextOf_\(o\.childText, link\);/.test(src), true, 'ドラフト一続きの返信文は子の文から作る');
+eq(/return bskyReplyFromBody_\(o\.bskyBody, link\)/.test(src) && /out\.replyText = t \|\| bskyReplyTextOf_\(o\.childText, link\);/.test(src), true, 'ドラフト一続きの返信文は🦋投稿本文から作り、無い時だけ子の文');
+eq(/if \(dupLinkIn_\(out\.replyText\)\) throw new Error\('dup-link'\)/.test(src), true, '同じURLが2回入る返信は親ごと出さない');
 const st = fs.readFileSync(path.join(__dirname, '..', 'js/stock.js'), 'utf8');
 // 2026-10-13 Chami msg 1559480072589803612: 子の文は定型文へ。msg 1559679396363636736 以降は子の文欄の2行目を差し替えて使う(見出しが無い時だけ affiPostText)。
-eq(/draftId: meta\.id, childText: childText \}/.test(st) && /core\.withAffiStatusLine\(xv, info\)/.test(st), true, '投稿モードは子の文欄(2行目を差し替え)を子の文として渡す');
-if (fails) { console.log(fails + ' FAIL'); process.exit(1); }
-console.log('all ok');
+eq(/draftId: meta\.id, childText: childText, bskyBody: bskyBody \}/.test(st) && /core\.withAffiStatusLine\(xv, info\)/.test(st), true, '投稿モードは子の文欄(控え)と🦋投稿本文を渡す');
+eq(/var bskyBody = applyPromo_\(masterBody_\(meta\), meta, true\);/.test(st), true, '🦋投稿本文=そのchの投稿本文(masterBody_)・セール案内行は残す');
+const SL = '⇩オータムセール🌰最大99%OFF！';
+eq(Core.resolvePromoTemplate(TPL, { noPromo: true, keepSaleLines: true }).indexOf(SL) > 0, true, '癒やし倉庫(noPromo)でもBluesky返信はセール案内行を残す');
+eq(Core.resolvePromoTemplate(TPL, { noPromo: true }).indexOf(SL), -1, 'Xの子の文(keepSaleLinesなし)は従来どおり外す(v1066)');
+eq(Core.resolvePromoTemplate('見出し\n今だけN%OFF', { noPromo: true, keepSaleLines: true }), '見出し', '作品の割引率(N%)の行はBluesky返信でも外す');
+Promise.all(tasks).then(() => {
+  if (fails) { console.log(fails + ' FAIL'); process.exit(1); }
+  console.log('all ok');
+});

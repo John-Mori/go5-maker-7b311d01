@@ -2263,10 +2263,36 @@
     var t = String(childText || '').replace(/\r\n?/g, '\n').replace(/^\s+|\s+$/g, '');
     var fallback = BSKY_REPLY_TEXT + '\n' + link;
     if (!t) return fallback;
-    var out = /https?:\/\/\S+/.test(t) ? t.replace(/https?:\/\/\S+/g, function () { return link; }) : t + '\n\n' + link;
+    // 差し替えるのは最初のURL(=作品リンク)だけ。2本目以降(セール等)まで作品リンクにすると同じURLが2回出る(2026-10-21インシデント)。
+    var out = /https?:\/\/\S+/.test(t) ? t.replace(/https?:\/\/\S+/, function () { return link; }) : t + '\n\n' + link;
     return countGraphemes(out) > 300 ? fallback : out;
   }
   try { window.Go5BskyReplyTextOf = bskyReplyTextOf_; } catch (e) {}
+  // ★返信文の正=そのchの🦋投稿本文(テンプレ帳を反映した文)そのもの。作品/セールのプレースホルダを、それぞれ
+  //   Bluesky用の作品短縮/セール短縮で埋めるだけで、本文に無い行(新作/準新作の2行目等)は足さない。
+  //   子の文(X用・セール行を落とした文)の中のURLを全部作品リンクへ置き換えていたため、セール行が消えて
+  //   同じ短縮URLが2回出た(Chami 2026-10-21 msg 1562248434251997204「2枚目のようにしてくれって。
+  //   同じ短縮リンク投稿とかありえんでしょ、インシデントです」)。作品プレースホルダが無い本文は''=子の文へ倒す。
+  function bskyReplyFromBody_(body, link) {
+    var cap = stripAutoBlocksSafe_(String(body || '').replace(/\r\n?/g, '\n')).replace(/^\s+|\s+$/g, '');
+    if (!cap || !link || !hasWorkPH_(cap)) return Promise.resolve('');
+    return finalizeSalePlaceholder_(fillWorkPH_(cap, link)).then(function (t) {
+      t = String(t || '').replace(/^\s+|\s+$/g, '');
+      return countGraphemes(t) > 300 ? '' : t;
+    });
+  }
+  try { window.Go5BskyReplyFromBody = bskyReplyFromBody_; } catch (e) {}
+  // 同じURL(https有無は同一視)が2回以上出ていればそのURLを返す。返信を出す前の最後の番犬(上と同じインシデント)。
+  function dupLinkIn_(t) {
+    var seen = {}, dup = '';
+    (String(t || '').match(/(?:https?:\/\/)?[\w.-]+\.[a-z]{2,}\/[^\s)）]+/gi) || []).forEach(function (u) {
+      var k = u.replace(/^https?:\/\//i, '');
+      if (seen[k] && !dup) dup = u;
+      seen[k] = 1;
+    });
+    return dup;
+  }
+  try { window.Go5DupLinkIn = dupLinkIn_; } catch (e) {}
   function replyImageBlob_() {
     if (_replyImgBlobCache) return _replyImgBlobCache;
     // 時限付き(応答が返らないと子の投稿がずっと待ちになる)。失敗/時限は null=画像なしで子を出す。
@@ -2374,10 +2400,13 @@
       var sv = r && (r.shareUrl || r.shortUrl);
       return (sv && ourShortBase(sv)) ? sv : aff; // 短縮失敗=生アフィリンク(印なし)で返信=リンクは生かす
     }, function () { return aff; }).then(function (link) {
-      // ★返信文=ドラフトの子の文(リンクだけBluesky用)。子の文が無い時は「続きはこちら」+作品リンク。
-      out.replyText = bskyReplyTextOf_(o.childText, link);
       if (ourShortBase(link)) out.bskyWorkShortUrl = link;
-      return o.imageBlob ? compressFile(o.imageBlob) : null;
+      // ★返信文=そのchの🦋投稿本文(テンプレ)どおり。作品プレースホルダの無い本文の時だけ子の文(リンクだけBluesky用)。
+      return bskyReplyFromBody_(o.bskyBody, link).then(function (t) {
+        out.replyText = t || bskyReplyTextOf_(o.childText, link);
+        if (dupLinkIn_(out.replyText)) throw new Error('dup-link'); // 同じ短縮URLを2回出す返信は親ごと出さない
+        return o.imageBlob ? compressFile(o.imageBlob) : null;
+      });
     }).then(function (blob) {
       return replyImageBlob_().then(function (replyBlob) {
         return window.BlueskyCore.blueskyPostThread({ identifier: handle, appPassword: appPw, parentText: parentText, replyText: out.replyText, imageBlob: blob, replyImageBlob: replyBlob,

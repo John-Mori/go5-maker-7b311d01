@@ -592,7 +592,9 @@
         continue;                             // %表示のとき価格専用行(¥N)は行ごと削除
       }
       if (noDiscount && /N\s*[%％]/.test(line)) continue; // 割引0%=N%を含む行を丸ごと削除(①)
-      if (opts.noPromo && /N\s*[%％]|[%％]\s*(?:オフ|OFF)/.test(line)) continue; // 販促なし=接頭辞なしの割引行も外す
+      // 販促なし=接頭辞なしの割引行も外す。opts.keepSaleLines(Bluesky返信)の時だけセール案内の行(例「⇩オータムセール🌰最大99%OFF！」)は残す
+      //   (2026-10-21 インシデント msg 1562248434251997204。Xの子の文は v1066 のまま外す)。
+      if (opts.noPromo && (/N\s*[%％]/.test(line) || (/[%％]\s*(?:オフ|OFF)/.test(line) && !(opts.keepSaleLines && /セール|sale/i.test(line))))) continue;
       out.push(line);
     }
     var res = out.join('\n');

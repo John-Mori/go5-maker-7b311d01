@@ -1035,6 +1035,52 @@ test.describe('ドラフト軽量ページ', () => {
     const call = await page.evaluate(() => window.__e2eBskyCalls[0]);
     expect(call.childText, '送信直前の#draftXTextと食い違う子の文が投稿された').toBe(shownText);
   });
+
+  // 2026-10-21 インシデント(msg 1562248434251997204): Bluesky返信にセール行が無く、同じ短縮URLが2回出た。
+  //   返信の本文は🦋投稿タブの本文(テンプレ)を正とし、作品とセールのプレースホルダを両方保ったまま渡す。
+  test('ドラフト投稿モードのBluesky返信は🦋投稿本文(セール行つき)を渡す', async ({ page }) => {
+    const draftId = 'stk_e2e_bsky_tpl_body';
+    const tpl = '⇩気になった方はコチラから💕 #PR #漫画\n(商品紹介用短縮URL)\n\n⇩オータムセール🌰最大99%OFF！\n(セール用短縮URL)';
+    await page.goto('Stock.html', { waitUntil: 'domcontentloaded' });
+    await page.evaluate(({ draftId, tpl }) => {
+      localStorage.setItem('current_account', 'acc3');
+      localStorage.setItem('bsky_text__acc3', tpl);
+      localStorage.setItem('go5_stock_meta', JSON.stringify([{
+        id: draftId, ts: Date.now(), addedAt: Date.now(), account: 'acc3',
+        label: 'テンプレ返信回帰', title: 'テンプレ返信回帰', author: 'test',
+        bskyText: tpl, affiliateUrl: '', workUrl: '', videoName: 'test.mp4',
+        videoId: 'vid_e2e_bsky_tpl_body', attrs: {}, priceInfo: { releaseDate: '2026-01-01', pct: 0 },
+      }]));
+    }, { draftId, tpl });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.evaluate(() => {
+      window.__e2eBskyCalls = [];
+      window.Go5DraftBskyThread = function (args) {
+        window.__e2eBskyCalls.push(args);
+        return Promise.resolve({ parentUrl: 'https://bsky.example/post/parent', replyUrl: 'https://bsky.example/post/reply' });
+      };
+      window.Go5FreshWorkInfo = function () { return Promise.resolve({ releaseDate: '2026-01-01', pct: 0 }); };
+      if (window.Go5Sync) window.Go5Sync.fetchBlobR2At = function () { return Promise.resolve(null); };
+    });
+    await page.locator('.stk-mode[data-id="' + draftId + '"]').click();
+    await expect(page.locator('#draftBskyPost')).toBeVisible();
+    page.on('dialog', (dialog) => dialog.accept());
+    await page.locator('#draftBskyPost').click();
+    await expect.poll(() => page.evaluate(() => window.__e2eBskyCalls.length)).toBe(1);
+    const call = await page.evaluate(() => window.__e2eBskyCalls[0]);
+    expect(call.bskyBody, '🦋投稿本文が返信へ渡っていない').toContain('⇩オータムセール🌰最大99%OFF！');
+    expect(call.bskyBody).toContain('(商品紹介用短縮URL)');
+    expect(call.bskyBody).toContain('(セール用短縮URL)');
+    // 本物の組み立て(Go5BskyReplyFromBody)へ通し、作品とセールが別URLで埋まり、同じURLが2回出ないこと。
+    const reply = await page.evaluate((body) => {
+      return window.Go5BskyReplyFromBody ? window.Go5BskyReplyFromBody(body, 'https://xdgh3.com/e2eWork') : Promise.resolve(null);
+    }, call.bskyBody);
+    if (reply !== null) {
+      expect(reply.split('\n')[1]).toBe('https://xdgh3.com/e2eWork');
+      expect(reply).toContain('⇩オータムセール🌰最大99%OFF！');
+      expect(await page.evaluate((t) => window.Go5DupLinkIn(t), reply)).toBe('');
+    }
+  });
 });
 
 // 作品・セールのDMM/FANZA行きは短縮しない(Chami決定 2026-10-18 5Sec軍議 msg 1561272541387948148)。

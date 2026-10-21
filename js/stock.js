@@ -3256,8 +3256,10 @@
     return { type: type, price: price, pct: pct, noPromo: acc === 'acc3' };  // DLサイト便は割引率を出さない
   }
   // 販促テンプレ(%:/¥: 候補行・N%/N円/¥N・%表示時の価格行削除)を解決する。純粋関数は bluesky-core 側。(Chami依頼2026-08-03①②)
-  function applyPromo_(text, meta) {
-    if (window.BlueskyCore && window.BlueskyCore.resolvePromoTemplate) return window.BlueskyCore.resolvePromoTemplate(text, promoInfo_(meta));
+  function applyPromo_(text, meta, keepSaleLines) {
+    var opts = promoInfo_(meta);
+    if (keepSaleLines) opts.keepSaleLines = true; // Bluesky返信はセール案内の行を残す(2026-10-21 インシデント)
+    if (window.BlueskyCore && window.BlueskyCore.resolvePromoTemplate) return window.BlueskyCore.resolvePromoTemplate(text, opts);
     return String(text || '');
   }
   // 投稿モードのX本文を組む＝bluesky側の合成(短縮URL置換等)→販促テンプレ解決 の順で通す。
@@ -3593,7 +3595,10 @@
       // 子の文欄(見出し行あり)ならその文の2行目を投稿直前の情報で差し替えて使う=欄の見た目と投稿が一致する(Chami msg 1559679396363636736)。
       var xv = String(($('draftXText') || {}).value || ''), info = got[1] || meta.priceInfo || null;
       var childText = (core && core.withAffiStatusLine && core.withAffiStatusLine(xv, info)) || ((core && core.affiPostText) ? core.affiPostText(info, '') : xv);
-      return window.Go5DraftBskyThread({ account: meta.account || 'acc1', parentText: parentText, workLink: aff, imageBlob: blob || null, draftId: meta.id, childText: childText });
+      // bskyBody=そのchの🦋投稿本文(テンプレ)。返信はこれを正にし、作品/セールのプレースホルダだけBluesky用短縮で埋める
+      //   (Chami 2026-10-21 msg 1562248434251997204「2枚目のようにしてくれって」)。childTextは本文にプレースホルダが無い時の控え。
+      var bskyBody = applyPromo_(masterBody_(meta), meta, true);
+      return window.Go5DraftBskyThread({ account: meta.account || 'acc1', parentText: parentText, workLink: aff, imageBlob: blob || null, draftId: meta.id, childText: childText, bskyBody: bskyBody });
     }).then(function (r) {
       mergeDraftPost_(meta.id, { bskyParentUrl: r.parentUrl, bskyReplyUrl: r.replyUrl, bskyWorkShortUrl: r.bskyWorkShortUrl, bskyParentShortUrl: r.parentShortUrl, bskyReplyShortUrl: r.replyShortUrl });
       if (_modalMeta === meta) { setDescUrlSlot_(r.replyShortUrl || r.replyUrl || r.parentShortUrl || r.parentUrl); saveDraftPost_(); }
@@ -3607,6 +3612,7 @@
                     'parent-too-long': '親の本文(作品リンク行を除く)が300文字を超えています。短くしてください。',
                     'empty-parent': '親投稿の本文(画像の上の欄)が空です。', 'no-work-link': 'このドラフトに作品URLがありません。',
                     'no-core': '投稿モジュール未読込。ページを再読み込みしてください。',
+                    'dup-link': '返信に同じリンクが2回入るため止めました(何も投稿していません)。🦋投稿タブの本文とセールの選択を確認してください。',
                     'reply-pending': '親は投稿できたけど、返信(作品リンク)が失敗しました。15秒後に自動で返信だけ出し直します。画面を閉じても、次にアプリを開いた時に出します。' };
       var msg = known[m] || esc(window.Go5FriendlyBskyError ? window.Go5FriendlyBskyError(m) : m);
       say('⚠️ 投稿できませんでした：<br>' + msg);
