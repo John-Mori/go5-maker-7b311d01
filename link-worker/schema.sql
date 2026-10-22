@@ -19,3 +19,18 @@ CREATE TABLE IF NOT EXISTS short_click_daily (
   clicks INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY(code, day)
 );
+
+-- 1クリックずつの記録(UA・リファラ・国・ASN・判定)。IPは保存しない。30日より古い行はWorkerが時々掃除する。
+-- verdict: bot=既知クローラ(空HTMLで弾いた) / self=自分の端末(数えない) / noua=UA無しで302(現行は数えている) / counted=人として数えた
+CREATE TABLE IF NOT EXISTS short_click_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts TEXT NOT NULL,
+  code TEXT NOT NULL,
+  verdict TEXT NOT NULL,
+  ua TEXT,
+  referer TEXT,
+  country TEXT,
+  asn INTEGER,
+  host TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_short_click_log_ts ON short_click_log(ts);

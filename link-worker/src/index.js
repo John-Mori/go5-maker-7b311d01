@@ -32,6 +32,7 @@ import {
   getClicks,
   getLink,
   listLinks,
+  logClick,
   putLinkIfAbsent,
 } from "./storage.mjs";
 
@@ -182,6 +183,16 @@ async function handleRedirect(code, env, ctx, request) {
   // 既知クローラは数えない（X投稿時の Twitterbot カード生成クロール等）。
   const ua = request.headers.get("User-Agent") || "";
   const isBot = isBotUA(ua);
+  // 1件ずつの記録(UA・リファラ・国・ASN・判定)。IPは残さない。判定: bot=空HTMLで弾いた / self=自分の端末(数えない)
+  //   / noua=UA無しで302(現行は数えている) / counted=人として数えた。
+  const verdict = (ua && isBot) ? "bot" : (optedOut || markSelf) ? "self" : !ua ? "noua" : "counted";
+  if (ctx && typeof ctx.waitUntil === "function") {
+    const cf = request.cf || {};
+    ctx.waitUntil(logClick(env, {
+      code, verdict, ua, referer: request.headers.get("Referer") || "",
+      country: cf.country || "", asn: cf.asn, host: reqUrl.hostname,
+    }));
+  }
   // ★SNSクローラ(Twitterbot等)には 302 で FANZA へ通さず、OGP/カード用メタを一切持たない空HTMLを返す。
   //   → X等の投稿にリンクプレビュー(埋め込みカード)を出さない(Chami依頼2026-08-09「最悪出ても埋め込みは表示しないように・冗長」)。
   //   これまでは 302→FANZA を辿らせていたので FANZA の OGP がカード化して冗長に見えていた。

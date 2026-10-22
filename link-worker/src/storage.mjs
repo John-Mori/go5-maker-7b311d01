@@ -32,6 +32,49 @@ async function recordDailyClick_(env, code) {
   ).bind(code, day).run();
 }
 
+// ---- 1クリックずつの記録(Chami 2026-10-22「利益が出ん。なんで?」の真因切り分け用)----
+//   日別集計(short_click_daily)・累計(short_links.clicks)とは別テーブル。数字の数え方は変えない。
+//   IPは保存しない。弾いたbotも残す(何が来ているかを見るため)。古い行は CLICK_LOG_KEEP_DAYS で掃除する。
+export const CLICK_LOG_KEEP_DAYS = 30;
+let logSchemaReady_;
+function jstStamp_(ms = Date.now()) {
+  return new Date(ms + 9 * 60 * 60 * 1000).toISOString().slice(0, 19).replace("T", " ");
+}
+async function ensureLogSchema_(env) {
+  if (!env.LINKS_DB) return false;
+  if (!logSchemaReady_) {
+    logSchemaReady_ = env.LINKS_DB.batch([
+      env.LINKS_DB.prepare(
+        "CREATE TABLE IF NOT EXISTS short_click_log (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, code TEXT NOT NULL, verdict TEXT NOT NULL, ua TEXT, referer TEXT, country TEXT, asn INTEGER, host TEXT)"
+      ),
+      env.LINKS_DB.prepare("CREATE INDEX IF NOT EXISTS idx_short_click_log_ts ON short_click_log(ts)"),
+    ]).then(() => true).catch(() => false);
+  }
+  const ready = await logSchemaReady_;
+  if (!ready) logSchemaReady_ = null; // 一過性のD1失敗を次のクリックで再試行する
+  return ready;
+}
+const cut_ = (s, n) => (s == null ? null : String(s).slice(0, n));
+export async function logClick(env, rec, nowMs = Date.now(), rand = Math.random) {
+  try {
+    if (!(await ensureLogSchema_(env))) return;
+    const asn = Number(rec.asn);
+    await env.LINKS_DB.prepare(
+      "INSERT INTO short_click_log(ts,code,verdict,ua,referer,country,asn,host) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)"
+    ).bind(
+      jstStamp_(nowMs), String(rec.code), String(rec.verdict),
+      cut_(rec.ua, 400), cut_(rec.referer, 400), cut_(rec.country, 8),
+      rec.asn != null && rec.asn !== "" && Number.isFinite(asn) ? asn : null,
+      cut_(rec.host, 64)
+    ).run();
+    // 掃除は約100回に1回だけ(毎クリックで消すと書き込みが倍になる)。
+    if (rand() < 0.01) {
+      await env.LINKS_DB.prepare("DELETE FROM short_click_log WHERE ts < ?1")
+        .bind(jstStamp_(nowMs - CLICK_LOG_KEEP_DAYS * 86400000)).run();
+    }
+  } catch (e) { /* 記録の失敗はリダイレクトにも集計にも影響させない */ }
+}
+
 async function kvGet_(env, key) {
   if (!env.LINKS) return null;
   try { return await env.LINKS.get(key); } catch (e) { return null; }
