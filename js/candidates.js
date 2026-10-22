@@ -165,6 +165,18 @@
   function hideEverPostedDecide_(hideAcc1, hideAcc2, postedAcc1, postedAcc2) {
     return (!!hideAcc1 && !!postedAcc1) || (!!hideAcc2 && !!postedAcc2);
   }
+  // 癒しの非表示=従来の3日クールタイム。旧「月詠み✓/宵桜艶帖✓」(acc1/acc2)の保存値もONとして読む。
+  function hideCooldownOnOf_(hp) {
+    return !!(hp && (hp.acc1 || hp.acc2 || hp.acc3));
+  }
+  // 「癒し/月/桜 × 非表示/表示」ボタン1つ分の保存値を返す純関数。押すたびに反転させず、押した側の状態へ揃える。
+  function hidePostedApply_(hp, ch, hide) {
+    var next = {}; for (var k in (hp || {})) next[k] = hp[k];
+    if (ch === 'acc3') { next.acc3 = !!hide; if (!hide) { next.acc1 = false; next.acc2 = false; } }
+    else if (ch === 'acc1') next.allAcc1 = !!hide;
+    else if (ch === 'acc2') next.allAcc2 = !!hide;
+    return next;
+  }
   // ★画像の同一性判定(動画作成用モーダルの「通常/使用済み/除外」マーク機能)。djb2ハッシュ。
   //   js/candidates.js と KouhoTeian.html に同一実装を置く(2ファイル一致必須・どちらか片方だけ直さない)。
   function imgHash_(s) { s = String(s || ''); var h = 5381, i = s.length; while (i) { h = ((h * 33) ^ s.charCodeAt(--i)) >>> 0; } return h.toString(36); }
@@ -229,7 +241,7 @@
   // Node(テスト)からは純関数 buildPostedIndex_ だけを取り出す。DOM/localStorage を触る本体は実行しない。
   //   関数宣言は巻き上げられるので、本体の定義位置より前でも参照できる(tests/test_posted_index.js)。
   if (typeof module !== 'undefined' && module.exports && typeof document === 'undefined') {
-    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_, refSlotDecide_: refSlotDecide_, refStallDecide_: refStallDecide_, refRetryPlan_: refRetryPlan_, histDirectRetryPlan_: histDirectRetryPlan_, noMaterialHideDecide_: noMaterialHideDecide_, reclaimClassify_: reclaimClassify_, isR2Marker_: isR2Marker_, shouldResolveR2Marker_: shouldResolveR2Marker_, candTextMergeIdb_: candTextMergeIdb_, candListMergeIdb_: candListMergeIdb_, durableVerdict_: durableVerdict_, imgHash_: imgHash_, imgSlotMarkKey_: imgSlotMarkKey_, imgUrlHashMarkKey_: imgUrlHashMarkKey_, imgMarkStateFromMap_: imgMarkStateFromMap_, imgMarkDateFromMap_: imgMarkDateFromMap_, remapSlotMarksForImages_: remapSlotMarksForImages_, shouldDeferCandAdd_: shouldDeferCandAdd_, canReadHistPrefix_: canReadHistPrefix_, candidateKindOf_: candidateKindOf_, candidateKindPass_: candidateKindPass_, hideEverPostedDecide_: hideEverPostedDecide_, candidateTodayDay_: candidateTodayDay_, candidateTodayChecked_: candidateTodayChecked_ };
+    module.exports = { buildPostedIndex_: buildPostedIndex_, usableCandidatePrefetch_: usableCandidatePrefetch_, modalIsOpen_: modalIsOpen_, candTextOf_: candTextOf_, candTextSave_: candTextSave_, candTextNonEmpty_: candTextNonEmpty_, refSlotDecide_: refSlotDecide_, refStallDecide_: refStallDecide_, refRetryPlan_: refRetryPlan_, histDirectRetryPlan_: histDirectRetryPlan_, noMaterialHideDecide_: noMaterialHideDecide_, reclaimClassify_: reclaimClassify_, isR2Marker_: isR2Marker_, shouldResolveR2Marker_: shouldResolveR2Marker_, candTextMergeIdb_: candTextMergeIdb_, candListMergeIdb_: candListMergeIdb_, durableVerdict_: durableVerdict_, imgHash_: imgHash_, imgSlotMarkKey_: imgSlotMarkKey_, imgUrlHashMarkKey_: imgUrlHashMarkKey_, imgMarkStateFromMap_: imgMarkStateFromMap_, imgMarkDateFromMap_: imgMarkDateFromMap_, remapSlotMarksForImages_: remapSlotMarksForImages_, shouldDeferCandAdd_: shouldDeferCandAdd_, canReadHistPrefix_: canReadHistPrefix_, candidateKindOf_: candidateKindOf_, candidateKindPass_: candidateKindPass_, hideEverPostedDecide_: hideEverPostedDecide_, hideCooldownOnOf_: hideCooldownOnOf_, hidePostedApply_: hidePostedApply_, candidateTodayDay_: candidateTodayDay_, candidateTodayChecked_: candidateTodayChecked_ };
     return;
   }
   function $(id) { return document.getElementById(id); }
@@ -730,7 +742,7 @@
   function isHiddenByPosted_(it) {
     if (!it) return false;
     if (isHiddenByEverPosted_(it)) return true;
-    if (!_hidePosted.acc1 && !_hidePosted.acc2) return false; // どちらのトグルもOFF=隠さない
+    if (!hideCooldownOnOf_(_hidePosted)) return false; // 癒し非表示がOFF=隠さない
     if (isHiddenByNoMaterial_(it)) return true; // ★複数画像がない=投稿できない作品も、この非表示トグルON時は隠す(Chami 2026-08-24)
     // ★D1権威(生成側と同一ソース)の直近3日/直近10件にヒットしたら隠す。取得できていれば ts再構築に依らず確実。
     if (isInD1Set_(it, d1Within3dCids_())) return true;
@@ -745,7 +757,7 @@
   function isHiddenByPostedForAll_(it) {
     if (!it) return false;
     if (isHiddenByEverPosted_(it)) return true;
-    if (!_hidePosted.acc1 && !_hidePosted.acc2) return false;
+    if (!hideCooldownOnOf_(_hidePosted)) return false;
     if (isInD1Set_(it, d1Within3dCids_())) return true;
     if (isInD1Set_(it, d1RecentTop10Cids_())) return true;
     var last = lastPostedTsAnyCh_(it);
@@ -769,27 +781,42 @@
         '<label><input id="candFilterBooks" type="checkbox"' + (_filterBooks ? ' checked' : '') + '><span>books</span></label>' +
         '<label class="cand-filter-today-label"><input id="candFilterToday" type="checkbox"' + (_filterToday ? ' checked' : '') + '><span>今日</span></label>' +
       '</div>' +
-      '<span class="cand-kind-posted-spacer"></span>' +
-      '<button id="candHidePosted1" type="button" aria-pressed="' + (!!_hidePosted.acc1) + '" class="cand-hidep-toggle' + (_hidePosted.acc1 ? ' active' : '') + '" title="どちらかのchへ投稿して3日以内の作品(クールタイム中)と、動画生成用の画像が2枚未満で複数画像がなく投稿できない作品を一覧から隠す。クールタイムは3日経つと再表示され、もう片方のchへ回せます">' + esc('月詠み') + '<span class="cand-hide-check" aria-hidden="true">✓</span>非表示</button>' +
-      '<button id="candHidePosted2" type="button" aria-pressed="' + (!!_hidePosted.acc2) + '" class="cand-hidep-toggle' + (_hidePosted.acc2 ? ' active' : '') + '" title="どちらかのchへ投稿して3日以内の作品(クールタイム中)と、動画生成用の画像が2枚未満で複数画像がなく投稿できない作品を一覧から隠す。クールタイムは3日経つと再表示され、もう片方のchへ回せます">' + esc('宵桜艶帖') + '<span class="cand-hide-check" aria-hidden="true">✓</span>非表示</button>' +
     '</div>' +
-    '<div class="cand-hide-all-row" role="group" aria-label="チャンネル別の投稿済み作品を完全非表示">' +
-      '<button id="candHideAll1" type="button" aria-pressed="' + (!!_hidePosted.allAcc1) + '" class="cand-hidep-toggle cand-hideall-toggle' + (_hidePosted.allAcc1 ? ' active' : '') + '" title="月詠みで一度でも投稿した作品を、投稿日に関係なく一覧から隠す"><span class="cand-hide-check" aria-hidden="true">✓</span>月詠み完全非表示</button>' +
-      '<button id="candHideAll2" type="button" aria-pressed="' + (!!_hidePosted.allAcc2) + '" class="cand-hidep-toggle cand-hideall-toggle' + (_hidePosted.allAcc2 ? ' active' : '') + '" title="宵桜艶帖で一度でも投稿した作品を、投稿日に関係なく一覧から隠す"><span class="cand-hide-check" aria-hidden="true">✓</span>宵桜艶帖完全非表示</button>' +
+    // 癒し=従来の3日クールタイム非表示 / 月・桜=一度でも投稿した作品の非表示(Chami msg 1562695089015492658)。
+    '<div class="cand-hide-grid" role="group" aria-label="チャンネル別の非表示と表示">' +
+      '<div class="cand-hide-all-row">' + HIDE_CH_.map(function (c) { return hideChButtonHtml_(c, true); }).join('') + '</div>' +
+      '<div class="cand-hide-all-row">' + HIDE_CH_.map(function (c) { return hideChButtonHtml_(c, false); }).join('') + '</div>' +
     '</div>';
   }
-  // 通常の3日非表示と、チャンネル別の全履歴非表示を同じ同期設定へ保存する。
+  var HIDE_CH_ = [
+    { acc: 'acc3', label: '癒し', title: 'どれかのchへ投稿して3日以内の作品(クールタイム中)と、動画生成用の画像が2枚未満で投稿できない作品' },
+    { acc: 'acc1', label: '月', title: '月詠み色恋劇場で一度でも投稿した作品(投稿日に関係なく)' },
+    { acc: 'acc2', label: '桜', title: '宵桜艶帖で一度でも投稿した作品(投稿日に関係なく)' }
+  ];
+  function hideChIsOn_(acc) {
+    return acc === 'acc3' ? hideCooldownOnOf_(_hidePosted) : !!_hidePosted[acc === 'acc1' ? 'allAcc1' : 'allAcc2'];
+  }
+  function hideChButtonHtml_(c, hide) {
+    var on = hideChIsOn_(c.acc) === hide;
+    return '<button type="button" data-hide-ch="' + c.acc + '" data-hide-val="' + (hide ? 1 : 0) + '" aria-pressed="' + on + '"' +
+      ' class="cand-hidep-toggle cand-hidech-' + c.acc + (on ? ' active' : '') + '" title="' + esc(c.title + (hide ? 'を一覧から隠す' : 'も一覧に出す')) + '">' +
+      esc(c.label + (hide ? '非表示' : '表示')) + '</button>';
+  }
+  // 押した側の状態へ揃えて同期設定へ保存し、同じchの「非表示/表示」両方の見た目を更新する。
   function wireHidePostedButtons_(rerender) {
-    var b1 = $('candHidePosted1'), b2 = $('candHidePosted2'), a1 = $('candHideAll1'), a2 = $('candHideAll2');
-    function toggle_(button, key) {
-      if (!button) return;
+    var btns = document.querySelectorAll('.cand-hide-grid [data-hide-ch]');
+    Array.prototype.forEach.call(btns, function (button) {
       button.addEventListener('click', function () {
-        _hidePosted[key] = !_hidePosted[key]; saveHidePosted_();
-        this.classList.toggle('active', !!_hidePosted[key]); this.setAttribute('aria-pressed', String(!!_hidePosted[key]));
+        var acc = this.getAttribute('data-hide-ch'), hide = this.getAttribute('data-hide-val') === '1';
+        if (hideChIsOn_(acc) === hide) return;
+        _hidePosted = hidePostedApply_(_hidePosted, acc, hide); saveHidePosted_();
+        Array.prototype.forEach.call(btns, function (b) {
+          var on = hideChIsOn_(b.getAttribute('data-hide-ch')) === (b.getAttribute('data-hide-val') === '1');
+          b.classList.toggle('active', on); b.setAttribute('aria-pressed', String(on));
+        });
         _candPageByTab[_activeTab] = 1; rerender();
       });
-    }
-    toggle_(b1, 'acc1'); toggle_(b2, 'acc2'); toggle_(a1, 'allAcc1'); toggle_(a2, 'allAcc2');
+    });
   }
   function wireKindFilter_(rerender) {
     var d = $('candFilterDoujin'), b = $('candFilterBooks'), t = $('candFilterToday');
@@ -4829,7 +4856,7 @@
       var wrap = $('candPageWrap'); if (wrap) wrap.setAttribute('aria-busy', 'true');
       var seq = ++_allLoadSeq; // 最後に出した読み込みだけを描く(条件を変える前の遅い返事で絞った一覧を上書きしない)
       catalogPage_({ sort: _sort, page: page, limit: size, q: searchQueryRaw_(_workSearchByTab.all || ''), sale: _filterSale ? 1 : 0,
-        priceMax: _priceMax || 0, kind: candidateKindQuery_() || 'all', hideRecent: (_hidePosted.acc1 || _hidePosted.acc2) ? 1 : 0,
+        priceMax: _priceMax || 0, kind: candidateKindQuery_() || 'all', hideRecent: hideCooldownOnOf_(_hidePosted) ? 1 : 0,
         hidePostedAcc1: _hidePosted.allAcc1 ? 1 : 0, hidePostedAcc2: _hidePosted.allAcc2 ? 1 : 0 }, function (j) {
         if (seq !== _allLoadSeq) return;
         if (wrap) wrap.removeAttribute('aria-busy');
@@ -6360,7 +6387,7 @@
     _candRepaint_ = paintMainPage_; _candRepaintTab_ = tabId;
     // ★外枠(件数見出し・検索欄・表示数セレクタ・ページ入れ物)は、並び順/絞り込み/表示数が変わらない限り
     //   作り直さない=検索フォーカスもカードのDOMも保つ。並び順や非表示切替など見出しが変わる操作の時だけ組み直す。
-    var stateSig = tabId + '|' + _sort + '|' + (_showHidden ? 1 : 0) + '|' + (_filterSale ? 1 : 0) + '|' + (_filterDoujin ? 1 : 0) + '|' + (_filterBooks ? 1 : 0) + '|' + (_filterToday ? 1 : 0) + '|' + (_hidePosted.acc1 ? 1 : 0) + '|' + (_hidePosted.acc2 ? 1 : 0) + '|' + (_hidePosted.allAcc1 ? 1 : 0) + '|' + (_hidePosted.allAcc2 ? 1 : 0) + '|' + _priceMax;
+    var stateSig = tabId + '|' + _sort + '|' + (_showHidden ? 1 : 0) + '|' + (_filterSale ? 1 : 0) + '|' + (_filterDoujin ? 1 : 0) + '|' + (_filterBooks ? 1 : 0) + '|' + (_filterToday ? 1 : 0) + '|' + (hideCooldownOnOf_(_hidePosted) ? 1 : 0) + '|' + (_hidePosted.allAcc1 ? 1 : 0) + '|' + (_hidePosted.allAcc2 ? 1 : 0) + '|' + _priceMax;
     var shellReady = (el._go5CandState === stateSig && document.getElementById('candCardList'));
     if (!shellReady) {
       var salesMiss = missingCount(salesTargetCids_(arr));

@@ -20,7 +20,7 @@ class MemoryKv {
 }
 
 const require = createRequire(import.meta.url);
-const { candidateKindOf_, candidateKindPass_, hideEverPostedDecide_ } = require("../js/candidates.js");
+const { candidateKindOf_, candidateKindPass_, hideEverPostedDecide_, hideCooldownOnOf_, hidePostedApply_ } = require("../js/candidates.js");
 const doujinItem = { cid: "d_kind_1", url: "https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_kind_1/" };
 const booksItem = { cid: "b_kind_1", url: "https://book.dmm.com/detail/b_kind_1/" };
 assert.equal(candidateKindOf_(doujinItem), "同人");
@@ -39,6 +39,17 @@ assert.equal(hideEverPostedDecide_(false, false, true, true), false, "完全非�
 assert.equal(hideEverPostedDecide_(true, false, true, false), true, "月詠み投稿済みを月詠み完全非表示で隠す");
 assert.equal(hideEverPostedDecide_(true, false, false, true), false, "別チャンネルの投稿だけでは隠さない");
 assert.equal(hideEverPostedDecide_(false, true, false, true), true, "宵桜艶帖投稿済みを宵桜艶帖完全非表示で隠す");
+assert.equal(hideCooldownOnOf_({ acc1: true }), true, "旧「月詠み✓非表示」の保存値は癒し非表示ONとして読む");
+assert.equal(hideCooldownOnOf_({ allAcc1: true, allAcc2: true }), false, "月・桜の非表示は3日クールタイムを入れない");
+let hp = hidePostedApply_({ acc1: true, acc2: true }, "acc3", false);
+assert.equal(hideCooldownOnOf_(hp), false, "癒し表示で旧キーも含めて3日非表示を外す");
+hp = hidePostedApply_(hp, "acc3", true);
+assert.equal(hideCooldownOnOf_(hp), true, "癒し非表示で3日非表示に戻す");
+hp = hidePostedApply_(hidePostedApply_(hp, "acc1", true), "acc1", true);
+assert.equal(hp.allAcc1, true, "月非表示は2回押しても反転しない");
+assert.equal(hidePostedApply_(hp, "acc1", false).allAcc1, false, "月表示で戻す");
+assert.equal(hidePostedApply_(hp, "acc2", true).allAcc2, true, "桜非表示");
+assert.equal(hidePostedApply_(hp, "acc2", true).acc3, true, "桜を押しても癒しは変えない");
 const origin = "https://john-mori.github.io";
 const kv = new MemoryKv();
 const env = { FANZA_KV: kv, USE_D1: "off", SHARED_SECRET: "public-test", ADMIN_SECRET: "admin-test", ALLOWED_ORIGIN: origin };
@@ -58,7 +69,7 @@ const candidateSource = fs.readFileSync(new URL("../js/candidates.js", import.me
 assert.match(candidateSource, /var PAGESIZE_DEF = 20/, "全候補の既定表示数は20件");
 assert.match(candidateSource, /id="candWorkSearchRun"/, "全候補検索は入力完了後の検索ボタンで実行");
 assert.match(candidateSource, /\/api\/candidate-catalog\?/, "全候補はページ単位のWorker APIを使う");
-assert.match(candidateSource, /hideRecent: \(_hidePosted\.acc1 \|\| _hidePosted\.acc2\) \? 1 : 0/, "all-candidates sends the posted cooldown filter before paging");
+assert.match(candidateSource, /hideRecent: hideCooldownOnOf_\(_hidePosted\) \? 1 : 0/, "all-candidates sends the posted cooldown filter before paging");
 assert.match(candidateSource, /hidePostedAcc1: _hidePosted\.allAcc1 \? 1 : 0, hidePostedAcc2: _hidePosted\.allAcc2 \? 1 : 0/, "全履歴のチャンネル別非表示をページング前に送る");
 assert.match(candidateSource, /<span>books<\/span>/, "候補種別の表記はbooksに固定");
 assert.match(candidateSource, /kind: candidateKindQuery_\(\) \|\| 'all'/, "all-candidates sends the category filter before paging");

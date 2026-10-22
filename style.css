@@ -327,7 +327,10 @@ canvas#cv{width:auto;height:auto;max-width:100%;max-height:52vh;aspect-ratio:9/1
 .cand-kind-filter label{display:flex;align-items:center;gap:2px;margin:0;color:var(--ink);font-size:11px;font-weight:700;white-space:nowrap;cursor:pointer;}
 .cand-kind-filter input{width:15px;height:15px;flex:0 0 15px;margin:0;accent-color:var(--accent);}
 .cand-kind-filter .cand-filter-today-label span{font-size:1.2em;}
-.cand-hide-all-row{display:flex;justify-content:flex-end;align-items:center;gap:6px;margin-top:7px;flex-wrap:nowrap;}
+/* 「癒し/月/桜 × 非表示/表示」を2行3列で縦にそろえる。列幅は文字量なり(右寄せ・横いっぱいに広げない)。 */
+.cand-hide-grid{display:grid;grid-template-columns:repeat(3,auto);justify-content:end;gap:6px;margin-top:7px;}
+.cand-hide-all-row{display:contents;}
+.cand-hide-grid .cand-hidep-toggle{font-size:11px;padding:6px 8px;}
 .cand-tabs{display:flex;gap:6px;padding:10px 2px 0;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;border-bottom:1px solid var(--line);}
 .cand-tabs::-webkit-scrollbar{display:none;}
 .cand-tab{flex:0 0 auto;width:auto;white-space:nowrap;font-family:inherit;font-size:13.5px;font-weight:700;background:var(--card);color:var(--sub);border:1px solid var(--line);border-radius:12px 12px 0 0;padding:9px 13px;cursor:pointer;margin-top:0;}
@@ -962,18 +965,13 @@ html[data-account="acc3"] .acct-cta{background:var(--cta-to);color:var(--cta-ink
 /* アカウント別「投稿済みを非表示」トグル：OFF=クリーム地の枠線 / ON=オレンジ地・黒文字 */
 .cand-hidep-toggle{width:auto;margin:0;flex:0 0 auto;font-size:10px;padding:6px 2px;border-radius:8px;border:1px solid #d8c9a6;background:#fffef9;color:#5a4a2a;font-weight:700;cursor:pointer;line-height:1.1;white-space:nowrap;}
 .cand-hidep-toggle.active{background:#e8892b;border-color:#e8892b;color:#111;}
-/* 「◯◯✔非表示」トグルも各chのテーマ色。縁取り=そのch色 / ON=そのchの塗り(Chami 2026-08-11)。 */
-#candHidePosted1{border-color:#2C4C8F;color:#2C4C8F;}
-#candHidePosted1.active{background:#2C4C8F;border-color:#2C4C8F;color:#FFD65C;}
-#candHidePosted2{border-color:#7A3F8F;color:#7A3F8F;}
-#candHidePosted2.active{background:#4A2A6B;border-color:#4A2A6B;color:#FF7BA8;}
-#candHideAll1{border-color:#2C4C8F;color:#2C4C8F;}
-#candHideAll1.active{background:#2C4C8F;border-color:#2C4C8F;color:#FFD65C;}
-#candHideAll2{border-color:#7A3F8F;color:#7A3F8F;}
-#candHideAll2.active{background:#4A2A6B;border-color:#4A2A6B;color:#FF7BA8;}
-.cand-hide-check{display:inline-block;color:inherit;font-family:Arial,sans-serif;font-weight:900;font-style:normal;line-height:1;margin:0 1px;}
-.cand-hideall-toggle .cand-hide-check{opacity:.24;margin-right:3px;}
-.cand-hideall-toggle.active .cand-hide-check{opacity:1;}
+/* 非表示/表示ボタンも各chのテーマ色。縁取り=そのch色 / 今の状態側=そのchの塗り(Chami 2026-08-11)。 */
+.cand-hidech-acc3{border-color:#d9a91c;color:#8a6200;}
+.cand-hidech-acc3.active{background:#c9960f;border-color:#c9960f;color:#fff;}
+.cand-hidech-acc1{border-color:#2C4C8F;color:#2C4C8F;}
+.cand-hidech-acc1.active{background:#2C4C8F;border-color:#2C4C8F;color:#FFD65C;}
+.cand-hidech-acc2{border-color:#7A3F8F;color:#7A3F8F;}
+.cand-hidech-acc2.active{background:#4A2A6B;border-color:#4A2A6B;color:#FF7BA8;}
 @media (min-width:700px){
   .cand-kind-posted-row{gap:8px;}
   .cand-kind-filter{gap:7px;}

@@ -68,10 +68,10 @@ test.describe('PC candidate recovery invariants', () => {
 
     const positions = await page.evaluate(() => {
       const group = document.querySelector('.cand-kind-filter').getBoundingClientRect();
-      const posted = document.querySelector('#candHidePosted1').getBoundingClientRect();
-      return { groupRight: group.right, postedLeft: posted.left };
+      const posted = document.querySelector('.cand-hide-grid').getBoundingClientRect();
+      return { groupBottom: group.bottom, postedTop: posted.top };
     });
-    expect(positions.groupRight).toBeLessThanOrEqual(positions.postedLeft);
+    expect(positions.groupBottom).toBeLessThanOrEqual(positions.postedTop);
 
     await doujin.check();
     await expect(doujinCard).toBeVisible();
@@ -549,19 +549,20 @@ test.describe('PC candidate recovery invariants', () => {
 
     await expect(page.locator('.cand-kind-filter')).toContainText('books');
     await expect(page.locator('.cand-kind-filter')).not.toContainText('ブックス');
-    const rowLayout = await page.evaluate(() => {
-      const row = document.querySelector('.cand-kind-posted-row');
-      const group = document.querySelector('.cand-kind-filter').getBoundingClientRect();
-      const first = document.querySelector('#candHidePosted1').getBoundingClientRect();
-      const second = document.querySelector('#candHidePosted2').getBoundingClientRect();
-      const bounds = row.getBoundingClientRect();
+    const labels = await page.locator('.cand-hide-grid button').allInnerTexts();
+    expect(labels).toEqual(['癒し非表示', '月非表示', '桜非表示', '癒し表示', '月表示', '桜表示']);
+    const gridLayout = await page.evaluate(() => {
+      const grid = document.querySelector('.cand-hide-grid');
+      const r = [...grid.querySelectorAll('button')].map((b) => b.getBoundingClientRect());
+      const mid = (x) => (x.top + x.bottom) / 2;
       return {
-        fits: row.scrollWidth <= row.clientWidth + 1,
-        sameLine: Math.abs((group.top + group.bottom) / 2 - (first.top + first.bottom) / 2) < 2 && Math.abs((first.top + first.bottom) / 2 - (second.top + second.bottom) / 2) < 2,
-        inside: second.right <= bounds.right + 1
+        fits: grid.scrollWidth <= grid.clientWidth + 1,
+        rows: Math.abs(mid(r[0]) - mid(r[2])) < 2 && Math.abs(mid(r[3]) - mid(r[5])) < 2 && mid(r[3]) > mid(r[0]),
+        cols: [0, 1, 2].every((i) => Math.abs(r[i].left - r[i + 3].left) < 2)
       };
     });
-    expect(rowLayout).toEqual({ fits: true, sameLine: true, inside: true });
+    expect(gridLayout).toEqual({ fits: true, rows: true, cols: true });
+    const hideBtn = (label) => page.locator('.cand-hide-grid button', { hasText: new RegExp('^' + label + '$') });
 
     const oldAcc1 = page.locator('.cand-card', { hasText: '月詠みで昔投稿した作品' });
     const oldAcc2 = page.locator('.cand-card', { hasText: '宵桜艶帖で昔投稿した作品' });
@@ -570,14 +571,19 @@ test.describe('PC candidate recovery invariants', () => {
     await expect(oldAcc2).toBeVisible();
     await expect(never).toBeVisible();
 
-    await page.locator('#candHideAll1').click();
+    await expect(hideBtn('月表示')).toHaveClass(/active/);
+    await hideBtn('月非表示').click();
     await expect(oldAcc1).toHaveCount(0);
     await expect(oldAcc2).toBeVisible();
     await expect(never).toBeVisible();
-    await page.locator('#candHideAll2').click();
+    await expect(hideBtn('月非表示')).toHaveClass(/active/);
+    await expect(hideBtn('月表示')).not.toHaveClass(/active/);
+    await hideBtn('月非表示').click(); // 2回押しても反転しない
+    await expect(oldAcc1).toHaveCount(0);
+    await hideBtn('桜非表示').click();
     await expect(oldAcc2).toHaveCount(0);
     await expect(never).toBeVisible();
-    await page.locator('#candHideAll1').click();
+    await hideBtn('月表示').click();
     await expect(oldAcc1).toBeVisible();
     await expect(oldAcc2).toHaveCount(0);
 
@@ -585,7 +591,10 @@ test.describe('PC candidate recovery invariants', () => {
     expect(saved.allAcc1).toBe(false);
     expect(saved.allAcc2).toBe(true);
 
-    await page.locator('#candHidePosted1').click();
-    const checkColor = await page.locator('#candHidePosted1 .cand-hide-check').evaluate((el) => getComputedStyle(el).color);
-    expect(checkColor).toBe('rgb(255, 214, 92)');
+    await hideBtn('癒し非表示').click();
+    await expect(hideBtn('癒し非表示')).toHaveClass(/active/);
+    const savedIyashi = await page.evaluate(() => JSON.parse(localStorage.getItem('cand_hide_posted') || '{}'));
+    expect(savedIyashi.acc3).toBe(true);
+    const sakuraColor = await hideBtn('桜非表示').evaluate((el) => getComputedStyle(el).color);
+    expect(sakuraColor).toBe('rgb(255, 123, 168)');
   });});
