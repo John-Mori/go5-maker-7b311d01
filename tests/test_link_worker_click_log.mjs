@@ -74,10 +74,26 @@ r = await hit(env, { ua: "" });
 assert.equal(r.status, 302, "UA無しは302(従来どおり)");
 assert.equal(db.log[4].verdict, "noua", "UA無しは noua として見分けられる");
 
+// データセンター(ホスティング)ASNは数えない(gunji-5s 2026-10-23 依頼)。人が踏んだ時に備え302は返す。
+//   実物: 01:23 Hetzner(24940)のFirefox / 01:21 Google Cloud(396982)のShapBot が counted に入っていた。
+const clicksBeforeDc = db.links.get("abcde").clicks;
+r = await hit(env, { ua: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:148.0) Gecko/20100101 Firefox/148.0", cf: { country: "FI", asn: 24940 } });
+assert.equal(r.status, 302, "データセンターも302は返す(VPN経由の人を詰まらせない)");
+assert.equal(db.log[db.log.length - 1].verdict, "dc", "Hetznerは dc");
+r = await hit(env, { ua: "ShapBot/0.1.0", cf: { country: "US", asn: 396982 } });
+assert.equal(db.log[db.log.length - 1].verdict, "dc", "Google Cloudは dc");
+assert.equal(db.links.get("abcde").clicks, clicksBeforeDc, "dc は累計に足さない");
+// 家庭/携帯回線と、iCloudプライベートリレー/WARPの出口(Cloudflare・Akamai・Fastly)は人なので数える。
+for (const asn of [701, 2516, 13335, 36183, 54113]) {
+  await hit(env, { ua: iphone, cf: { country: "JP", asn } });
+  assert.equal(db.log[db.log.length - 1].verdict, "counted", "ASN " + asn + " は人として数える");
+}
+assert.equal(db.links.get("abcde").clicks, clicksBeforeDc + 5, "人の回線は従来どおり累計+1");
+
 db.failLog = true;
 r = await hit(env, { ua: iphone });
 assert.equal(r.status, 302, "記録が壊れてもリダイレクトは返る");
-assert.equal(db.links.get("abcde").clicks, 3, "記録が壊れても累計は数える");
+assert.equal(db.links.get("abcde").clicks, clicksBeforeDc + 6, "記録が壊れても累計は数える");
 db.failLog = false;
 const before = db.log.length;
 db.log.unshift({ ts: "2000-01-01 00:00:00", code: "old", verdict: "counted" });
