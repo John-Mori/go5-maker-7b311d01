@@ -2997,6 +2997,13 @@
   //   手動タブの全消し窓(8/15の全滅=着地前に location.href でblobを殺す)も塞ぐ。保存窓の間だけ有効
   //   (__go5SaveInFlight=true)。affiliate.js の showTab を単一の切替権威として使い、その tabStock 早期return
   //   (Stock.htmlへ)は __go5SaveInFlight で無効化される=一覧表示+render() は showTab 側が担う。
+  // ★保存窓は「着地待ちのドラフトが1本でも残っている間」開けておく(Chami 2026-10-22 20:10
+  //   「ドラフトで保存してる最中に新たなデータをドラフトしたら前のドラフト中のデータがドラフト欄から消えた」)。
+  //   旧実装は boolean 1本で、後から作ったドラフトが先に着地すると前のドラフトの保存窓まで閉じていた。
+  //   その後のタブ操作や着地遷移が Stock.html へ破壊遷移し、メモリ上にしか無い前の pending を殺していた。
+  var _saveWindows = 0;
+  function openSaveWindow_() { _saveWindows++; window.__go5SaveInFlight = true; }
+  function closeSaveWindow_() { if (_saveWindows > 0) _saveWindows--; window.__go5SaveInFlight = _saveWindows > 0; return _saveWindows > 0; }
   function showStockInline_() {
     window.__go5SaveInFlight = true;
     if (typeof window.showTab === 'function') { try { window.showTab('tabStock'); return; } catch (e) {} }
@@ -4066,6 +4073,7 @@
       //   生成完了で即ドラフト一覧をページ内表示=着地(navigate)を待たずに一覧が出る。新ドラフトは下の
       //   onStart で pending の「保存中…」カードとして先頭に出る。破壊遷移(location.href)は着地検証後 or
       //   保存窓外のみ=8/15の全滅の不変条件(未着地で遷移しない)は維持。standalone(Stock.html単独)では不要。
+      openSaveWindow_();
       if (!window.__go5StockStandalone) { try { showStockInline_(); } catch (_e) {} }
       // ★holdMessage は「実因が判明したら上書きできる」よう可変にする(Fable5診断2026-08-16)。
       //   従来は原因に関わらず“動画のせい”に見せる固定文で、localStorage逼迫のメタ書込み失敗も同じ文面だった。
@@ -4080,11 +4088,14 @@
       var _navigated = false;
       var goDraft_ = function () {
         if (_navigated) return; _navigated = true; // 保険のタイマとsaveStock_完了で二重遷移しない
-        window.__go5SaveInFlight = false; // 着地決着=以後の手動タブ/リロードは通常どおり Stock.html へ
+        // 着地決着=自分の保存窓だけ閉じる。他のドラフトがまだ着地待ちなら窓は開いたまま(Stock.htmlへ飛ばない)。
+        var othersInFlight = closeSaveWindow_();
         if (window.__go5StockStandalone) { render(); return; }
         // ページ内表示(B)中は既に #pageStock が前面=再描画で pending を通常カードへ置換して終わり(遷移しない)。
         var ps = $('pageStock');
         if (ps && !ps.hidden) { render(); return; }
+        // 他のドラフトが保存中に破壊遷移すると、その pending と動画blobが消える=再描画だけにして留まる。
+        if (othersInFlight) { render(); return; }
         try { location.href = 'Stock.html'; }
         catch (e2) { var tb = $('tabStock'); if (tb) tb.click(); else render(); }
       };
@@ -4102,7 +4113,12 @@
           ? Go5SaveGate.decide(gate)
           : (gate.localLanded || gate.cloudLanded ? 'navigate' : (gate.timerFired ? 'hold' : 'wait'));
         if (act === 'navigate') { if (navTimer) { clearTimeout(navTimer); navTimer = null; } if (waitTimer) { clearTimeout(waitTimer); waitTimer = null; } hideSaveWait_(); hideSaveHold_(); goDraft_(); }
-        else if (act === 'hold') { if (navTimer) { clearTimeout(navTimer); navTimer = null; } if (waitTimer) { clearTimeout(waitTimer); waitTimer = null; } hideSaveWait_(); showSaveHold_(holdMessage, retryPossible); }
+        else if (act === 'hold') {
+          if (navTimer) { clearTimeout(navTimer); navTimer = null; } if (waitTimer) { clearTimeout(waitTimer); waitTimer = null; } hideSaveWait_();
+          // 保留パネルのボタンは「いま保留になったこのドラフト」に向ける(作成時に配ると後発ドラフトに上書きされる)。
+          window.__go5HoldGoDraft = goDraft_; window.__go5RetrySave = retrySave_;
+          showSaveHold_(holdMessage, retryPossible);
+        }
       }
       // ★飛行中のレーンは失敗ではない(Fable5診断2026-08-17・P2)。旧25秒は無条件に hold へ倒していたが、
       //   iPhoneの細い上りでは動画のR2 PUTが25秒を普通に超える=保存が成功しつつある最中に
@@ -4143,10 +4159,10 @@
         }
       };
 
-      window.__go5HoldGoDraft = goDraft_; // 「このまま履歴へ」=ユーザーの明示選択でのみ遷移
+      // 「このまま履歴へ」(__go5HoldGoDraft=goDraft_)=ユーザーの明示選択でのみ遷移。配るのは hold 時(decideNav_)。
       // 保留(hold)からのリトライ=メモリ上の動画blobをR2へ再度上げる。着地したら遷移(I4のリトライ)。
       //   遷移(location.href)でJSコンテキストを壊さない限り detail.blob は生きている=ここで救える。
-      window.__go5RetrySave = function () {
+      var retrySave_ = function () {
         hideSaveHold_();
         gate.timerFired = false;
         if (!draftId || !isUsableVideoBlob_(detail.blob)) {
