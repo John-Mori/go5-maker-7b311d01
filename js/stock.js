@@ -3112,8 +3112,17 @@
     var r = $('draftPubSched'); if (r) { r.checked = true; syncPubModeUI_(); }
     renderPickedSlot_();
     saveDraftPost_();
+    syncPlannedToHistory_();
     closeSlotPicker_();
   });
+  // Blueskyへ投げた後(=投稿履歴に自動記録の行がある)で公開枠を選んだ時、その行へ予定時刻を書き足す。
+  //   旧実装は自動記録の時点の枠しか渡らず、後から選んだ枠は投稿完了を押すまで履歴へ届かなかった
+  //   =予約投稿なのにBluesky投稿の時刻で表示されていた(Chami 2026-10-22 msg 1562781627078287380)。
+  function syncPlannedToHistory_() {
+    if (!_modalMeta || curPubMode_() !== 'scheduled' || !(_pickedSlot && _pickedSlot.scheduled_at)) return;
+    if (!loadDraftPost_(_modalMeta.id).bskyParentUrl) return;
+    autoRecordBskyHistory_(_modalMeta);
+  }
 
   function saveDraftPost_() {
     if (!_modalMeta) return;
@@ -3794,7 +3803,7 @@
     });
     $('draftYtUrl').addEventListener('input', saveDraftPost_);
     // 公開設定：即時/予約ラジオ。予約のときだけ「公開枠を選ぶ」行を表示。
-    function onPubModeChange_() { syncPubModeUI_(); saveDraftPost_(); }
+    function onPubModeChange_() { syncPubModeUI_(); saveDraftPost_(); syncPlannedToHistory_(); }
     $('draftPubNow').addEventListener('change', onPubModeChange_);
     $('draftPubSched').addEventListener('change', onPubModeChange_);
     $('draftPickSlot').addEventListener('click', openSlotPicker_);
@@ -3888,6 +3897,10 @@
     $('draftModalComplete').addEventListener('click', function () {
       if (!_modalMeta) return;
       closeSlotPicker_();
+      // 予約にしたのに公開枠が無いと予定時刻が渡らず、投稿履歴は今の時刻で載る(Chami 2026-10-22「予約投稿になってない」)。
+      if (curPubMode_() === 'scheduled' && !(_pickedSlot && _pickedSlot.scheduled_at)) {
+        if (!window.confirm('「予約」になっていますが、公開枠がまだ選ばれていません。\nこのまま完了すると、投稿履歴には今の時刻で載ります(投稿予定になりません)。\n\nOK=このまま完了する\nキャンセル=戻って公開枠を選ぶ')) { openSlotPicker_(); return; }
+      }
       if (!window.confirm('投稿履歴に反映します。OKを押すと正式に投稿完了になります。')) return;
       var id = _modalMeta.id;
       var ytUrl = ($('draftYtUrl') || {}).value || '';

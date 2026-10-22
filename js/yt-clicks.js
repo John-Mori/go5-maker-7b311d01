@@ -648,8 +648,55 @@
     var rest = bareUrl.slice(bareBase.length + 1).split(/[/?#]/)[0];
     return /^[0-9A-Za-z]+$/.test(rest) ? rest : '';
   }
+  // チャンネル別の「既定の投稿先」(x|bsky)。URLから判別できない行の表示・編集ラジオ・手動追加の初期値に使う。
+  //   旧実装は全ch固定で既定Xだった。chごとに投稿履歴の画面で切り替えられるようにした(Chami 2026-10-22 msg 1562781627078287380
+  //   「デフォルト設定がここで言わなくてもできるように。チャンネルが増えてもそれぞれで」)。未設定は 癒やし倉庫(acc3)=Bsky、他=X。
+  var DEFAULT_PLAT_KEY = 'hist_default_plat__';
+  function defaultPlat_(acc) {
+    acc = acc || acct();
+    var v = ''; try { v = localStorage.getItem(DEFAULT_PLAT_KEY + acc) || ''; } catch (e) {}
+    if (v === 'x' || v === 'bsky') return v;
+    return acc === 'acc3' ? 'bsky' : 'x';
+  }
+  // URLで判別できない行の投稿先。投稿時に刻んだ柱/投稿先URLがあればそれを正とし、無い時だけchの既定へ落とす
+  //   (既定をBskyへ切り替えても、X柱で投げた過去の行がBsky↗へ化けないように)。
+  function itemDefaultPlat_(it) {
+    if (it && (it.pillar === 'x' || (it.xPostUrl && !it.bskyParentUrl))) return 'x';
+    if (it && (it.pillar === 'bsky' || (it.bskyParentUrl && !it.xPostUrl))) return 'bsky';
+    var acc = ''; try { acc = chForItem_(it); } catch (e) {}
+    return defaultPlat_(acc);
+  }
+  function setDefaultPlat_(acc, plat) {
+    try { localStorage.setItem(DEFAULT_PLAT_KEY + acc, plat === 'bsky' ? 'bsky' : 'x'); } catch (e) {}
+  }
+  // 「既定の投稿先」切替を履歴一覧の直上へ置き、表示中チャンネルの値に合わせる。
+  //   (手動追加ボタンの段は閉じた詳細メニューの中なので、そこに置くと見つからない)
+  //   render()のたびに呼ぶので、チャンネルを切り替えるとそのチャンネルの値へ追従する。
+  function syncDefaultPlatUI_() {
+    var anchor = $('ytClickList');
+    if (!anchor || !anchor.parentNode) return;
+    var box = $('histDefaultPlat');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'histDefaultPlat';
+      box.className = 'hist-default-plat';
+      box.innerHTML =
+        '<span>既定の投稿先(このチャンネル)</span>' +
+        '<label class="vedit-plat-opt"><input type="radio" name="histDefaultPlat" value="x"><span>X</span></label>' +
+        '<label class="vedit-plat-opt"><input type="radio" name="histDefaultPlat" value="bsky"><span>Bsky</span></label>';
+      anchor.parentNode.insertBefore(box, anchor);
+      box.addEventListener('change', function (ev) {
+        var t = ev.target;
+        if (!t || t.name !== 'histDefaultPlat') return;
+        setDefaultPlat_(acct(), t.value);
+        render();
+      });
+    }
+    var cur = defaultPlat_(acct());
+    Array.prototype.forEach.call(box.querySelectorAll('input[name="histDefaultPlat"]'), function (r) { r.checked = (r.value === cur); });
+  }
   // 投稿リンクがX(旧Twitter)か判定。(BlueskyのpostUri=at://は常にBsky確定。
-  //   生URLがx.com/twitter.comならX。短縮URLしか無い場合は判別不能=既定X＝platOf_(ラジオ)の既定と一致させる。
+  //   生URLがx.com/twitter.comならX。短縮URLしか無い場合は判別不能=chの既定の投稿先＝platOf_(ラジオ)の既定と一致させる。
   //   ★旧・既定Bskyだと、保存前は「ラジオ=X」なのに「表示=Bsky↗」に食い違った(Chami報告2026-07-29)。
   function isXLink_(href, it) {
     // 編集で明示指定(X/Bsky)があれば最優先。短縮URLだけの行はURLから判別できないため手動選択が正。
@@ -660,7 +707,7 @@
     if (XRE.test(String(href || ''))) return true;
     if (it && (XRE.test(String(it.postUrl || '')) || XRE.test(String(it.shareUrl || '')))) return true;
     if (it && /bsky\.app\//i.test(String((it.postUrl || '') + ' ' + (it.shareUrl || '') + ' ' + (it.shortUrl || '')))) return false;
-    return true; // 判別不能=既定X(Chami:これから原則X投稿)。platOf_ と揃える
+    return itemDefaultPlat_(it) === 'x'; // 判別不能=柱かchの既定の投稿先。platOf_ と揃える
   }
   // 投稿履歴の「Bsky↗」リンク。Xリンクなら「X↗」表示＋白字黒枠(.vlink-x)へ切替。
   function postLinkHtml_(href, it) {
@@ -712,7 +759,7 @@
     var s = String((it && it.postUrl) || '') + ' ' + String((it && it.shareUrl) || '') + ' ' + String((it && it.shortUrl) || '');
     if (/(?:x\.com|twitter\.com)\//i.test(s)) return 'x';
     if (/bsky\.app\//i.test(s)) return 'bsky';
-    return 'x';
+    return itemDefaultPlat_(it);
   }
   // セール会場リンク(導線3・共通コード)のクリック統計。(2026-07-14 Chami依頼: 累計/今日/昨日/週を投稿履歴に表示)
   var SALE_CODES = ['JrziR']; // campaign=gain(utm)の歴史的コード(フォールバック)。af_id差/再生成でコードが変わり得るため下で実リンクからも導出。
@@ -1131,15 +1178,24 @@
     }
     return got ? sum : null;
   }
+  // 導線2(ピンク)の計測URL群 = 作品短縮＋workClickUrls＋ツリー(Bluesky子を含む返信内の作品リンク)。
+  //   Bluesky柱の投稿は作品リンクが返信(Bluesky子)にしか無く、白の横にピンクが出なかった(Chami 2026-10-22 msg 1562781627078287380)。
+  function pinkUrlsOf_(it) {
+    var urls = [it.workShortUrl].concat(it.workClickUrls || []);
+    try { rowTreesOf_(it, chForItem_(it)).forEach(function (t) { urls.push(t.shortUrl); }); } catch (e) {}
+    return urls.filter(function (u) { return u && !/\s/.test(u); });
+  }
   function postClicks_(it, vid) {
     var code = codeOf(it.shortUrl || '');   // 表示用の主コード(白矢印リンク)
-    var wcode = codeOf(it.workShortUrl || ''); // 表示用の主コード(ピンク矢印リンク)
+    var pinkUrls = pinkUrlsOf_(it);
+    var wcode = ''; // 表示用の主コード(ピンク矢印リンク)。作品短縮が無ければツリー側の最初のコード
+    for (var pi = 0; pi < pinkUrls.length && !wcode; pi++) wcode = codeOf(pinkUrls[pi]);
     // 導線1: 主short + clickUrls(異ドメインの別URL) + 合算URL群 を code 単位で重複なく合算。
     //   従来は主code値に mergeUrls を"別途"足していたため、mergeUrls に主codeが含まれると二重計上し得た。
     //   URL集合→code重複除去→1回加算 に統一(Codex T2/T3・履歴とランキング共通)。
     var clicks = sumClickCodes_([it.shortUrl].concat(it.clickUrls || []).concat(it.mergeUrls || []));
-    // 導線2: 作品短縮 + workClickUrls(統合で拾った別URL)。
-    var wclicks = sumClickCodes_([it.workShortUrl].concat(it.workClickUrls || []));
+    // 導線2: 作品短縮 + workClickUrls(統合で拾った別URL) + ツリー(Bluesky子など)。
+    var wclicks = sumClickCodes_(pinkUrls);
     // GAS日次デルタで累計の下限を張る(累計≥週)。codeOfが空(手入力の作品短縮URL等)でもGAS由来の
     //   実数があれば必ず反映=「累計0なのに週8」やランキング除外を封じる(履歴と同一のロジック)。
     var _dl = vid ? deltaCache[vid] : null;
@@ -1686,7 +1742,7 @@
         attrs,
         (wsEl && wsEl.value) || '旧作',
         ($('veditWorkShort').value || '').trim(),
-        (platEl && platEl.checked) ? 'bsky' : 'x', // 既定=X
+        (platEl && platEl.checked) ? 'bsky' : 'x', // ラジオの値(初期値はchの既定の投稿先)
         _mres.mergeUrls, // 合算URL(導線1のみ・過去の短縮URL群=クリック加算)
         treeRes.trees // 返信ポストURL＋その返信内のアフィ計測短縮URL
       );
@@ -1778,7 +1834,7 @@
     _treeContextItem = treeItem || null;
     _treeContextAccount = /^acc\d+$/.test(String(treeAccount || '')) ? String(treeAccount) : 'acc1';
     setTreeRows_(treeLinks); // 返信ポストURLと返信内アフィ短縮URLを復元(空ならツリー1を表示)
-    var plat = (platform === 'bsky') ? 'bsky' : 'x'; // 既定=X(Chami:これから原則X投稿)
+    var plat = (platform === 'bsky' || platform === 'x') ? platform : defaultPlat_(_treeContextAccount); // 未指定=chの既定の投稿先
     if ($('veditPlatX')) $('veditPlatX').checked = (plat === 'x');
     if ($('veditPlatBsky')) $('veditPlatBsky').checked = (plat === 'bsky');
     $('veditWork').value = workVal || '';
@@ -2540,6 +2596,7 @@
   function render() {
     // Async metric/image updates must not replace the search input while the IME conversion panel is open.
     if (_histSearchComposing || _histSearchRenderTimer) return;
+    syncDefaultPlatUI_();
     var list = $('ytClickList');
     // Preserve the actual search subtree across list renders. Background sync can otherwise replace
     // the input just before compositionstart and break the first Japanese syllable.
@@ -2719,7 +2776,7 @@
       // ★この端末のローカル履歴には無く、記録シートから補った行。編集・削除はGAS経由で正本へ反映する。
       // 日別クリック窓の対象URL群(postClicks_の累計と同じ集合=白:主short+clickUrls+mergeUrls / ピンク:作品short+workClickUrls)
       var dCUrls = [it.shortUrl].concat(it.clickUrls || []).concat(it.mergeUrls || []).filter(function (u) { return u && !/\s/.test(u); });
-      var dWUrls = [it.workShortUrl].concat(it.workClickUrls || []).filter(function (u) { return u && !/\s/.test(u); });
+      var dWUrls = pinkUrlsOf_(it); // ピンクはツリー(Bluesky子)も含める=上の累計と同じ集合
       var treeHtml_ = treeRowsHtml_(it, chForItem_(it));
       if (it._fromSheet) tagsHtml += '<span class="vtag vtag-sheet" title="この端末にはこの記録が無く、記録シートの内容を表示して補っています(編集・削除は記録シートへ反映)">☁️シート由来</span>';
       return '<div class="vrow' + (it.remade ? ' vrow-remade' : '') + '" data-hist-anchor="' + esc(k) + '" data-hist-usedkey="' + esc(pKey) + '" data-hist-refcid="' + esc(rImgCid) + '">' +
@@ -3315,7 +3372,8 @@
       if (matched.workShortMintPending === true) { delete matched.workShortMintPending; changed = true; }
       // Bluesky投稿時の自動記録行(autoRecorded)へ、後の投稿完了でX/柱/予定時刻を空欄だけ追記する。
       ['xPostUrl', 'bskyParentUrl', 'bskyReplyUrl', 'bskyWorkShortUrl', 'bskyParentShortUrl', 'bskyReplyShortUrl', 'pillar'].forEach(function (k) { if (!matched[k] && opts[k]) { matched[k] = String(opts[k]); changed = true; } });
-      if (!matched.plannedAt && opts.scheduledAt) { matched.plannedAt = opts.scheduledAt; changed = true; }
+      // 予定時刻は空欄埋めでなく最新の公開枠で上書きする(Bluesky投稿の後で枠を選び直しても、履歴が古い枠/投稿時刻のままにならない)。
+      if (opts.scheduledAt && matched.plannedAt !== opts.scheduledAt) { matched.plannedAt = opts.scheduledAt; changed = true; }
       if (opts.scheduledAt) { try { recordPlannedPostTime_(ytUrl || itemYt_(ymap, matched) || matched.ytUrl, matched.plannedAt); } catch (e) {} }
       if (!matched.ytTitlePlan && opts.ytTitle) { matched.ytTitlePlan = String(opts.ytTitle).replace(/\n+/g, ' ').trim(); changed = true; }
       var wasAuto = !!matched.autoRecorded;
@@ -3958,14 +4016,14 @@
       if (_pendingShort) { entry.shortUrl = _pendingShort; delete entry.postUrl; } // 計測キー(r2)
       if (_pendingShare) entry.shareUrl = _pendingShare; // 表示用(da.gd)
       applyWorkShort_(entry, workShortVal); // 作品クリック計測URL(導線2)
-      if (platform === 'x' || platform === 'bsky') entry.platform = platform; // X↗/Bsky↗表示の手動指定(既定X)
+      if (platform === 'x' || platform === 'bsky') entry.platform = platform; // X↗/Bsky↗表示の手動指定(初期値はchの既定)
       if (Array.isArray(mergeUrls) && mergeUrls.length) entry.mergeUrls = mergeUrls; // 合算URL(導線1のみ)
       saveTreeLinksFor_(entry, acct(), treeLinks);
       saveArr(manualKey(), loadManual().concat([entry]));
       var m = loadYtMap(); m[id] = ytUrl; saveYtMap(m);
       pokeSnapshotNow_(); // 手動追加でもYT URL紐付け当日に日別記録のベースラインを作る(④)
       refresh();
-    }, '', 'x', [], [], null, acct());
+    }, '', defaultPlat_(acct()), [], [], null, acct());
   }
 
   // クリック数(開封数)・YouTube視聴回数/投稿日時/題名をAPIから取得しキャッシュへ。Promiseを返す。

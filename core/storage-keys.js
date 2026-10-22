@@ -58,6 +58,7 @@
     /^cand_posted_(on|off)$/,                  // 「このchで投稿した/していない」の手動宣言=全端末で同じ投稿済み判定に連動
     // 本文・YouTube説明欄・アフィURL とその Qセーブ/元に戻す/やり直しスタック(アカウント別)：
     /^fanza_af_id_bsky__acc[0-9]+$/,           // Bluesky用af_id(チャンネル別・空欄=fanza_af_idを使う・2026-10-21 出先別af_id)
+    /^hist_default_plat__acc[0-9]+$/,          // 投稿履歴の既定の投稿先 x/bsky(チャンネル別・2026-10-22)
     /^bsky_enable(__|$)/,
     /^bsky_unattended(__|$)/,
     /^bsky_text(_|__|$)/,        // bsky_text / bsky_text_quick(_at) / bsky_text_undostack / _redostack

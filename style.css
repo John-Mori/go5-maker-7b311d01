@@ -681,6 +681,9 @@ html[data-account="acc3"] .acct-cta{background:var(--cta-to);color:var(--cta-ink
 .vedit-plat-opt{display:inline-flex;align-items:center;gap:4px;margin:0;cursor:pointer;}
 .vedit-plat-opt input[type=radio]{width:auto;margin:0;accent-color:var(--accent);}
 .vedit-plat-cap{margin-left:2px;}
+/* 投稿履歴の「既定の投稿先」(チャンネル別X/Bsky)。編集モーダルの投稿先ラジオと同じ見た目。 */
+.hist-default-plat{display:flex;align-items:center;gap:14px;font-size:12px;color:var(--sub);margin:6px 0 4px;flex-wrap:wrap;}
+.hist-default-plat .vedit-plat-opt input[type=radio]{width:auto;margin:0;accent-color:var(--accent);}
 .vedit-field-plat{margin-top:0;}
 .vedit-field input,.vedit-field select{font-size:14px;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:#0b1019;color:var(--ink);width:100%;box-sizing:border-box;}
 /* 作品状態：ドロップダウンを1/3幅にし、右に「データ再作成」ボタン(反映されてない履歴の回復用・Chami依頼2026-08-15) */
