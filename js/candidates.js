@@ -455,7 +455,12 @@
   var MAKER_REFRESH_MIN_MS = 60 * 1000; // 60秒
   var MAKER_FETCH_TIMEOUT_MS = 45000; // 一覧取得の無限待ち防止。失敗時は既存キャッシュへ退避する。
 
-  var _activeTab = 'main'; // 'main' | サークルタブid
+  // 選んだサブタブは端末に覚える(Chami 2026-10-22「いちいち手動追加にページが戻る」)。
+  //   iOS Safariは外部リンクから戻るとページを丸ごと再読込することがあり、メモリだけだと毎回 main へ戻っていた。
+  //   端末ローカルのみ(lsSet を通さない=他端末へ同期しない)。消えたタブidは render() 冒頭で main へ戻す。
+  var K_ACTIVE_TAB = 'cand_active_tab';
+  var _activeTab = (function () { try { return localStorage.getItem(K_ACTIVE_TAB) || 'main'; } catch (e) { return 'main'; } })(); // 'main' | サークルタブid
+  function saveActiveTab_() { try { localStorage.setItem(K_ACTIVE_TAB, _activeTab); } catch (e) {} }
   var _sort = 'added_desc'; // 現在表示中の並び順。タブ入場時に defaultSortForTab_ で上書きされる(下 render())。
   var _sortTab = null;      // _sort を最後に既定へ揃えたタブ。タブが実際に変わった時だけ既定へ戻す目印(再描画では触らない)
   var _showHidden = false;
@@ -497,7 +502,11 @@
   }
   var _workSearchByTab = {};
   var _memoSearchByTab = {}; // メモ/コメント検索の入力をタブ別に保持(Chami依頼2026-08-11)
-  var _candPageByTab = {};   // 候補一覧の現在ページをタブ別に保持(ページ分け・Chami依頼2026-08-15)
+  // 候補一覧の現在ページをタブ別に保持(ページ分け・Chami依頼2026-08-15)。
+  //   iOSの再読込を跨いで同じページへ戻れるよう sessionStorage にも置く(タブを閉じれば消える・2026-10-22)。
+  var K_CAND_PAGE = 'cand_page_by_tab';
+  var _candPageByTab = (function () { try { return JSON.parse(sessionStorage.getItem(K_CAND_PAGE) || '{}') || {}; } catch (e) { return {}; } })();
+  function saveCandPage_() { try { sessionStorage.setItem(K_CAND_PAGE, JSON.stringify(_candPageByTab)); } catch (e) {} }
   var DUPLICATE_WORK_NOTICE = '同じ作品が既に追加されているので統合';
   // 重複追加は分かりにくいinline通知ではなくダイアログで明示する(Chami指定2026-07-24)。
   //   重複した時「だけ」出す。今回入力していたメモがあれば改行して2行目に表示する。
@@ -4582,8 +4591,10 @@
     kickInfoBackfill_(); // タブへ戻ってきた時=未取得タイトルの追跡を素早いフェーズへ戻す(この後の描画でbackfillが回る)
     // タブが実際に切り替わった時だけ、そのタブの既定並び順へ揃える。並べ替え変更後の再描画では
     //   _sortTab===_activeTab のため _sort に触れない=ユーザーがその場で選んだ順を保つ(Chami指示2026-08-24)。
-    if (_sortTab !== _activeTab) { _sort = defaultSortForTab_(_activeTab); _sortTab = _activeTab; }
     var tabs = lsGet(K_TABS, '[]');
+    // 覚えていたタブが削除済み(他端末で消した等)なら、タブ帯を描く前に手動追加へ戻す=どのボタンも選ばれていない状態を作らない
+    if (['buzz', 'auto', 'main', 'all'].indexOf(_activeTab) < 0 && !tabs.some(function (t) { return t.id === _activeTab; })) _activeTab = 'main';
+    if (_sortTab !== _activeTab) { _sort = defaultSortForTab_(_activeTab); _sortTab = _activeTab; }
     var tabBtns = '<button class="cand-tab cand-tab-buzz' + (_activeTab === 'buzz' ? ' active' : '') + '" data-ct="buzz" type="button">🦋 ' + esc(builtinTabLabel_('buzz')) + '</button>' +
       '<button class="cand-tab' + (_activeTab === 'auto' ? ' active' : '') + '" data-ct="auto" type="button">' + esc(builtinTabLabel_('auto')) + '</button>' +
       '<button class="cand-tab' + (_activeTab === 'main' ? ' active' : '') + '" data-ct="main" type="button">💡 ' + esc(builtinTabLabel_('main')) + '</button>' +
@@ -4617,6 +4628,7 @@
       else renderMain(tab.id);                          // 独立した候補リストタブ(タブ名だけのタブ)
     }
     page.setAttribute('data-cand-render-tab', _activeTab);
+    saveActiveTab_(); // 全ての切替経路(タブ押下/新規タブ/削除/消えたタブの戻し)をここ1か所で保存
     if (viewportSnap && window.Go5Viewport) window.Go5Viewport.restore(page, viewportSnap);
     // 選択中のサブタブを帯の中央へ(クリック/アクセス時ともここを通る)。画像・フォントで幅が後から
     //   変わるので、初回レイアウト後(rAF)に寄せ直す(Chami依頼 2026-08-08)。
@@ -6364,7 +6376,8 @@
       var size = candPageSize_();
       var pages = Math.max(1, Math.ceil(view.length / size));
       var page = _candPageByTab[tabId] || 1; if (page > pages) page = pages; if (page < 1) page = 1;
-      _candPageByTab[tabId] = page;
+      // 再読込直後で候補がまだ0件(IDB復元前)の時は丸めを書き戻さない=覚えていたページを1へ潰さない
+      if (view.length) { _candPageByTab[tabId] = page; saveCandPage_(); }
       var startI = (page - 1) * size, slice = view.slice(startI, startI + size);
       var pager = candPagerHtml_(page, pages, view.length, startI, slice.length);
       var resultLine = (q || mq) ? '<div class="hint" style="padding:2px 6px;">' + view.length + '件が条件に一致</div>' : '';
