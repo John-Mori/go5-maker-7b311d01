@@ -73,6 +73,8 @@ assert.equal(db.links.get("abcde").clicks, 1, "self は数えない(従来どお
 r = await hit(env, { ua: "" });
 assert.equal(r.status, 302, "UA無しは302(従来どおり)");
 assert.equal(db.log[4].verdict, "noua", "UA無しは noua として見分けられる");
+// UA無しは数えない(5Sec軍議 2026-10-23 決定 msg 1562913383991218320)。人のブラウザはUAを必ず送る。302と記録は残す。
+assert.equal(db.links.get("abcde").clicks, 1, "noua は累計に足さない");
 
 // データセンター(ホスティング)ASNは数えない(gunji-5s 2026-10-23 依頼)。人が踏んだ時に備え302は返す。
 //   実物: 01:23 Hetzner(24940)のFirefox / 01:21 Google Cloud(396982)のShapBot が counted に入っていた。

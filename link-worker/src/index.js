@@ -185,7 +185,7 @@ async function handleRedirect(code, env, ctx, request) {
   const ua = request.headers.get("User-Agent") || "";
   const isBot = isBotUA(ua);
   // 1件ずつの記録(UA・リファラ・国・ASN・判定)。IPは残さない。判定: bot=空HTMLで弾いた / self=自分の端末(数えない)
-  //   / dc=データセンターASNから(302は返すが数えない) / noua=UA無しで302(現行は数えている) / counted=人として数えた。
+  //   / dc=データセンターASNから(302は返すが数えない) / noua=UA無しで302(数えない・5Sec軍議 2026-10-23) / counted=人として数えた。
   const cf = request.cf || {};
   const isDc = isDatacenterASN(cf.asn);
   const verdict = (ua && isBot) ? "bot" : (optedOut || markSelf) ? "self" : isDc ? "dc" : !ua ? "noua" : "counted";
@@ -209,8 +209,8 @@ async function handleRedirect(code, env, ctx, request) {
   }
   const headers = { Location: urlStr, "Cache-Control": "no-store" };
   if (markSelf) headers["Set-Cookie"] = "go5nc=1; Max-Age=63072000; Path=/; Secure; SameSite=Lax";
-  if (!optedOut && !markSelf && !isDc) {
-    // クリックを概算カウント（リダイレクトはブロックしない）。自分(除外対象)/ボットなら数えない。
+  if (verdict === "counted") {
+    // クリックを概算カウント（リダイレクトはブロックしない）。自分/ボット/データセンター/UA無しは数えない。
     if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(bumpClickCount(env, code, urlStr));
   }
   // 302（恒久キャッシュでカウントが漏れないよう一時リダイレクト）
