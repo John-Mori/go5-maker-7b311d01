@@ -458,9 +458,25 @@
   // 選んだサブタブは端末に覚える(Chami 2026-10-22「いちいち手動追加にページが戻る」)。
   //   iOS Safariは外部リンクから戻るとページを丸ごと再読込することがあり、メモリだけだと毎回 main へ戻っていた。
   //   端末ローカルのみ(lsSet を通さない=他端末へ同期しない)。消えたタブidは render() 冒頭で main へ戻す。
+  //   v1087: iPhoneのLSが満杯だと新しいキーの setItem が黙って失敗し、毎回 main へ戻っていた(v1085が効かなかった原因)。
+  //   sessionStorage(別枠の容量・同じタブの画面遷移を跨ぐ)を先に読み書きし、LSは予備。LS失敗時は空きを作って1回だけ再試行する。
   var K_ACTIVE_TAB = 'cand_active_tab';
-  var _activeTab = (function () { try { return localStorage.getItem(K_ACTIVE_TAB) || 'main'; } catch (e) { return 'main'; } })(); // 'main' | サークルタブid
-  function saveActiveTab_() { try { localStorage.setItem(K_ACTIVE_TAB, _activeTab); } catch (e) {} }
+  var _activeTab = (function () {
+    try { var s = sessionStorage.getItem(K_ACTIVE_TAB); if (s) return s; } catch (e) {}
+    try { return localStorage.getItem(K_ACTIVE_TAB) || 'main'; } catch (e) { return 'main'; }
+  })(); // 'main' | サークルタブid
+  // 覚えていたサークルタブがまだ同期で届いていない時は一時的に main を見せるだけで、覚えたidは上書きしない(届いたら戻す)。
+  var _tabFallbackFrom = null;
+  function saveActiveTab_() {
+    if (_tabFallbackFrom) { if (_activeTab === 'main') return; _tabFallbackFrom = null; }
+    try { sessionStorage.setItem(K_ACTIVE_TAB, _activeTab); } catch (e) {}
+    try { if (localStorage.getItem(K_ACTIVE_TAB) === _activeTab) return; } catch (e) {}
+    try { localStorage.setItem(K_ACTIVE_TAB, _activeTab); }
+    catch (e) {
+      try { reclaimLsQuota_(); localStorage.setItem(K_ACTIVE_TAB, _activeTab); }
+      catch (e2) { klog_('active_tab_save_fail', 'tab', _activeTab, { err: String(e2 && e2.name) }); }
+    }
+  }
   var _sort = 'added_desc'; // 現在表示中の並び順。タブ入場時に defaultSortForTab_ で上書きされる(下 render())。
   var _sortTab = null;      // _sort を最後に既定へ揃えたタブ。タブが実際に変わった時だけ既定へ戻す目印(再描画では触らない)
   var _showHidden = false;
@@ -2587,6 +2603,7 @@
   try { document.addEventListener('go5-synced', function (e) {
     var d = e && e.detail || {};
     if (d.pulledCand) bgRender_();
+    else if (_tabFallbackFrom && lsGet(K_TABS, '[]').some(function (t) { return t.id === _tabFallbackFrom; })) render(); // 覚えていたタブが同期で届いた
     if (d.pulledImg) reHydrateFromSync_(d.pulledImgKeys || []);
   }); } catch (e) {}
   // 同期受信のcand_text(メモ等)がLS満杯でIDBミラーへ着地した時は、ミラーから読み直して描画する。
@@ -4593,7 +4610,9 @@
     //   _sortTab===_activeTab のため _sort に触れない=ユーザーがその場で選んだ順を保つ(Chami指示2026-08-24)。
     var tabs = lsGet(K_TABS, '[]');
     // 覚えていたタブが削除済み(他端末で消した等)なら、タブ帯を描く前に手動追加へ戻す=どのボタンも選ばれていない状態を作らない
-    if (['buzz', 'auto', 'main', 'all'].indexOf(_activeTab) < 0 && !tabs.some(function (t) { return t.id === _activeTab; })) _activeTab = 'main';
+    //   ただし同期の到着前で一時的に無いだけかもしれないので、覚えたidは保存し直さず(_tabFallbackFrom)、届いた次の描画で戻す。
+    if (_tabFallbackFrom && _activeTab === 'main' && tabs.some(function (t) { return t.id === _tabFallbackFrom; })) { _activeTab = _tabFallbackFrom; _tabFallbackFrom = null; }
+    if (['buzz', 'auto', 'main', 'all'].indexOf(_activeTab) < 0 && !tabs.some(function (t) { return t.id === _activeTab; })) { _tabFallbackFrom = _activeTab; _activeTab = 'main'; }
     if (_sortTab !== _activeTab) { _sort = defaultSortForTab_(_activeTab); _sortTab = _activeTab; }
     var tabBtns = '<button class="cand-tab cand-tab-buzz' + (_activeTab === 'buzz' ? ' active' : '') + '" data-ct="buzz" type="button">🦋 ' + esc(builtinTabLabel_('buzz')) + '</button>' +
       '<button class="cand-tab' + (_activeTab === 'auto' ? ' active' : '') + '" data-ct="auto" type="button">' + esc(builtinTabLabel_('auto')) + '</button>' +
@@ -4610,7 +4629,7 @@
     page.querySelectorAll('.cand-tab[data-ct]').forEach(function (b) {
       b.addEventListener('click', function () {
         if (_suppressNextClick) { _suppressNextClick = false; return; } // 直前の並べ替え操作の後続クリックは無視
-        _activeTab = b.getAttribute('data-ct'); _showHidden = false; render();
+        _activeTab = b.getAttribute('data-ct'); _tabFallbackFrom = null; _showHidden = false; render();
       });
     });
     var addBtn = $('candAddTab');
@@ -4865,6 +4884,7 @@
     function load_() {
       if (_filterToday) { fallback_(); return; } // 今日印は同期LSの作品スナップが正本。サーバーカタログへ全件問い合わせしない。
       var page = _candPageByTab.all || 1, size = candPageSize_();
+      saveCandPage_(); // 全候補のページ番号も再読込を跨いで残す(v1087)
       var wrap = $('candPageWrap'); if (wrap) wrap.setAttribute('aria-busy', 'true');
       var seq = ++_allLoadSeq; // 最後に出した読み込みだけを描く(条件を変える前の遅い返事で絞った一覧を上書きしない)
       catalogPage_({ sort: _sort, page: page, limit: size, q: searchQueryRaw_(_workSearchByTab.all || ''), sale: _filterSale ? 1 : 0,
@@ -4873,7 +4893,7 @@
         if (seq !== _allLoadSeq) return;
         if (wrap) wrap.removeAttribute('aria-busy');
         if (!j) { fallback_(); return; }
-        _candPageByTab.all = j.page || 1; progressText_(j.progress); paint_(j.items || [], j.total || 0, j.page || 1, j.pages || 1, false);
+        _candPageByTab.all = j.page || 1; saveCandPage_(); progressText_(j.progress); paint_(j.items || [], j.total || 0, j.page || 1, j.pages || 1, false);
         // 初回の裏取得が進んだ分だけ、画面を開いたままでも最大5回追従。常時ポーリングにはしない。
         if (j.progress && (j.progress.pending || j.progress.running) && catalogPolls < 5 && _activeTab === 'all') {
           catalogPolls++; setTimeout(function () { if (_activeTab === 'all') load_(); }, 10000);
@@ -6474,7 +6494,7 @@
     var tabs = lsGet(K_TABS, '[]');
     var tab = null; tabs.forEach(function (t) { if (t.id === tabId) tab = t; });
     var body = $('candBody');
-    if (!tab) { _activeTab = 'main'; render(); return; }
+    if (!tab) { if (_activeTab === tabId) _tabFallbackFrom = tabId; _activeTab = 'main'; render(); return; }
     body.innerHTML = '<div class="card" style="padding:10px 12px;">' +
       '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
       sortControlHtml_() +

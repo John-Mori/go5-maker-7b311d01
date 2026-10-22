@@ -27,6 +27,42 @@ test.describe('candidate tab survives reload', () => {
     await expect(page.locator('.cand-tab.active')).toHaveCount(1);
   });
 
+  // v1087: 実機の引き金=iPhoneのLSが満杯で新しいキー cand_active_tab が書けない→画面遷移で戻るたび手動追加(v1085はここを素通りした)
+  test('LSが満杯でも、動画作成画面へ行って戻った時に選んだタブのまま', async ({ page }) => {
+    await page.addInitScript(() => {
+      const orig = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (k, v) {
+        if (this === window.localStorage && k === 'cand_active_tab') { const e = new Error('quota'); e.name = 'QuotaExceededError'; throw e; }
+        return orig.call(this, k, v);
+      };
+    });
+    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
+    await page.locator('.cand-tab[data-ct="auto"]').click();
+    await expect(page.locator('.cand-tab.active[data-ct="auto"]')).toBeVisible();
+    await page.goto('index.html', { waitUntil: 'domcontentloaded' });
+    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('.cand-tab.active[data-ct="auto"]')).toBeVisible();
+    await expect(page.locator('.cand-tab.active')).toHaveCount(1);
+  });
+
+  test('覚えていたサークルタブが同期前で無い時は一時的に手動追加、届いたら元のタブへ戻り覚えたidも消えない', async ({ page }) => {
+    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
+    await page.evaluate(() => {
+      localStorage.removeItem('cand_tabs');
+      localStorage.setItem('cand_active_tab', 'ct_sync1');
+      sessionStorage.removeItem('cand_active_tab');
+    });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page.locator('.cand-tab.active[data-ct="main"]')).toBeVisible();
+    expect(await page.evaluate(() => localStorage.getItem('cand_active_tab'))).toBe('ct_sync1');
+    await page.evaluate(() => {
+      localStorage.setItem('cand_tabs', JSON.stringify([{ id: 'ct_sync1', name: '同期タブ' }]));
+      document.dispatchEvent(new CustomEvent('go5-synced', { detail: {} }));
+    });
+    await expect(page.locator('.cand-tab.active[data-ct="ct_sync1"]')).toBeVisible();
+    await expect(page.locator('.cand-tab.active')).toHaveCount(1);
+  });
+
   test('page number of the list is kept after reload', async ({ page }) => {
     await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
     await page.evaluate(() => {
