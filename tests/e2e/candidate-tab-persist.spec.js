@@ -46,13 +46,14 @@ test.describe('candidate tab survives reload', () => {
   });
 
   test('覚えていたサークルタブが同期前で無い時は一時的に手動追加、届いたら元のタブへ戻り覚えたidも消えない', async ({ page }) => {
-    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
-    await page.evaluate(() => {
+    // 開いたままのページの再描画が先に main を書き戻す競合を避けるため、ページのスクリプトより前に仕込む(初回だけ)
+    await page.addInitScript(() => {
+      if (sessionStorage.getItem('__e2e_seeded')) return;
+      sessionStorage.setItem('__e2e_seeded', '1');
       localStorage.removeItem('cand_tabs');
       localStorage.setItem('cand_active_tab', 'ct_sync1');
-      sessionStorage.removeItem('cand_active_tab');
     });
-    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.goto('KouhoLists.html', { waitUntil: 'domcontentloaded' });
     await expect(page.locator('.cand-tab.active[data-ct="main"]')).toBeVisible();
     expect(await page.evaluate(() => localStorage.getItem('cand_active_tab'))).toBe('ct_sync1');
     await page.evaluate(() => {
