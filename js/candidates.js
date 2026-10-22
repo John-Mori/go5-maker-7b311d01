@@ -6324,13 +6324,16 @@
     // 0件でも検索欄・件数・追加導線を残す。早期returnすると、画像/投稿済みフィルターで0件になったPCから
     // 検索による救出ができず「検索が機能しない」に見えるため、空一覧も同じ描画パイプへ通す。
     var hidden = lsGet(hiddenKey(tabId), '[]'), hset = {}; hidden.forEach(function (c) { hset[c] = true; });
+    // 🤖自動追加はXの元ポスト由来で画像0〜1枚が普通=「画像2枚未満は隠す」を掛けると全件消える。
+    //   全候補と同じく投稿済み(クールタイム/月・桜)だけで隠す(Chami 2026-10-23 03:49「癒やし非表示にしたら全部表示されなくなる」)。
+    var hiddenByPosted_ = (tabId === 'auto') ? isHiddenByPostedForAll_ : isHiddenByPosted_;
     var filt_ = function (it) {
       if (!candidateKindPass_(it, _filterDoujin, _filterBooks)) return false;
       if (!todayPass_(it)) return false;
       if (!(_showHidden ? hset[it.cid] : !hset[it.cid])) return false;
       if (_filterSale && !isOnSale_(it)) return false;
       if (!passPrice_(it)) return false;
-      if (!_showHidden && isHiddenByPosted_(it)) return false; // アカウント別「投稿済みを非表示」
+      if (!_showHidden && hiddenByPosted_(it)) return false; // アカウント別「投稿済みを非表示」
       return true;
     };
     var arr = sortItems(all, _sort).filter(filt_);
@@ -6386,7 +6389,7 @@
         if (!(_showHidden ? hs2[it.cid] : !hs2[it.cid])) return false;
         if (_filterSale && !isOnSale_(it)) return false;
         if (!passPrice_(it)) return false;
-        if (!_showHidden && isHiddenByPosted_(it)) return false;
+        if (!_showHidden && hiddenByPosted_(it)) return false;
         return true;
       });
       _cardIndex = {}; arr2.forEach(function (it) { _cardIndex[it.cid] = it; });
