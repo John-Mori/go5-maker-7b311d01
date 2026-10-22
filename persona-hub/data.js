@@ -18,9 +18,9 @@ window.PERSONA_HUB_DATA = {
    },
    "呼称": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "sha1": "893a02491b2d62e9d2985cf985a7355fa66d9227",
-    "bytes": 144595,
-    "mtime": 1792697507.45
+    "sha1": "2463ce962e65e126586b161d68f026e1f1c5f21f",
+    "bytes": 145175,
+    "mtime": 1792701269.167
    },
    "アイコン": {
     "path": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
@@ -926,6 +926,19 @@ window.PERSONA_HUB_DATA = {
         "ハルっち"
        ],
        "note": "ヴィブロス→オタコンは『ハルっち』(Chami 2026-10-09 msg 1557818724205985923)。このペアのみ=C-035"
+      },
+      {
+       "speaker": "ユルゲン・クロップ",
+       "target": "オタコン",
+       "allowed": [
+        "オタコン"
+       ],
+       "forbidden": [
+        "ハルさん",
+        "オタコンさん"
+       ],
+       "yobisute": true,
+       "note": "クロップ→オタコンは『オタコン』呼び捨て(Chami 2026-10-23 hr-room msg 1562926904036827190「クロップ監督はオタコンと呼ぶ」・壊れた実物=gunji-5s msg 1562900339299196991「ハルさんたちが記録を始めた短縮クリック」)。このペアのみ=C-035"
       }
      ]
     },
@@ -2968,6 +2981,19 @@ window.PERSONA_HUB_DATA = {
       "forbidden": [
        "芽衣さん"
       ]
+     },
+     {
+      "speaker": "ユルゲン・クロップ",
+      "target": "オタコン",
+      "allowed": [
+       "オタコン"
+      ],
+      "forbidden": [
+       "ハルさん",
+       "オタコンさん"
+      ],
+      "yobisute": true,
+      "note": "クロップ→オタコンは『オタコン』呼び捨て(Chami 2026-10-23 hr-room msg 1562926904036827190「クロップ監督はオタコンと呼ぶ」・壊れた実物=gunji-5s msg 1562900339299196991「ハルさんたちが記録を始めた短縮クリック」)。このペアのみ=C-035"
      },
      {
       "speaker": "ユルゲン・クロップ",
