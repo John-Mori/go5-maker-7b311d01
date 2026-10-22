@@ -18,9 +18,9 @@ window.PERSONA_HUB_DATA = {
    },
    "呼称": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "sha1": "eb4158f07536bc1861f4820b5ba2a8c99308e4cb",
-    "bytes": 143309,
-    "mtime": 1792590740.38
+    "sha1": "34c18a815b9bfcce9f8a625cb3db27abefeb26bc",
+    "bytes": 143940,
+    "mtime": 1792691608.472
    },
    "アイコン": {
     "path": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
@@ -677,6 +677,20 @@ window.PERSONA_HUB_DATA = {
        "note": "愛称『アイ』(almondeye_address と一致)"
       },
       {
+       "speaker": "カスミ",
+       "target": "アーモンドアイ",
+       "allowed": [
+        "アイ"
+       ],
+       "forbidden": [
+        "アーモンドアイさん",
+        "アイさん",
+        "アイちゃん"
+       ],
+       "yobisute": true,
+       "note": "カスミ→アイは『アイ』呼び捨て(Chami 2026-10-23 hr-room msg 1562886200971362436「カスミはアーモンドアイをアイと呼ぶ」・壊れた実物=web-research msg 1562849279733923940「アーモンドアイさん、受け取ったよ」)。almondeye_address.by_speakerと一致。このペアのみ=C-035"
+      },
+      {
        "speaker": "三笘薫",
        "target": "アーモンドアイ",
        "allowed": [
@@ -1162,6 +1176,20 @@ window.PERSONA_HUB_DATA = {
        "ジェンティルドンナさん"
       ],
       "note": "★2026-09-29 Chami指示(hr部屋 msg 1554165253925765261「カスミは莉波さん、ヴィルシーナさん、ジェンティルドンナさんとそれぞれ呼ぶ」)。生成側の正本=kasumi.md 呼び方。"
+     },
+     {
+      "speaker": "カスミ",
+      "target": "アーモンドアイ",
+      "allowed": [
+       "アイ"
+      ],
+      "forbidden": [
+       "アーモンドアイさん",
+       "アイさん",
+       "アイちゃん"
+      ],
+      "yobisute": true,
+      "note": "カスミ→アイは『アイ』呼び捨て(Chami 2026-10-23 hr-room msg 1562886200971362436「カスミはアーモンドアイをアイと呼ぶ」・壊れた実物=web-research msg 1562849279733923940「アーモンドアイさん、受け取ったよ」)。almondeye_address.by_speakerと一致。このペアのみ=C-035"
      }
     ]
    }
