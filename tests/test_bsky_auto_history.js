@@ -56,7 +56,7 @@ eq([r3.reason, r3.autoRecorded], ['dupe', false], '確定後の二度押しは�
 
 console.log('--- stock.js の配線 ---');
 const st = read('js/stock.js');
-eq(/var hr = autoRecordBskyHistory_\(meta\);/.test(st), true, 'Bluesky投稿成功後に自動記録を呼ぶ');
+eq(/var hr = autoRecordBskyHistory_\(meta, fresh\);/.test(st), true, 'Bluesky投稿成功後に自動記録を呼ぶ');
 eq(/opts\.autoRecorded = true;/.test(st), true, '自動記録は autoRecorded を付けて渡す');
 eq(/_res\.reason === 'dupe' && _res\.autoRecorded && _res\.matchedBy === 'videoId'\) \{/.test(st), true, '自動記録行への投稿完了は確認ダイアログを出さない');
 eq(/var _hpOpts = histOptsOf_\(meta, ytUrl, shortUrl, pd\);/.test(st), true, '投稿完了と自動記録は同じ引数組み立てを使う');

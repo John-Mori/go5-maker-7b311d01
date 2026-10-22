@@ -35,13 +35,36 @@
     });
     return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
   }
-  function loadDraftPost_(id) { try { return JSON.parse(localStorage.getItem('go5_draft_post_' + id) || '{}') || {}; } catch (e) { return {}; } }
+  // LSへ書けなかったドラフト投稿データの控え(このページの寿命の間だけ)。書けた時点で消す。
+  var _draftPostUnsaved = {};
+  function loadDraftPost_(id) {
+    if (_draftPostUnsaved[id]) return JSON.parse(JSON.stringify(_draftPostUnsaved[id]));
+    try { return JSON.parse(localStorage.getItem('go5_draft_post_' + id) || '{}') || {}; } catch (e) { return {}; }
+  }
+  // go5_draft_post_ の書き込み(v1088)。LSが満杯で落ちたら候補画像の死荷重を空けて書き直す。
+  //   旧実装は setItem の失敗を空catchで握りつぶし、Bluesky投稿のURL(bskyParentUrl)がiPhoneに残らず
+  //   投稿モーダルの「✅ 投稿済み」行が消えていた(Chami 2026-10-22 msg 1562790223455461446)。
+  //   書けない間は _draftPostUnsaved に控え、空きができた時点で書き直す。戻り値=今LSへ書けたか。
+  function writeDraftPost_(id, sv) {
+    var k = 'go5_draft_post_' + id, v = JSON.stringify(sv);
+    function tryWrite() { try { localStorage.setItem(k, v); delete _draftPostUnsaved[id]; return true; } catch (e) { return false; } }
+    if (tryWrite()) return true;
+    _draftPostUnsaved[id] = JSON.parse(v);
+    try { console.warn('[stock] go5_draft_post_ write failed (quota?) id=' + id); } catch (e) {}
+    var rc = window.Go5ReclaimLs;
+    if (typeof rc === 'function') {
+      var p = null; try { p = rc(); } catch (e) { p = null; }
+      if (tryWrite()) return true; // 同期で空いた分で書けた
+      if (p && typeof p.then === 'function') p.then(function () { if (_draftPostUnsaved[id] && tryWrite()) kickSync_(); }, function () {});
+    }
+    return false;
+  }
   // go5_draft_post_ へ指定フィールドだけ非破壊マージ(本文編集の「空=未編集」判定に触れない)。
   function mergeDraftPost_(id, obj) {
     try {
-      var k = 'go5_draft_post_' + id, sv = loadDraftPost_(id), changed = false;
+      var sv = loadDraftPost_(id), changed = false;
       Object.keys(obj).forEach(function (f) { if (obj[f] && sv[f] !== obj[f]) { sv[f] = obj[f]; changed = true; } });
-      if (changed) { localStorage.setItem(k, JSON.stringify(sv)); kickSync_(); }
+      if (changed) { writeDraftPost_(id, sv); kickSync_(); }
     } catch (e) {}
   }
   var BSKY_DRAFT_FIELDS_ = ['bskyParentUrl', 'bskyReplyUrl', 'bskyWorkShortUrl', 'bskyParentShortUrl', 'bskyReplyShortUrl'];
@@ -1410,7 +1433,7 @@
   // Bluesky親+返信を投げた時点で投稿履歴へ自動で1件載せる(Chami 2026-10-13 msg 1559255858628534303)。
   //   ドラフトは残す(作成履歴への退避は従来どおり投稿完了で)。後の投稿完了は同じ背骨IDの行へYouTube URL等を追記する。
   //   戻り値は addCompletedPost の結果(ok/dupe/…)。記録の失敗は投稿の失敗ではないので例外は投げない。
-  function autoRecordBskyHistory_(meta) {
+  function autoRecordBskyHistory_(meta, fresh) {
     try {
       if (!(window.Go5History && typeof window.Go5History.addCompletedPost === 'function')) return { ok: false, reason: 'unavailable' };
       if (!meta.videoId && window.IdGen && window.IdGen.makeVideoId) {
@@ -1423,6 +1446,8 @@
       // ★説明欄へ入れたBluesky短縮(子>親)を導線1として最初から載せる。旧実装は '' を渡し、
       //   投稿完了を押すまで白矢印の計測コードが無かった(Chami 2026-10-13 msg 1559338789447409784「概要欄クリックが計測ない」)。
       var pd0 = loadDraftPost_(meta.id);
+      // 投稿直後の結果は保存の成否に関わらず履歴の行へ載せる(v1088・LS満杯で落ちると親/返信URLが行から消えていた)。
+      if (fresh) Object.keys(fresh).forEach(function (f) { if (fresh[f] && !pd0[f]) pd0[f] = fresh[f]; });
       var opts = histOptsOf_(meta, meta.youtubeUrl || '', bskyDescShortOf_(pd0), pd0);
       opts.autoRecorded = true;
       return window.Go5History.addCompletedPost(opts) || { ok: false, reason: 'unknown' };
@@ -3142,10 +3167,10 @@
     // ★導線2の計測用短縮URL(mintDraftWorkShort_ が発行して残す正本フィールド)は、この本文保存で
     //   握り潰さないよう既存レコードから引き継ぐ(dataに項目が無いとJSON全置換で消える=空欄再発の穴)。
     try {
-      var _ex0 = JSON.parse(localStorage.getItem('go5_draft_post_' + _modalMeta.id) || '{}') || {};
+      var _ex0 = loadDraftPost_(_modalMeta.id); // LSへ書けなかった控えも含めて引き継ぐ(v1088)
       ['workShortUrl', 'workShareUrl', 'workShortFor'].concat(BSKY_DRAFT_FIELDS_).forEach(function (f) { if (_ex0[f] && !data[f]) data[f] = _ex0[f]; });
     } catch (e) {}
-    try { localStorage.setItem('go5_draft_post_' + _modalMeta.id, JSON.stringify(data)); } catch (e) {}
+    try { writeDraftPost_(_modalMeta.id, data); } catch (e) {}
     kickSync_(); // 投稿編集も全端末へ運ぶ
   }
 
@@ -3547,8 +3572,30 @@
     var xi = $('draftXReply'); if (xi) xi.value = split ? replyLink : ''; // 短縮前/失敗時は生リンク(踏める)
     renderBskyStatus_(saved);
   }
+  // ドラフト側にBlueskyのURLが残っていない時は、投稿履歴の自動記録行(同じvideoId)から取り戻す(v1088)。
+  //   旧版でLS満杯のため保存に落ちたドラフトも、履歴の行に親URLがあれば「✅ 投稿済み」を出せる。
+  function bskyFromHist_(meta) {
+    if (!meta || !meta.videoId) return null;
+    var a = meta.account || 'acc1', arr = [];
+    // 自動記録行は手動側(verify_manual__)へ入る。旧来の短縮履歴(short_hist__)も見る。
+    ['verify_manual__', 'short_hist__'].forEach(function (p) { try { arr = arr.concat(JSON.parse(localStorage.getItem(p + a) || '[]') || []); } catch (e) {} });
+    try {
+      for (var i = 0; i < arr.length; i++) {
+        var it = arr[i];
+        if (it && it.videoId === meta.videoId && it.bskyParentUrl) {
+          var o = {}; BSKY_DRAFT_FIELDS_.forEach(function (f) { if (it[f]) o[f] = String(it[f]); });
+          return o;
+        }
+      }
+    } catch (e) {}
+    return null;
+  }
   function renderBskyStatus_(saved) {
     var st = $('draftBskyStatus'); if (!st) return;
+    if (!(saved && saved.bskyParentUrl) && _modalMeta) {
+      var hb = bskyFromHist_(_modalMeta);
+      if (hb) { saved = Object.assign({}, saved || {}, hb); mergeDraftPost_(_modalMeta.id, hb); }
+    }
     if (saved && saved.bskyParentUrl) {
       st.innerHTML = '✅ 投稿済み 親：<a href="' + esc(saved.bskyParentUrl) + '" target="_blank" rel="noopener">開く</a>' +
         (saved.bskyReplyUrl ? '／返信：<a href="' + esc(saved.bskyReplyUrl) + '" target="_blank" rel="noopener">開く</a>' : '') +
@@ -3599,10 +3646,13 @@
       var bskyBody = applyPromo_(masterBody_(meta), meta, true);
       return window.Go5DraftBskyThread({ account: meta.account || 'acc1', parentText: parentText, workLink: aff, imageBlob: blob || null, draftId: meta.id, childText: childText, bskyBody: bskyBody });
     }).then(function (r) {
-      mergeDraftPost_(meta.id, { bskyParentUrl: r.parentUrl, bskyReplyUrl: r.replyUrl, bskyWorkShortUrl: r.bskyWorkShortUrl, bskyParentShortUrl: r.parentShortUrl, bskyReplyShortUrl: r.replyShortUrl });
+      var fresh = { bskyParentUrl: r.parentUrl, bskyReplyUrl: r.replyUrl, bskyWorkShortUrl: r.bskyWorkShortUrl, bskyParentShortUrl: r.parentShortUrl, bskyReplyShortUrl: r.replyShortUrl };
+      mergeDraftPost_(meta.id, fresh);
       if (_modalMeta === meta) { setDescUrlSlot_(r.replyShortUrl || r.replyUrl || r.parentShortUrl || r.parentUrl); saveDraftPost_(); }
-      renderBskyStatus_(loadDraftPost_(meta.id));
-      var hr = autoRecordBskyHistory_(meta);
+      // 表示は手元の投稿結果から描く=保存が満杯で落ちても「✅ 投稿済み」を消さない(v1088)。
+      var shown = loadDraftPost_(meta.id); Object.keys(fresh).forEach(function (f) { if (fresh[f]) shown[f] = fresh[f]; });
+      renderBskyStatus_(shown);
+      var hr = autoRecordBskyHistory_(meta, fresh);
       if (st && hr && (hr.ok || hr.reason === 'dupe' || hr.reason === 'persist-pending')) st.innerHTML += '<br>📒 投稿履歴へは投稿完了を押した時に載ります(Blueskyの記録は控えてあります)。';
       else if (st) st.innerHTML += '<br>⚠️ 投稿履歴への自動記録はできませんでした(理由=' + esc((hr && hr.reason) || '不明') + ')。投稿完了を押せば載ります。';
     }).catch(function (e) {

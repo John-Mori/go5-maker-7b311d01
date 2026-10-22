@@ -5678,6 +5678,8 @@
       });
     }).catch(function () { if (inboxTimer) clearTimeout(inboxTimer); return null; }).then(function (res) { _candInboxBusy = false; return res; });
   }
+  // 満杯時の喪失安全な空け(投稿ドラフトの保存など他画面からも使う・v1088)。
+  try { window.Go5ReclaimLs = reclaimLsQuota_; } catch (e) {}
   try { window.Go5CandInbox = { importNow: function () { return importCandInbox_(true); } }; } catch (e) {}
 
   function renderMain(tabId) {
