@@ -5556,8 +5556,8 @@
     if (n) candItemsWrite_(autoKey, items);
     return n;
   }
-  function fetchImgScaled_(url) {
-    var u = /\?/.test(url) ? url : url + '?name=large';
+  function fetchImgScaled_(url, raw) {
+    var u = (raw || /\?/.test(url)) ? url : url + '?name=large'; // ?name=large は pbs.twimg.com 用
     var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
     var timer = ctrl ? setTimeout(function () { try { ctrl.abort(); } catch (e) {} }, 15000) : null;
     var opts = { mode: 'cors', cache: 'force-cache' }; if (ctrl) opts.signal = ctrl.signal;
@@ -5681,6 +5681,112 @@
   // 満杯時の喪失安全な空け(投稿ドラフトの保存など他画面からも使う・v1088)。
   try { window.Go5ReclaimLs = reclaimLsQuota_; } catch (e) {}
   try { window.Go5CandInbox = { importNow: function () { return importCandInbox_(true); } }; } catch (e) {}
+
+  // 今日のおすすめ(daily_pick・acc3)の帯(設計 2026-10-24 §1)。5S部門の06:00便→publish_daily_pick.py→R2→
+  //   sync-worker GET /api/daily-pick/latest を、動画作成タブを開いた時に取りに行く(cand-inbox と同じトークン)。
+  //   端末ローカル daily_pick_v1 に置く(同期しない=各端末が取りに行く)。押した作品は daily_pick_done(cid→ts)。
+  //   カードを押す=既存の transferToMovie_ を呼ぶだけ(#top/#movieWorkUrl/前景画像)。動画合成は「ドラフトで作成」が要る。
+  var DAILY_PICK_KEY = 'daily_pick_v1', DAILY_PICK_DONE = 'daily_pick_done';
+  var _dailyPickAt = 0, _dailyPickBusy = false;
+  function dailyPickDoc_() { var d = lsGet(DAILY_PICK_KEY, 'null'); return (d && Array.isArray(d.items)) ? d : null; }
+  function dailyPickDone_() { var d = lsGet(DAILY_PICK_DONE, '{}'); return (d && typeof d === 'object' && !Array.isArray(d)) ? d : {}; }
+  function fetchDailyPick_(force) {
+    var now = new Date().getTime();
+    if (_dailyPickBusy || (!force && now - _dailyPickAt < 10 * 60 * 1000)) return Promise.resolve(dailyPickDoc_());
+    var c = null; try { c = window.Go5Sync && window.Go5Sync.getConfig && window.Go5Sync.getConfig(); } catch (e) {}
+    var url = (c && c.url) || '', token = (c && c.token) || '';
+    if (!/^https?:\/\//.test(url) || !token) return Promise.resolve(dailyPickDoc_());
+    _dailyPickBusy = true; _dailyPickAt = now;
+    var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    var timer = ctrl ? setTimeout(function () { try { ctrl.abort(); } catch (e) {} }, 12000) : null;
+    var opts = { headers: { 'X-Sync-Token': token }, cache: 'no-store' };
+    if (ctrl) opts.signal = ctrl.signal;
+    return fetch(url + '/api/daily-pick/latest', opts).then(function (r) {
+      if (timer) clearTimeout(timer);
+      return r.ok ? r.json() : null;
+    }).then(function (doc) {
+      if (doc && Array.isArray(doc.items) && doc.items.length) {
+        doc.syncBase = url; // フック画像(/img/:key)の配信元
+        lsSet(DAILY_PICK_KEY, doc);
+      }
+      return dailyPickDoc_();
+    }).catch(function () { if (timer) clearTimeout(timer); return dailyPickDoc_(); })
+      .then(function (d) { _dailyPickBusy = false; return d; });
+  }
+  function dailyPickImgSrc_(doc, it) {
+    var h = (it && it.hook) || {};
+    if (h.r2_key && /^[a-f0-9]{16,64}$/.test(h.r2_key) && doc.syncBase) return doc.syncBase + '/img/' + h.r2_key;
+    return /^https:\/\//.test(String(h.url || '')) ? String(h.url) : '';
+  }
+  function dailyPickToday_() {
+    var d = new Date(new Date().getTime() + 9 * 3600 * 1000);
+    return d.toISOString().slice(0, 10);
+  }
+  function renderDailyPick_() {
+    var band = document.getElementById('dailyPickBand');
+    if (!band) return;
+    var doc = dailyPickDoc_();
+    // 前日以前の分は出さない(古いおすすめを今日の物と取り違えない)。
+    if (!doc || !doc.items.length || String(doc.date || '') !== dailyPickToday_()) { band.hidden = true; band.innerHTML = ''; return; }
+    var done = dailyPickDone_(), md = String(doc.date).slice(5).replace('-', '/');
+    var cards = doc.items.slice(0, 5).map(function (it, i) {
+      var cid = String(it.cid || ''), src = dailyPickImgSrc_(doc, it), isDone = !!done[cid];
+      var titles = (Array.isArray(it.titles) ? it.titles : []).filter(function (t) { return t && String(t.text || '').trim(); });
+      var radios = titles.map(function (t, j) {
+        return '<label style="display:flex;gap:6px;align-items:flex-start;margin:3px 0;font-size:13px;"><input type="radio" name="dpTitle_' + i + '" value="' + j + '"' + (j === 0 ? ' checked' : '') + '><span>' + esc(t.text) + '</span></label>';
+      }).join('');
+      var price = (it.price != null && it.price !== '') ? esc(String(it.price).replace(/円$/, '')) + '円' : '';
+      return '<div class="dp-card" data-i="' + i + '" style="border:1px solid var(--line,#ccc);border-radius:10px;padding:8px;margin-top:8px;' + (isDone ? 'opacity:.55;' : '') + '">' +
+        '<div style="display:flex;gap:8px;">' +
+          (src ? '<img src="' + esc(src) + '" alt="" loading="lazy" style="width:84px;height:84px;object-fit:cover;border-radius:6px;flex:0 0 auto;">' : '') +
+          '<div style="min-width:0;flex:1 1 auto;">' +
+            '<div style="font-weight:700;font-size:13px;">' + (i + 1) + '. ' + esc(it.title || cid) + '</div>' +
+            '<div class="hint" style="margin:2px 0 0;">' + esc(it.circle || '') + (price ? ' / ' + price : '') + (it.sales_n ? ' / 累計' + esc(it.sales_n) : '') + (isDone ? ' / 作成済み' : '') + '</div>' +
+          '</div>' +
+        '</div>' +
+        (radios || '<div class="hint">題名案なし</div>') +
+        '<button type="button" class="primary dp-go" data-i="' + i + '" style="width:100%;margin:6px 0 0;font-size:13px;padding:7px;">この作品でドラフトを作る</button>' +
+        '<div class="hint dp-msg" role="status" style="margin:4px 0 0;"></div>' +
+      '</div>';
+    }).join('');
+    band.innerHTML = '<div style="font-weight:700;">今日のおすすめ(' + esc(md) + '・癒やし倉庫)</div>' + cards;
+    band.hidden = false;
+    Array.prototype.forEach.call(band.querySelectorAll('.dp-go'), function (b) {
+      b.addEventListener('click', function () { applyDailyPick_(doc, Number(b.getAttribute('data-i')), b); });
+    });
+  }
+  function applyDailyPick_(doc, i, btn) {
+    var it = doc.items[i]; if (!it) return;
+    var card = btn.closest ? btn.closest('.dp-card') : null, msg = card ? card.querySelector('.dp-msg') : null;
+    var sel = card ? card.querySelector('input[name="dpTitle_' + i + '"]:checked') : null;
+    var titles = (Array.isArray(it.titles) ? it.titles : []).filter(function (t) { return t && String(t.text || '').trim(); });
+    var title = String(((titles[sel ? Number(sel.value) : 0]) || {}).text || '');
+    var cid = String(it.cid || ''), src = dailyPickImgSrc_(doc, it);
+    var dpNum_ = function (v) { var n = Number(String(v == null ? '' : v).replace(/[^\d.]/g, '')); return isFinite(n) && n > 0 ? n : undefined; };
+    var cand = { cid: cid, title: it.title || '', author: it.circle || '', price: dpNum_(it.price), listPrice: dpNum_(it.list_price) || dpNum_(it.price), discountPct: Number(it.discount_pct) || 0, genres: it.genres || [] };
+    if (msg) msg.textContent = '画像を読み込み中…';
+    btn.disabled = true;
+    var imgP = src ? fetchImgScaled_(src, true) : Promise.resolve(null);
+    imgP.then(function (dataUrl) {
+      if (!dataUrl && msg) msg.textContent = '画像を取れませんでした(写真欄から選んでください)';
+      // 由来の印(β-3「おすすめ枠」で使う)。動画作成タブの1件だけ=次の作品を押したら上書き。
+      try { sessionStorage.setItem('daily_pick_active', JSON.stringify({ date: doc.date, cid: cid, rank: it.rank || (i + 1), channel: doc.channel || 'acc3' })); } catch (e) {}
+      var done = dailyPickDone_(); done[cid] = new Date().getTime(); lsSet(DAILY_PICK_DONE, done);
+      klog_('daily_pick_apply', 'work', cid, { rank: it.rank || (i + 1), img: !!dataUrl });
+      return transferToMovie_(cand, dataUrl || '', title, it.work_url || '');
+    }).then(function () { btn.disabled = false; renderDailyPick_(); }, function () { btn.disabled = false; if (msg) msg.textContent = '流し込みに失敗しました'; });
+  }
+  function refreshDailyPick_(force) {
+    renderDailyPick_();
+    return fetchDailyPick_(force).then(function () { renderDailyPick_(); });
+  }
+  try { window.Go5DailyPick = { refresh: refreshDailyPick_ }; } catch (e) {}
+  try {
+    var _dpBoot = function () { var p = document.getElementById('pageMovie'); if (p && !p.hidden) refreshDailyPick_(false); };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _dpBoot); else _dpBoot();
+    // スマホは再読込せず前面へ戻すだけのことが多い=06:00便の後に開いても前日の帯のままにしない(10分おき)。
+    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') _dpBoot(); });
+  } catch (e) {}
 
   function renderMain(tabId) {
     tabId = tabId || 'main';

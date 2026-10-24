@@ -88,6 +88,7 @@
     }
     if (activeBtnId === 'rankBtn'    && window.YtRank)   window.YtRank.renderRank();
     if (activeBtnId === 'tabCand'    && window.Go5Cand)  window.Go5Cand.render();
+    if (activeBtnId === 'tabMovie'   && window.Go5DailyPick) window.Go5DailyPick.refresh(false); // 今日のおすすめ帯
     if (activeBtnId === 'reserveBtn' && window.Scheduler) window.Scheduler._renderTab();
     if (activeBtnId === 'tabStock'   && window.Go5Stock)  window.Go5Stock.render();
     // 投稿履歴タブ入場時は #ytClickList を必ず作り直す(=その時点の localStorage を正として描き直す)。

@@ -24,6 +24,8 @@
  *                                  ※書き込みは wrangler r2 object put（PC側=scripts/teian/publish_candidates.py）。
  *   GET  /api/cand-inbox         → PCが集めた候補(Grok X検索→FANZA)の受け箱JSON（トークン必須）。R2 cand_inbox/latest.json。
  *                                  未配信は {empty:true}。書き込みは scripts/grok_fanza/publish_cand_inbox.py(wrangler)。
+ *   GET  /api/daily-pick/latest  → 今日のおすすめ(acc3・3作品)JSON（トークン必須）。R2 daily_pick/latest.json。
+ *   GET  /api/daily-pick/:date   → 指定日分。未配信は {empty:true}。書き込みは scripts/teian/publish_daily_pick.py(wrangler)。
  *
  * セキュリティ：
  *   ・/api/* は X-Sync-Token（env.SYNC_TOKEN）一致必須。Origin は env.ALLOWED_ORIGINS（"*"可）。
@@ -75,6 +77,14 @@ export default {
       if (request.method !== "GET" && request.method !== "HEAD") return json({ ok: false, error: "method_not_allowed" }, 405, cors);
       if (!authOk(request, env)) return json({ ok: false, error: "bad_token" }, 403, cors);
       return serveTeian(decodeURIComponent(path.slice("/api/teian/".length)), env, cors);
+    }
+
+    // 今日のおすすめ(daily_pick) — 5S部門の06:00便が R2 daily_pick/<date>.json / latest.json へ置いた
+    //   acc3 のおすすめ3作品を、動画作成タブの「今日のおすすめ」帯が取り込む。teian と同型(書きは wrangler・読みはトークン必須)。
+    if (path.startsWith("/api/daily-pick/")) {
+      if (request.method !== "GET" && request.method !== "HEAD") return json({ ok: false, error: "method_not_allowed" }, 405, cors);
+      if (!authOk(request, env)) return json({ ok: false, error: "bad_token" }, 403, cors);
+      return serveDailyPick(decodeURIComponent(path.slice("/api/daily-pick/".length)), env, cors);
     }
 
     // 候補の受け箱 — PCのGrok候補パイプ(scripts/grok_fanza)が R2 cand_inbox/latest.json へ置いた
@@ -259,6 +269,17 @@ async function serveTeian(name, env, cors) {
   else return json({ ok: true, empty: true, candidates: [] }, 200, cors);
   const obj = await env.SYNC_IMAGES.get(key);
   if (!obj) return json({ ok: true, empty: true, candidates: [] }, 200, cors);
+  const body = await obj.text();
+  return new Response(body, { status: 200, headers: Object.assign({ "Content-Type": "application/json", "Cache-Control": "no-store" }, cors || {}) });
+}
+async function serveDailyPick(name, env, cors) {
+  if (!env.SYNC_IMAGES) return json({ ok: false, error: "r2_unset" }, 500, cors);
+  var key;
+  if (name === "latest" || name === "") key = "daily_pick/latest.json";
+  else if (/^\d{4}-\d{2}-\d{2}$/.test(name)) key = "daily_pick/" + name + ".json"; // 日付以外は弾く=パス横断防止
+  else return json({ ok: true, empty: true, items: [] }, 200, cors);
+  const obj = await env.SYNC_IMAGES.get(key);
+  if (!obj) return json({ ok: true, empty: true, items: [] }, 200, cors);
   const body = await obj.text();
   return new Response(body, { status: 200, headers: Object.assign({ "Content-Type": "application/json", "Cache-Control": "no-store" }, cors || {}) });
 }
