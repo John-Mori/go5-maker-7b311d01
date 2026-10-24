@@ -6,7 +6,8 @@ const { test, expect } = require('@playwright/test');
 
 const GAS = 'https://gas.e2e.test/exec';
 
-test('投稿モードのBluesky予約がacc3・枠の30分前・Bluesky用af_idでGASへ届き、開き直すとURLが埋まる', async ({ page }) => {
+test('投稿モードのBluesky予約がacc3・枠の30分前・Bluesky用af_idでGASへ届き、開き直すとURLが埋まる', async ({ page, baseURL }) => {
+  const SITE = new URL(baseURL || 'http://127.0.0.1/').origin; // 本番スモークはPages上で走る=サイト自身は通す
   const draftId = 'stk_e2e_bsky_reserve';
   const title = '予約で親と返信を出す';
   const posts = [];
@@ -24,7 +25,7 @@ test('投稿モードのBluesky予約がacc3・枠の30分前・Bluesky用af_id�
         : { ok: true, id: 'rsv_e2e_1', status: 'pending' };
       return route.fulfill({ status: 200, contentType: 'application/javascript', body: cb + '(' + JSON.stringify(d) + ');' });
     }
-    if (/^https?:\/\/(127\.0\.0\.1|localhost)[:/]/.test(u)) return route.continue();
+    if (u.startsWith(SITE + '/') || /^https?:\/\/(127\.0\.0\.1|localhost)[:/]/.test(u)) return route.continue();
     return route.abort(); // 短縮worker等の外部は落とす=返信は生のアフィリンク(af_id差し替え済み)になる
   });
   await page.goto('Stock.html', { waitUntil: 'domcontentloaded' });

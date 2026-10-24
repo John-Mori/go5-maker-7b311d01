@@ -7,8 +7,9 @@ const { test, expect } = require('@playwright/test');
 
 const GAS = 'https://gas.e2e.test/exec';
 
-test('おすすめ枠→枠−30分で予約・同枠の二重選択拒否・4本目の確認・カレンダーが予約登録済へ', async ({ page }) => {
+test('おすすめ枠→枠−30分で予約・同枠の二重選択拒否・4本目の確認・カレンダーが予約登録済へ', async ({ page, baseURL }) => {
   test.setTimeout(90000);
+  const SITE = new URL(baseURL || 'http://127.0.0.1/').origin; // 本番スモークはPages上で走る=サイト自身は通す
   const draftId = 'stk_e2e_slot_rules';
   const posts = [];
   const dialogs = [];
@@ -22,7 +23,7 @@ test('おすすめ枠→枠−30分で予約・同枠の二重選択拒否・4�
       const cb = new URL(u).searchParams.get('callback') || 'cb';
       return route.fulfill({ status: 200, contentType: 'application/javascript', body: cb + '(' + JSON.stringify({ ok: true, id: 'rsv_e2e_rules', status: 'pending' }) + ');' });
     }
-    if (/^https?:\/\/(127\.0\.0\.1|localhost)[:/]/.test(u)) return route.continue();
+    if (u.startsWith(SITE + '/') || /^https?:\/\/(127\.0\.0\.1|localhost)[:/]/.test(u)) return route.continue();
     return route.abort();
   });
   await page.goto('Stock.html', { waitUntil: 'domcontentloaded' });
