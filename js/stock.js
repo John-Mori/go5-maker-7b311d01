@@ -943,6 +943,17 @@
     });
   }
 
+  // 候補ページ「今日のおすすめ」帯が流し込み時にタブへ置く印(daily_pick_active)。作品URLにそのcidが入る時だけ由来とみなす
+  //   =帯の後に別作品を手で作った時へ印を誤って付けない。
+  function dailyPickMark_(workUrl, affUrl) {
+    var a = null;
+    try { a = JSON.parse(sessionStorage.getItem('daily_pick_active') || 'null'); } catch (e) { return null; }
+    if (!a || !a.cid) return null;
+    var aff = String(affUrl || '');
+    try { aff = decodeURIComponent(aff); } catch (e) {}
+    if ((String(workUrl || '') + ' ' + aff).indexOf(String(a.cid)) < 0) return null;
+    return { date: String(a.date || ''), cid: String(a.cid), rank: Number(a.rank) || 0 };
+  }
   function saveStock_(evDetail, hooks) {
     hooks = hooks || {}; // {onStart(id), onCommitted(id,meta,kind), onLocal(id), onCloud(id), onBothFailed(id)} — 検証済みシグナルだけを配る
     var ts = Date.now();
@@ -966,7 +977,8 @@
       cmtType: ($('movieCmtType') || {}).value || '',
       priceInfo: livePriceInfo_(($('movieWorkUrl') || {}).value || ($('movieWorkAffi') || {}).value || ''),
       youtubeUrl: '',
-      srcMark: (evDetail.srcMark && evDetail.srcMark.cid && evDetail.srcMark.hash) ? { cid: String(evDetail.srcMark.cid), hash: String(evDetail.srcMark.hash) } : null // 動画に使った候補画像(cid+ハッシュ)。投稿完了で使用日を刻む(Chami 2026-08-24)
+      srcMark: (evDetail.srcMark && evDetail.srcMark.cid && evDetail.srcMark.hash) ? { cid: String(evDetail.srcMark.cid), hash: String(evDetail.srcMark.hash) } : null, // 動画に使った候補画像(cid+ハッシュ)。投稿完了で使用日を刻む(Chami 2026-08-24)
+      dailyPick: dailyPickMark_(($('movieWorkUrl') || {}).value || '', ($('movieWorkAffi') || {}).value || '') // 今日のおすすめ由来(投稿モードの「おすすめ枠」を出す印)
     };
 
     // Phase 0: メタはメモリ上の pending に置くだけ。一覧へは動画の着地検証後に commitPendingDraft_ が確定する。
@@ -3076,6 +3088,9 @@
     if (!lab) return;
     if (_pickedSlot && _pickedSlot.date) {
       lab.textContent = '選択中：' + _pickedSlot.date + (_pickedSlot.time ? ' ' + _pickedSlot.time : '') + (_pickedSlot.role ? '／' + _pickedSlot.role : '');
+      // Blueskyの無人予約はこの枠の lead 分前に出る(設計 §3 T_b)。予約ボタンが送る時刻と同じ式で出す。
+      var acc = (_modalMeta && _modalMeta.account) || 'acc1', sAt = slotAtMs_(_pickedSlot);
+      if (sAt) lab.textContent += '／🦋Bluesky ' + fmtMd_(sAt - bskyLeadMin_(acc) * 60000) + '(' + bskyLeadMin_(acc) + '分前)';
       if (clr) clr.style.display = '';
     } else {
       lab.textContent = '(枠は未選択)';
@@ -3093,7 +3108,8 @@
       var p = loadDraftPost_(m.id), ps = p.pubSlot;
       if (!ps || !ps.date) return;
       var at = ps.scheduled_at ? (Date.parse(String(ps.scheduled_at).replace(' ', 'T')) || 0) : 0;
-      out.push({ id: ps.id || '', date: ps.date, time: ps.time || '', at: at, title: String(p.ytTitle || m.title || '(題名なし)').slice(0, 60) });
+      // Blueskyの無人予約を入れたドラフトは種別 bsky(カレンダーで「Bluesky予約済み」と出す・設計 §3)。
+      out.push({ id: ps.id || '', date: ps.date, time: ps.time || '', at: at, draftId: m.id, kind: p.bskyReserveId ? 'bsky' : '', title: String(p.ytTitle || m.title || '(題名なし)').slice(0, 60) });
     });
     // 投稿完了でドラフトから外れた予約投稿も枠を埋めている。投稿履歴の公開予定時刻で同じ枠に載せる
     //   (Chami 2026-10-15「どこが？」=予約済みの枠が出ず被り防止にならなかった)。生きているドラフトと同じ背骨IDは二重に出さない。
@@ -3102,9 +3118,22 @@
     return out;
   }
   // カレンダーを上から降ろす。schedule/ を pick=1 で埋め込み、枠タップ→slot-picked を受ける。
+  function pickerAcc_() { return (_modalMeta && _modalMeta.account) || (window.Go5Acct && Go5Acct.current && Go5Acct.current()) || 'acc1'; }
   function openSlotPicker_() {
     // ドラフトの投稿先チャンネルを渡す=ピッカーはそのchの枠だけを表示する(Chami依頼2026-08-05)。
-    var acc = (_modalMeta && _modalMeta.account) || (window.Go5Acct && Go5Acct.current && Go5Acct.current()) || 'acc1';
+    var acc = pickerAcc_();
+    var pk = ensureSlotPicker_(acc), f = $('draftPickerFrame');
+    // 表示→次フレームでスライドイン。iframe読込後に enter-pick を送る(未読込なら onload で)。
+    pk.style.display = 'flex';
+    void pk.offsetHeight; // 隠して用意した直後でも上からのスライドを効かせる
+    requestAnimationFrame(function () { pk.style.transform = 'translateY(0)'; });
+    var send = function () { try { f.contentWindow.postMessage({ target: 'sch-calendar', type: 'enter-pick', acc: acc, taken: takenSlots_(acc) }, '*'); } catch (e) {} };
+    if (f.contentWindow && f.dataset.loaded === '1') send();
+    else { f.addEventListener('load', function () { f.dataset.loaded = '1'; send(); }, { once: true }); }
+  }
+  // ピッカー(カレンダーiframe)を隠したまま用意する。おすすめ枠と枠の書き戻しも同じiframeのカレンダーへ頼む
+  //   (Stock.html には index.html の calFrame が無い=ここが唯一のカレンダー窓口)。
+  function ensureSlotPicker_(acc) {
     var pk = $('draftSlotPicker');
     if (!pk) {
       pk = document.createElement('div');
@@ -3121,17 +3150,78 @@
           '<button type="button" id="draftPickerClose" style="background:none;border:none;color:var(--sub);font-size:1.2rem;cursor:pointer;padding:2px 8px;line-height:1;width:auto;margin:0;">✕</button>' +
         '</div>' +
         '<iframe id="draftPickerFrame" title="公開枠カレンダー" style="border:0;width:100%;flex:1;min-height:60vh;background:var(--bg,#0e1422);"></iframe>';
+      pk.style.display = 'none';
       document.body.appendChild(pk);
       $('draftPickerClose').addEventListener('click', closeSlotPicker_);
     }
     var f = $('draftPickerFrame');
-    if (f && !f.getAttribute('src')) f.setAttribute('src', 'schedule/index.html?pick=1&acc=' + acc + '&v=46');
-    // 表示→次フレームでスライドイン。iframe読込後に enter-pick を送る(未読込なら onload で)。
-    pk.style.display = 'flex';
-    requestAnimationFrame(function () { pk.style.transform = 'translateY(0)'; });
-    var send = function () { try { f.contentWindow.postMessage({ target: 'sch-calendar', type: 'enter-pick', acc: acc, taken: takenSlots_(acc) }, '*'); } catch (e) {} };
-    if (f.contentWindow && f.dataset.loaded === '1') send();
-    else { f.addEventListener('load', function () { f.dataset.loaded = '1'; send(); }, { once: true }); }
+    if (f && !f.getAttribute('src')) {
+      // 先に隠して用意した(おすすめ枠・書き戻し)後で開くと load は済んでいる=ここで印を付けて openSlotPicker_ が即 enter-pick を送れるようにする。
+      f.addEventListener('load', function () { f.dataset.loaded = '1'; }, { once: true });
+      f.setAttribute('src', 'schedule/index.html?pick=1&acc=' + acc + '&v=47');
+    }
+    return pk;
+  }
+  // カレンダーが枠を読み終えた(ready)後に送る。読み終える前の書き戻しは空振りするので待ち行列に置く。
+  var _calReady = false, _calQueue = [];
+  function toCalendar_(msg) {
+    ensureSlotPicker_(pickerAcc_());
+    var f = $('draftPickerFrame');
+    if (_calReady && f && f.contentWindow) { try { f.contentWindow.postMessage(msg, '*'); } catch (e) {} return; }
+    _calQueue.push(msg);
+  }
+  // 枠の実行状態をカレンダーへ書き戻す(index.html の integration.js と同じ slot-writeback 形)。
+  function calWriteback_(slotId, acc, patch) {
+    if (!slotId) return;
+    toCalendar_(Object.assign({ target: 'sch-calendar', type: 'slot-writeback', id: slotId, account: acc || '' }, patch || {}));
+  }
+  // 同じchで他のドラフト・投稿履歴が入っている枠か(カレンダーの takenAssign_ と同じ一致規則)。自分自身は除く。
+  function slotConflict_(s, acc, selfId) {
+    var at = slotAtMs_(s), hit = null;
+    takenSlots_(acc).some(function (t) {
+      if (!t || (t.draftId && t.draftId === selfId)) return false;
+      if ((t.id && s.id && t.id === s.id) || (t.date && t.date === s.date && t.time && t.time === s.time) ||
+        (t.at && at && Math.abs(t.at - at) <= 10 * 60000)) { hit = t; return true; }
+      return false;
+    });
+    return hit;
+  }
+  // 枠を投稿モードへ取り込む(カレンダーで選んだ枠・おすすめ枠の共通口)。使用中の枠は拒否する(設計 §3 選択禁止)。
+  function applyPickedSlot_(s) {
+    var acc = pickerAcc_(), hit = slotConflict_(s, acc, _modalMeta ? _modalMeta.id : '');
+    if (hit) {
+      window.alert('この枠は使用中です(' + (hit.kind === 'bsky' ? 'Bluesky予約済み' : hit.posted ? '投稿済み' : '選択済み') + '：' + hit.title + ')。別の枠を選んでください。');
+      return false;
+    }
+    _pickedSlot = { id: s.id || '', date: s.date || '', time: s.time || '', role: s.role || '', genre: s.genre || '', scheduled_at: s.scheduled_at || '' };
+    // 予約が選ばれた=ラジオも予約へ寄せる(即時のまま枠だけ持つ矛盾を避ける)。
+    var r = $('draftPubSched'); if (r) { r.checked = true; syncPubModeUI_(); }
+    renderPickedSlot_();
+    saveDraftPost_();
+    syncPlannedToHistory_();
+    return true;
+  }
+  // おすすめ枠: カレンダーへ当日→翌日の空き枠を聞き、Chamiの確認で確定する。Blueskyが lead 分前に出せる枠だけ。
+  var _suggestReq = '';
+  function suggestSlot_() {
+    var meta = _modalMeta; if (!meta) return;
+    var acc = meta.account || 'acc1';
+    _suggestReq = 'sg' + Date.now();
+    var btn = $('draftSuggestSlot'); if (btn) btn.disabled = true;
+    toCalendar_({ target: 'sch-calendar', type: 'suggest-slot', req: _suggestReq, acc: acc,
+      taken: takenSlots_(acc).filter(function (t) { return t.draftId !== meta.id; }),
+      minAt: Date.now() + (bskyLeadMin_(acc) + 5) * 60000 });
+  }
+  function onSlotSuggested_(d) {
+    if (!d.req || d.req !== _suggestReq) return;
+    _suggestReq = '';
+    var btn = $('draftSuggestSlot'); if (btn) btn.disabled = false;
+    if (!_modalMeta) return;
+    var s = d.slot;
+    if (!s) { window.alert('今日・明日に空いている公開枠がありません(「📅 公開枠を選ぶ」から選んでください)。'); return; }
+    var acc = _modalMeta.account || 'acc1', sAt = slotAtMs_(s);
+    var tb = sAt ? '\nBlueskyは ' + fmtMd_(sAt - bskyLeadMin_(acc) * 60000) + ' に出ます(' + bskyLeadMin_(acc) + '分前)。' : '';
+    if (window.confirm('おすすめ枠：' + s.date + ' ' + (s.time || '') + (s.role ? '／' + s.role : '') + tb + '\nこの枠にしますか？')) applyPickedSlot_(s);
   }
   function closeSlotPicker_() {
     var pk = $('draftSlotPicker'); if (!pk) return;
@@ -3143,15 +3233,19 @@
   // カレンダーiframe(pick=1)からの枠選択を受ける。投稿モーダルが開いている時だけ取り込む。
   window.addEventListener('message', function (ev) {
     var d = ev.data;
-    if (!d || d.source !== 'sch-calendar' || d.type !== 'slot-picked' || !d.slot) return;
-    var s = d.slot;
-    _pickedSlot = { id: s.id || '', date: s.date || '', time: s.time || '', role: s.role || '', genre: s.genre || '', scheduled_at: s.scheduled_at || '' };
-    // 予約が選ばれた=ラジオも予約へ寄せる(即時のまま枠だけ持つ矛盾を避ける)。
-    var r = $('draftPubSched'); if (r) { r.checked = true; syncPubModeUI_(); }
-    renderPickedSlot_();
-    saveDraftPost_();
-    syncPlannedToHistory_();
-    closeSlotPicker_();
+    if (!d || d.source !== 'sch-calendar') return;
+    var f = $('draftPickerFrame');
+    if (d.type === 'ready') {
+      if (!f || ev.source !== f.contentWindow) return; // index.html の calFrame 等、別のカレンダーの合図は拾わない
+      _calReady = true;
+      var q = _calQueue; _calQueue = [];
+      q.forEach(function (m) { try { f.contentWindow.postMessage(m, '*'); } catch (e) {} });
+      return;
+    }
+    if (d.type === 'slot-suggested') { onSlotSuggested_(d); return; }
+    if (d.type !== 'slot-picked' || !d.slot) return;
+    // 使用中の枠は取り込まずピッカーを開いたままにする=その場で別の枠を選び直せる。
+    if (applyPickedSlot_(d.slot)) closeSlotPicker_();
   });
   // Blueskyへ投げた後(=投稿履歴に自動記録の行がある)で公開枠を選んだ時、その行へ予定時刻を書き足す。
   //   旧実装は自動記録の時点の枠しか渡らず、後から選んだ枠は投稿完了を押すまで履歴へ届かなかった
@@ -3522,6 +3616,7 @@
     var rn = $('draftPubNow'), rs = $('draftPubSched');
     if (rn) rn.checked = !wantSched;
     if (rs) rs.checked = wantSched;
+    var sg = $('draftSuggestSlot'); if (sg) sg.style.display = meta.dailyPick ? '' : 'none';
     syncPubModeUI_();
     renderAffCheck_(meta);
     m.style.display = 'flex';
@@ -3658,6 +3753,22 @@
     var v = parseInt(localStorage.getItem('bsky_lead_min__' + (acc || 'acc1')) || '', 10);
     return (v >= 0 && v <= 720) ? v : 30;
   }
+  // Bluesky予約の1日上限(chごと・既定3本=daily_pick の件数・設計 §3)。超えたら確認で止める。
+  function bskyDailyCap_(acc) {
+    var v = parseInt(localStorage.getItem('bsky_daily_cap__' + (acc || 'acc1')) || '', 10);
+    return (v >= 1 && v <= 50) ? v : 3;
+  }
+  // 同じchで atMs と同じ日に出るBluesky予約の本数(自分以外)。投稿完了で作成履歴へ移ったドラフトも数える。
+  function bskyReservedOnDay_(acc, atMs, selfId) {
+    var day = new Date(atMs).toDateString(), n = 0, seen = {};
+    loadMeta().concat(loadArchive()).forEach(function (m) {
+      if (!m || !m.id || seen[m.id] || m.id === selfId || (m.account || 'acc1') !== acc) return;
+      seen[m.id] = 1;
+      var p = loadDraftPost_(m.id), t = Date.parse(p.bskyReserveAt || '') || 0;
+      if (p.bskyReserveId && t && new Date(t).toDateString() === day) n++;
+    });
+    return n;
+  }
   function slotAtMs_(ps) { return (ps && ps.scheduled_at) ? (Date.parse(String(ps.scheduled_at).replace(' ', 'T')) || 0) : 0; }
   function fmtMd_(ms) { var d = new Date(ms), p = function (n) { return (n < 10 ? '0' : '') + n; }; return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()); }
   // 親+返信をGASの無人予約へ(公開枠の lead 分前)。投稿はGAS側の5分トリガーが行う=端末を閉じていても出る。
@@ -3675,6 +3786,8 @@
     var aff = (meta.affiliateUrl || meta.workUrl || '').trim();
     if (pd.bskyParentUrl && !window.confirm('このドラフトはBlueskyへ投稿済みです。さらに予約しますか？(二重投稿になります)')) return;
     if (pd.bskyReserveId && !window.confirm('このドラフトは既に予約済みです(' + fmtMd_(Date.parse(pd.bskyReserveAt) || 0) + ')。もう1件予約しますか？')) return;
+    var dayN = bskyReservedOnDay_(acc, atMs, meta.id), cap = bskyDailyCap_(acc);
+    if (dayN >= cap && !window.confirm(fmtMd_(atMs).split(' ')[0] + ' のBluesky予約は既に' + dayN + '本です(1日' + cap + '本まで)。' + (dayN + 1) + '本目を予約しますか？')) return;
     if (!window.confirm(fmtMd_(atMs) + ' にBlueskyへ親(画像+本文)→3〜10秒後に返信(作品リンク)を無人で投稿します。よろしいですか？')) return;
     btn.disabled = true; say('予約中…');
     var vid = ensureVideoId_(meta);
@@ -3684,7 +3797,9 @@
         meta: { videoId: vid, title: meta.title || '', attrs: a, goal: meta.goal || '', cmtType: meta.cmtType || '' } }));
     }).then(function (r) {
       mergeDraftPost_(meta.id, { bskyReserveId: String(r.id), bskyReserveAt: r.scheduledAt, bskyWorkShortUrl: r.bskyWorkShortUrl });
-      try { window.dispatchEvent(new CustomEvent('go5:bluesky-reserved', { detail: { draftId: meta.id, slotId: (_pickedSlot && _pickedSlot.id) || '', account: acc, at: r.scheduledAt } })); } catch (e) {}
+      var sid = (_pickedSlot && _pickedSlot.id) || '';
+      try { window.dispatchEvent(new CustomEvent('go5:bluesky-reserved', { detail: { draftId: meta.id, slotId: sid, account: acc, at: r.scheduledAt } })); } catch (e) {}
+      calWriteback_(sid, acc, { status: '予約登録済' }); // カレンダーの枠を「予約登録済」へ(設計 §3 書き戻し)
       if (_modalMeta === meta) renderBskyStatus_(loadDraftPost_(meta.id));
     }).catch(function (e) {
       var m = String(e && e.message ? e.message : e);
@@ -3715,6 +3830,8 @@
       }
       var acc = meta.account || 'acc1', fresh = { bskyParentUrl: r.parentUrl, bskyReplyUrl: r.replyUrl || '' };
       mergeDraftPost_(meta.id, fresh);
+      // 枠へ親投稿のURLを書き戻す。状態は変えない(「公開済」は YouTube の公開予定を過ぎた applyAutoPublish に任せる)。
+      calWriteback_((pd.pubSlot && pd.pubSlot.id) || '', acc, { post_url: r.parentUrl });
       if (here) renderBskyStatus_(loadDraftPost_(meta.id));
       if (here && st && !r.replyUrl) st.innerHTML += '<br>' + (r.status === 'reply_error' ? '⚠️ 返信(作品リンク)が出せませんでした：' + esc(r.error || '') : '⏳ 返信は次の5分の見回りで出し直します。');
       var mk = function (u) { return (u && window.Go5MakeShort) ? window.Go5MakeShort(u, { account: acc }).then(function (s) { return (s && (s.shareUrl || s.shortUrl)) || u; }, function () { return u; }) : Promise.resolve(u || ''); };
@@ -3911,6 +4028,8 @@
           '<div style="display:flex;gap:18px;align-items:center;margin-bottom:6px;font-size:.86rem;">' +
             '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="radio" name="draftPubMode" id="draftPubNow" value="now" checked style="accent-color:var(--accent);width:auto;margin:0;">即時投稿</label>' +
             '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="radio" name="draftPubMode" id="draftPubSched" value="scheduled" style="accent-color:var(--accent);width:auto;margin:0;">予約投稿</label>' +
+            // 今日のおすすめ(daily_pick)から作ったドラフトだけ出す=当日→翌日の空き枠を役割順で提案(設計 §3)。
+            '<button type="button" id="draftSuggestSlot" style="' + btnW + 'display:none;">✨ おすすめ枠</button>' +
           '</div>' +
           '<div id="draftSchedRow" style="display:none;margin-bottom:2px;">' +
             '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
@@ -3954,6 +4073,7 @@
     $('draftPubNow').addEventListener('change', onPubModeChange_);
     $('draftPubSched').addEventListener('change', onPubModeChange_);
     $('draftPickSlot').addEventListener('click', openSlotPicker_);
+    $('draftSuggestSlot').addEventListener('click', suggestSlot_);
     $('draftClearSlot').addEventListener('click', function () { _pickedSlot = null; renderPickedSlot_(); saveDraftPost_(); });
     // 柱分け時のX投稿欄は「子の文」=作品リンク込みでそのままコピー(親は親投稿カード側・Chami依頼2026-10-12)。
     $('draftCopyX').addEventListener('click', function () { copyText_(($('draftXText') || {}).value || '', this); });

@@ -273,7 +273,7 @@ window.SCH = window.SCH || {};
     const all = ctx.byAcc[ids[0]] || {};
     const slots = Object.keys(all).map(function (k) { return all[k]; }).filter(Boolean);
     const atOf = function (ps) { return ps.scheduled_at ? (Date.parse(String(ps.scheduled_at).replace(" ", "T")) || 0) : 0; };
-    const push = function (id, t, offAt) { (out[id] = out[id] || []).push({ title: t.title, at: t.at || 0, posted: !!t.posted, offAt: offAt || "" }); };
+    const push = function (id, t, offAt) { (out[id] = out[id] || []).push({ title: t.title, at: t.at || 0, posted: !!t.posted, offAt: offAt || "", kind: t.kind || "" }); };
     pickTaken.forEach(function (t) {
       if (!t) return;
       let hit = false;
@@ -346,7 +346,9 @@ window.SCH = window.SCH || {};
       el.classList.add("taken");
       const posted = hits.every(function (h) { return h.posted && h.at && h.at <= Date.now(); });
       const names = hits.map(function (h) { return takenTitle_(h.title) + (h.offAt ? "(" + h.offAt + "公開)" : ""); }).join(" / ");
-      takenNote = `<span class="taken-note" title="${escapeAttr(names)}">${posted ? "投稿済み" : "選択済み"}：${escapeHtml(names)}</span>`;
+      // Blueskyの無人予約が入った枠は種別を分けて出す(設計_daily_pick予約投稿 §3)。
+      const bsky = !posted && hits.some(function (h) { return h.kind === "bsky"; });
+      takenNote = `<span class="taken-note" title="${escapeAttr(names)}">${posted ? "投稿済み" : (bsky ? "Bluesky予約済み" : "選択済み")}：${escapeHtml(names)}</span>`;
     }
     el.innerHTML =
       `<span class="bar"></span>` +
@@ -633,6 +635,37 @@ window.SCH = window.SCH || {};
   }
 
   // 親（統合アプリ）からの書き戻し：投稿成功後に status/URL等を現在チャンネルの実行層のみ反映
+  // おすすめ枠(設計_daily_pick予約投稿 §3): 当日(minAt より後)→翌日の順に、役割の優先(本命/準本命→通常→補助)で
+  //   最初の空き枠を親へ返す。空き=親が渡した使用中(taken)と takenAssign_ と同じ規則で重ならず、予約/公開済みでもない枠。
+  function suggestSlot_(d) {
+    const acc = chan.isAcc(d.acc) ? d.acc : curAcc();
+    const reply = function (s) {
+      try { window.parent.postMessage({ source: "sch-calendar", type: "slot-suggested", req: d.req || "", slot: s ? slotPayload(s) : null }, "*"); } catch (e) {}
+    };
+    const map = (lastRender && lastRender.byAcc && lastRender.byAcc[acc]) || {};
+    const taken = Array.isArray(d.taken) ? d.taken : [];
+    const minAt = Number(d.minAt) || Date.now();
+    const atOf = function (ps) { return ps.scheduled_at ? (Date.parse(String(ps.scheduled_at).replace(" ", "T")) || 0) : 0; };
+    const rank = function (r) { return (r === "本命" || r === "準本命") ? 0 : r === "通常" ? 1 : /補助/.test(r || "") ? 2 : 3; };
+    const isTaken = function (ps) {
+      const at = atOf(ps);
+      return taken.some(function (t) {
+        return t && ((t.id && t.id === ps.id) || (t.date && t.date === ps.date && t.time && t.time === ps.time) ||
+          (t.at && at && Math.abs(t.at - at) <= 10 * 60000));
+      });
+    };
+    const now = Date.now();
+    const days = [jstParts_(now).date, jstParts_(now + 86400000).date];
+    for (let i = 0; i < days.length; i++) {
+      const cands = Object.keys(map).map(function (k) { return map[k]; }).filter(function (ps) {
+        return ps && ps.date === days[i] && atOf(ps) > minAt &&
+          ["予約登録済", "公開済", "取り下げ"].indexOf(ps.status) < 0 && !isTaken(ps);
+      }).sort(function (a, b) { return rank(a.role) - rank(b.role) || atOf(a) - atOf(b); });
+      if (cands.length) { reply(cands[0]); return; }
+    }
+    reply(null);
+  }
+
   function handleParentMessage(ev) {
     const d = ev.data;
     if (!d || d.target !== "sch-calendar") return;
@@ -651,6 +684,7 @@ window.SCH = window.SCH || {};
     if (d.type === "exit-pick") { pickMode = false; try { document.body.classList.remove("pick-mode"); } catch (e) {} if (editingId) closeEditor(); return; }
     if (d.type === "day-posts") { onDayPosts(d); return; }
     if (d.type === "recompute") { recomputeAndRender(); return; }
+    if (d.type === "suggest-slot") { suggestSlot_(d); return; }
     if (d.type === "sync-refresh") {
       store.init()
         .then(recomputeAndRender)
@@ -854,6 +888,8 @@ window.SCH = window.SCH || {};
 
     await recomputeAndRender();
     scheduleFirstScroll();  // 初回遷移のみ・カレンダーが実際に表示された時に撃つ・auto(§8)
+    // 埋め込み元へ「枠を読み終えた」合図。これより前の slot-writeback / suggest-slot は枠が無く空振りする。
+    if (inFrame) { try { window.parent.postMessage({ source: "sch-calendar", type: "ready" }, "*"); } catch (e) {} }
   }
 
   document.addEventListener("DOMContentLoaded", boot);
