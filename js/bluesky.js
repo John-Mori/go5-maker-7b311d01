@@ -2380,7 +2380,9 @@
   //   返信リンクはX側と別コードにする=宛先へ #go5=bsky を付けて短縮(link-workerはドメイン+URLで決定的にコードを作る)。
   //   フラグメントはブラウザがサーバへ送らないので、FANZA側のaf_id・遷移先は変わらない。
   //   成功時は親投稿URLも同じchドメインで短縮して返す(YouTube説明欄の1行目=A=1)。
-  function draftBskyThread_(o) {
+  // 即時投稿と無人予約の共通材料(設計_daily_pick予約投稿 §2)=af_id差し替え・短縮・返信文・画像を1か所で作る(af_id混線を構造で防ぐ)。
+  //   o.forReserve=予約(GASのch別資格で投稿)=端末のアプリパスワードは要らない。
+  function prepareBskyThread_(o) {
     o = o || {};
     var acc = o.account || acctId();
     var handle = '', appPw = '';
@@ -2388,8 +2390,8 @@
       handle = handleOfAcct_(acc);
       appPw = (localStorage.getItem(pkOf_('bsky_app_pw', acc)) || '').trim(); // 設定画面(saveA)と同じキー規則
     } catch (e) {}
-    if (!handle || !appPw) return Promise.reject(new Error('no-creds'));
-    if (!window.BlueskyCore || !window.BlueskyCore.blueskyPostThread) return Promise.reject(new Error('no-core'));
+    if (!o.forReserve && (!handle || !appPw)) return Promise.reject(new Error('no-creds'));
+    if (!o.forReserve && (!window.BlueskyCore || !window.BlueskyCore.blueskyPostThread)) return Promise.reject(new Error('no-core'));
     var parentText = String(o.parentText || '').trim();
     if (!parentText) return Promise.reject(new Error('empty-parent'));
     if (countGraphemes(parentText) > 300) return Promise.reject(new Error('parent-too-long'));
@@ -2397,23 +2399,31 @@
     if (!/^https?:\/\//.test(aff)) return Promise.reject(new Error('no-work-link'));
     aff = swapAfForBsky_(aff, acc); // ドラフトの作品リンク(X用af_idで保存)をこのchのBluesky用af_idへ(出先別af_id)
     var tagged = aff + (aff.indexOf('#') < 0 ? '#go5=bsky' : '&go5=bsky');
-    var out = { bskyWorkShortUrl: '', replyText: '', parentUrl: '', replyUrl: '', parentShortUrl: '', replyShortUrl: '', delayMs: 0 };
+    var prep = { acc: acc, handle: handle, appPw: appPw, parentText: parentText, bskyWorkShortUrl: '', replyText: '', imageBlob: null, replyImageBlob: null };
     return makeShortAndShare(tagged, { account: acc, bsky: true }).then(function (r) { // Bluesky返信の作品リンク=短縮(2026-10-21)
       var sv = r && (r.shareUrl || r.shortUrl);
       return (sv && ourShortBase(sv)) ? sv : aff; // 短縮失敗=生アフィリンク(印なし)で返信=リンクは生かす
     }, function () { return aff; }).then(function (link) {
-      if (ourShortBase(link)) out.bskyWorkShortUrl = link;
+      if (ourShortBase(link)) prep.bskyWorkShortUrl = link;
       // ★返信文=そのchの🦋投稿本文(テンプレ)どおり。作品プレースホルダの無い本文の時だけ子の文(リンクだけBluesky用)。
       return bskyReplyFromBody_(o.bskyBody, link).then(function (t) {
-        out.replyText = t || bskyReplyTextOf_(o.childText, link);
-        if (dupLinkIn_(out.replyText)) throw new Error('dup-link'); // 同じ短縮URLを2回出す返信は親ごと出さない
+        prep.replyText = t || bskyReplyTextOf_(o.childText, link);
+        if (dupLinkIn_(prep.replyText)) throw new Error('dup-link'); // 同じ短縮URLを2回出す返信は親ごと出さない
         return o.imageBlob ? compressFile(o.imageBlob) : null;
       });
     }).then(function (blob) {
-      return replyImageBlob_().then(function (replyBlob) {
-        return window.BlueskyCore.blueskyPostThread({ identifier: handle, appPassword: appPw, parentText: parentText, replyText: out.replyText, imageBlob: blob, replyImageBlob: replyBlob,
-          onParentPosted: function (p, ms) { _bskyReplyInflight[p.uri] = 1; addPendingReply_(pendingJobOf_(p, acc, out.replyText, ms, { kind: 'draft', draftId: o.draftId || '' })); } });
-      });
+      prep.imageBlob = blob;
+      return replyImageBlob_();
+    }).then(function (replyBlob) { prep.replyImageBlob = replyBlob; return prep; });
+  }
+  function draftBskyThread_(o) {
+    o = o || {};
+    var out = { bskyWorkShortUrl: '', replyText: '', parentUrl: '', replyUrl: '', parentShortUrl: '', replyShortUrl: '', delayMs: 0 };
+    var acc = o.account || acctId();
+    return prepareBskyThread_(o).then(function (prep) {
+      out.bskyWorkShortUrl = prep.bskyWorkShortUrl; out.replyText = prep.replyText;
+      return window.BlueskyCore.blueskyPostThread({ identifier: prep.handle, appPassword: prep.appPw, parentText: prep.parentText, replyText: out.replyText, imageBlob: prep.imageBlob, replyImageBlob: prep.replyImageBlob,
+        onParentPosted: function (p, ms) { _bskyReplyInflight[p.uri] = 1; addPendingReply_(pendingJobOf_(p, acc, out.replyText, ms, { kind: 'draft', draftId: o.draftId || '' })); } });
     }).then(function (res) {
       dropPendingReply_(res.parent.uri); delete _bskyReplyInflight[res.parent.uri];
       out.parentUrl = res.parent.postUrl; out.replyUrl = res.reply.postUrl; out.delayMs = res.delayMs || 0;
@@ -2434,6 +2444,45 @@
     }).then(function () { return out; });
   }
   try { window.Go5DraftBskyThread = draftBskyThread_; } catch (e) {}
+
+  // ドラフトのスレッド(親+返信)を無人予約へ(設計 §2)。GASの予約シートへ親画像・返信文・返信画像を渡し、5分トリガーが
+  //   T_b に親→3〜10秒→返信を出す。投稿はGASのch別資格(BSKY_HANDLE_ACCn)=端末のアプリパスワードは使わない。
+  //   o: prepareBskyThread_ と同じ + {atMs, slotId, meta}。戻り値 {id, scheduledAt, bskyWorkShortUrl}。
+  function blobToDataUrl_(b) {
+    return new Promise(function (res) {
+      if (!b) { res(''); return; }
+      var fr = new FileReader(); fr.onload = function () { res(String(fr.result || '')); }; fr.onerror = function () { res(''); }; fr.readAsDataURL(b);
+    });
+  }
+  function gasUrlOf_() { try { return (localStorage.getItem('bsky_gas_url') || '').trim(); } catch (e) { return ''; } }
+  function reserveDraftBskyThread_(o) {
+    o = o || {};
+    var gasUrl = gasUrlOf_();
+    if (!gasUrl) return Promise.reject(new Error('no-gas'));
+    if (!(o.atMs > Date.now())) return Promise.reject(new Error('past-time'));
+    var prep = null;
+    return prepareBskyThread_(Object.assign({}, o, { forReserve: true })).then(function (p) {
+      prep = p;
+      return Promise.all([blobToDataUrl_(p.imageBlob), blobToDataUrl_(p.replyImageBlob)]);
+    }).then(function (urls) {
+      var meta = Object.assign({}, o.meta || {}, { draftId: o.draftId || '', workUrl: o.workLink || '', pillar: 'bsky', bskyWorkShortUrl: prep.bskyWorkShortUrl });
+      var payload = { type: 'reserve', channel: prep.acc, scheduled_at: new Date(o.atMs).toISOString(), text: prep.parentText, slot_id: o.slotId || '', meta: meta,
+        thread: { reply_text: prep.replyText, reply_image: urls[1] || '', delay_ms: 3000 + Math.floor(Math.random() * 7000) } };
+      if (urls[0]) payload.image = urls[0];
+      return fetch(gasUrl, { method: 'POST', body: JSON.stringify(payload) }).then(function (r) { return r.json(); });
+    }).then(function (j) {
+      if (!j || !j.ok) { var e = new Error((j && j.error) || 'reserve-failed'); e.id = j && j.id; throw e; }
+      return { id: j.id, scheduledAt: new Date(o.atMs).toISOString(), bskyWorkShortUrl: prep.bskyWorkShortUrl };
+    });
+  }
+  try { window.Go5ReserveDraftBskyThread = reserveDraftBskyThread_; } catch (e) {}
+  // 予約1件の結果(action=reservation)。読めない時は null。
+  function fetchReservation_(id) {
+    var gasUrl = gasUrlOf_();
+    if (!gasUrl || !id) return Promise.resolve(null);
+    return new Promise(function (res) { jsonpGet(gasUrl + (gasUrl.indexOf('?') >= 0 ? '&' : '?') + 'action=reservation&id=' + encodeURIComponent(id), function (d) { res(d && d.ok ? d : null); }); });
+  }
+  try { window.Go5FetchReservation = fetchReservation_; } catch (e) {}
   try { window.Go5FriendlyBskyError = function (m) { return friendlyLoginError(m); }; } catch (e) {}
 
   // ---- 🔁 URL自動解決：af_id欠落/未短縮のどちらも自動で補い、最終的に「短縮済みアフィリンク」にする ----

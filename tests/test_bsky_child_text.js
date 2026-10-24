@@ -59,8 +59,8 @@ eq(g.dup('a\nxdgh3.com/Vb3y9\n\nhttps://xdgh3.com/Vb3y9'), 'https://xdgh3.com/Vb
 eq(g.dup('a\n' + WORK + '\n' + SALE), '', '番犬: 別URLは通す');
 
 console.log('--- 配線 ---');
-eq(/return bskyReplyFromBody_\(o\.bskyBody, link\)/.test(src) && /out\.replyText = t \|\| bskyReplyTextOf_\(o\.childText, link\);/.test(src), true, 'ドラフト一続きの返信文は🦋投稿本文から作り、無い時だけ子の文');
-eq(/if \(dupLinkIn_\(out\.replyText\)\) throw new Error\('dup-link'\)/.test(src), true, '同じURLが2回入る返信は親ごと出さない');
+eq(/return bskyReplyFromBody_\(o\.bskyBody, link\)/.test(src) && /prep\.replyText = t \|\| bskyReplyTextOf_\(o\.childText, link\);/.test(src), true, 'ドラフト一続きの返信文は🦋投稿本文から作り、無い時だけ子の文');
+eq(/if \(dupLinkIn_\(prep\.replyText\)\) throw new Error\('dup-link'\)/.test(src), true, '同じURLが2回入る返信は親ごと出さない');
 const st = fs.readFileSync(path.join(__dirname, '..', 'js/stock.js'), 'utf8');
 // 2026-10-13 Chami msg 1559480072589803612: 子の文は定型文へ。msg 1559679396363636736 以降は子の文欄の2行目を差し替えて使う(見出しが無い時だけ affiPostText)。
 eq(/draftId: meta\.id, childText: childText, bskyBody: bskyBody \}/.test(st) && /core\.withAffiStatusLine\(xv, info\)/.test(st), true, '投稿モードは子の文欄(控え)と🦋投稿本文を渡す');

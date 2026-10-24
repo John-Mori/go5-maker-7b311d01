@@ -52,7 +52,10 @@ assert.ok(historyItems.includes('platform: pfCol ? String'), 'historyItems_ must
 assert.ok(historyItems.includes('workShortUrl: wsuCol ? String'), 'historyItems_ must return the 作品短縮URL sheet cell');
 
 const reservations = section(gas, 'function runReservations()', 'function bskyCreds_');
-assert.match(reservations, /writeRecord_\(ch,[\s\S]*?platform\s*:\s*'bsky'/, 'GAS Bluesky reservation must record platform=bsky');
+// 記録はスレッド対応で recordReservation_ へ切り出した(2026-10-24)。runReservations はそれを呼ぶ。
+const recordRes = section(gas, 'function recordReservation_(', 'function bskySelfReplyOf_');
+assert.match(recordRes, /writeRecord_\(ch,[\s\S]*?platform\s*:\s*'bsky'/, 'GAS Bluesky reservation must record platform=bsky');
+assert.match(reservations, /recordReservation_\(ch,/, 'runReservations must record through recordReservation_');
 
 const recordToSheet = section(bluesky, 'function recordToSheet(record)', 'function updateGasStatus()');
 assert.ok(

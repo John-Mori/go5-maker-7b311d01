@@ -67,7 +67,7 @@
       if (changed) { writeDraftPost_(id, sv); kickSync_(); }
     } catch (e) {}
   }
-  var BSKY_DRAFT_FIELDS_ = ['bskyParentUrl', 'bskyReplyUrl', 'bskyWorkShortUrl', 'bskyParentShortUrl', 'bskyReplyShortUrl'];
+  var BSKY_DRAFT_FIELDS_ = ['bskyParentUrl', 'bskyReplyUrl', 'bskyWorkShortUrl', 'bskyParentShortUrl', 'bskyReplyShortUrl', 'bskyReserveId', 'bskyReserveAt'];
   // 説明欄へ入れるBluesky側の短縮URL=子(返信)が正(Chami 2026-10-13 msg 1559267964866535467)。子の短縮が無い旧ドラフトだけ親。
   function bskyDescShortOf_(pd) { return (pd && (pd.bskyReplyShortUrl || pd.bskyParentShortUrl)) || ''; }
   function isBskyShortPhLine_(t) {
@@ -1431,19 +1431,24 @@
       attrs: histAttrs // ジャンルのチェックを引き継ぐ(Chami依頼2026-07-30・空なら投稿完了時のライブ値で補完)
     };
   }
+  // 背骨ID(videoId)が無いドラフトにはここで振る=投稿履歴の行と予約シートの行が同じIDで1行にまとまる。
+  function ensureVideoId_(meta) {
+    if (!meta.videoId && window.IdGen && window.IdGen.makeVideoId) {
+      var metas = loadMeta();
+      var vid = window.IdGen.makeVideoId(meta.account || 'acc1', new Date(), {});
+      meta.videoId = vid;
+      metas.forEach(function (m) { if (m.id === meta.id) m.videoId = vid; });
+      saveMeta(metas);
+    }
+    return meta.videoId || '';
+  }
   // Bluesky親+返信を投げた時点で投稿履歴へ自動で1件載せる(Chami 2026-10-13 msg 1559255858628534303)。
   //   ドラフトは残す(作成履歴への退避は従来どおり投稿完了で)。後の投稿完了は同じ背骨IDの行へYouTube URL等を追記する。
   //   戻り値は addCompletedPost の結果(ok/dupe/…)。記録の失敗は投稿の失敗ではないので例外は投げない。
   function autoRecordBskyHistory_(meta, fresh) {
     try {
       if (!(window.Go5History && typeof window.Go5History.addCompletedPost === 'function')) return { ok: false, reason: 'unavailable' };
-      if (!meta.videoId && window.IdGen && window.IdGen.makeVideoId) {
-        var metas = loadMeta();
-        var vid = window.IdGen.makeVideoId(meta.account || 'acc1', new Date(), {});
-        meta.videoId = vid;
-        metas.forEach(function (m) { if (m.id === meta.id) m.videoId = vid; });
-        saveMeta(metas);
-      }
+      ensureVideoId_(meta);
       // ★説明欄へ入れたBluesky短縮(子>親)を導線1として最初から載せる。旧実装は '' を渡し、
       //   投稿完了を押すまで白矢印の計測コードが無かった(Chami 2026-10-13 msg 1559338789447409784「概要欄クリックが計測ない」)。
       var pd0 = loadDraftPost_(meta.id);
@@ -3608,7 +3613,10 @@
       st.innerHTML = '✅ 投稿済み 親：<a href="' + esc(saved.bskyParentUrl) + '" target="_blank" rel="noopener">開く</a>' +
         (saved.bskyReplyUrl ? '／返信：<a href="' + esc(saved.bskyReplyUrl) + '" target="_blank" rel="noopener">開く</a>' : '') +
         (saved.bskyWorkShortUrl ? '<br>Bluesky作品リンク：' + esc(saved.bskyWorkShortUrl) : '');
+    } else if (saved && saved.bskyReserveId) {
+      st.innerHTML = '⏰ 予約済み(無人)：' + esc(fmtMd_(Date.parse(saved.bskyReserveAt) || 0)) + ' に親→返信を投稿します。';
     } else st.textContent = '';
+    if (saved && saved.bskyReserveId && !saved.bskyReplyUrl && _modalMeta) pullReservation_(_modalMeta);
   }
   // 子(返信)の取りこぼしを後から出し直せた時(bluesky.js の bsky_pending_reply 台帳)=ドラフトと投稿履歴へ書き戻す
   //   (Chami 2026-10-13 msg 1559263050572369951「リプライができてない」)。
@@ -3628,6 +3636,95 @@
       if (meta) autoRecordBskyHistory_(meta); // 説明欄の短縮(導線1)を投稿履歴の行へ
     });
   });
+  // 即時投稿と無人予約が同じ材料で返信を作る(設計_daily_pick予約投稿 §2)=画像・子の文・🦋本文テンプレ。
+  function draftBskyArgs_(meta, parentText, aff) {
+    var imgP = (_draftImg.id === meta.id && _draftImg.blob) ? Promise.resolve(_draftImg.blob) : resolveSrcImageBlob_(meta.id);
+    // 子(返信)の文=定型文「⇩気になった方は…/新作N%OFF✨️ 等」+作品リンク(Chami msg 1559480072589803612)。
+    //   割引と発売日は投稿の直前に取り直す(取れなければ手元キャッシュ→ドラフト時のスナップ)。定型文の芯が無い時だけX欄の文。
+    var infoP = window.Go5FreshWorkInfo ? window.Go5FreshWorkInfo(meta.workUrl || meta.affiliateUrl || '') : Promise.resolve(null);
+    return Promise.all([imgP.catch(function () { return null; }), infoP.catch(function () { return null; })]).then(function (got) {
+      var blob = got[0], core = window.Go5MovieAttrsCore;
+      // 子の文欄(見出し行あり)ならその文の2行目を投稿直前の情報で差し替えて使う=欄の見た目と投稿が一致する(Chami msg 1559679396363636736)。
+      var xv = String(($('draftXText') || {}).value || ''), info = got[1] || meta.priceInfo || null;
+      var childText = (core && core.withAffiStatusLine && core.withAffiStatusLine(xv, info)) || ((core && core.affiPostText) ? core.affiPostText(info, '') : xv);
+      // bskyBody=そのchの🦋投稿本文(テンプレ)。返信はこれを正にし、作品/セールのプレースホルダだけBluesky用短縮で埋める
+      //   (Chami 2026-10-21 msg 1562248434251997204「2枚目のようにしてくれって」)。childTextは本文にプレースホルダが無い時の控え。
+      var bskyBody = applyPromo_(masterBody_(meta), meta, true);
+      return { account: meta.account || 'acc1', parentText: parentText, workLink: aff, imageBlob: blob || null, draftId: meta.id, childText: childText, bskyBody: bskyBody };
+    });
+  }
+  // Bluesky予約の時刻=公開枠の何分前か(chごと・既定30分・設計 §3)。
+  function bskyLeadMin_(acc) {
+    var v = parseInt(localStorage.getItem('bsky_lead_min__' + (acc || 'acc1')) || '', 10);
+    return (v >= 0 && v <= 720) ? v : 30;
+  }
+  function slotAtMs_(ps) { return (ps && ps.scheduled_at) ? (Date.parse(String(ps.scheduled_at).replace(' ', 'T')) || 0) : 0; }
+  function fmtMd_(ms) { var d = new Date(ms), p = function (n) { return (n < 10 ? '0' : '') + n; }; return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()); }
+  // 親+返信をGASの無人予約へ(公開枠の lead 分前)。投稿はGAS側の5分トリガーが行う=端末を閉じていても出る。
+  function reserveDraftBsky_(btn) {
+    var meta = _modalMeta; if (!meta) return;
+    var st = $('draftBskyStatus');
+    function say(h) { if (st) st.innerHTML = h; }
+    if (!window.Go5ReserveDraftBskyThread) { say('投稿モジュール未読込。ページを再読み込みしてください。'); return; }
+    var pd = loadDraftPost_(meta.id), acc = meta.account || 'acc1';
+    var slotMs = slotAtMs_(_pickedSlot);
+    if (!slotMs) { say('先に「公開設定」で予約を選び、カレンダーの公開枠を選んでください(Blueskyは枠の' + bskyLeadMin_(acc) + '分前に出ます)。'); return; }
+    var atMs = slotMs - bskyLeadMin_(acc) * 60000;
+    if (atMs <= Date.now()) { say('⚠️ この枠の' + bskyLeadMin_(acc) + '分前(' + esc(fmtMd_(atMs)) + ')は過ぎています。別の枠を選んでください。'); return; }
+    var parentText = String(($('draftParentText') || {}).value || '').trim();
+    var aff = (meta.affiliateUrl || meta.workUrl || '').trim();
+    if (pd.bskyParentUrl && !window.confirm('このドラフトはBlueskyへ投稿済みです。さらに予約しますか？(二重投稿になります)')) return;
+    if (pd.bskyReserveId && !window.confirm('このドラフトは既に予約済みです(' + fmtMd_(Date.parse(pd.bskyReserveAt) || 0) + ')。もう1件予約しますか？')) return;
+    if (!window.confirm(fmtMd_(atMs) + ' にBlueskyへ親(画像+本文)→3〜10秒後に返信(作品リンク)を無人で投稿します。よろしいですか？')) return;
+    btn.disabled = true; say('予約中…');
+    var vid = ensureVideoId_(meta);
+    draftBskyArgs_(meta, parentText, aff).then(function (args) {
+      var a = meta.attrs || {};
+      return window.Go5ReserveDraftBskyThread(Object.assign(args, { atMs: atMs, slotId: (_pickedSlot && _pickedSlot.id) || '',
+        meta: { videoId: vid, title: meta.title || '', attrs: a, goal: meta.goal || '', cmtType: meta.cmtType || '' } }));
+    }).then(function (r) {
+      mergeDraftPost_(meta.id, { bskyReserveId: String(r.id), bskyReserveAt: r.scheduledAt, bskyWorkShortUrl: r.bskyWorkShortUrl });
+      try { window.dispatchEvent(new CustomEvent('go5:bluesky-reserved', { detail: { draftId: meta.id, slotId: (_pickedSlot && _pickedSlot.id) || '', account: acc, at: r.scheduledAt } })); } catch (e) {}
+      if (_modalMeta === meta) renderBskyStatus_(loadDraftPost_(meta.id));
+    }).catch(function (e) {
+      var m = String(e && e.message ? e.message : e);
+      var known = { 'no-gas': '⚙設定の「GAS URL」が空です(予約投稿はGASが投稿します)。',
+                    'past-time': '予約時刻が過ぎています。別の枠を選んでください。',
+                    'dup_reserve': 'この時刻で同じドラフトが既に予約されています(二重予約は止めました)。',
+                    'parent-too-long': '親の本文(作品リンク行を除く)が300文字を超えています。短くしてください。',
+                    'empty-parent': '親投稿の本文(画像の上の欄)が空です。', 'no-work-link': 'このドラフトに作品URLがありません。',
+                    'dup-link': '返信に同じリンクが2回入るため止めました(何も予約していません)。🦋投稿タブの本文とセールの選択を確認してください。' };
+      say('⚠️ 予約できませんでした：<br>' + (known[m] || esc(m)));
+    }).then(function () { btn.disabled = false; });
+  }
+  // 予約の結果をGASから読み、出ていれば親/返信URLをドラフトへ書き戻す=投稿モードを開き直すとURLが埋まる(β-2受け入れ)。
+  var _rsvPulling = {};
+  function pullReservation_(meta) {
+    if (!meta || !window.Go5FetchReservation) return;
+    var pd = loadDraftPost_(meta.id), id = pd.bskyReserveId;
+    if (!id || pd.bskyReplyUrl || _rsvPulling[id]) return;
+    _rsvPulling[id] = 1;
+    window.Go5FetchReservation(id).then(function (r) {
+      delete _rsvPulling[id];
+      if (!r) return;
+      var st = $('draftBskyStatus'), here = (_modalMeta && _modalMeta.id === meta.id);
+      if (!r.parentUrl) {
+        var why = { error: '⚠️ 予約の親投稿が失敗しました', purged: '予約は取り消し済みです', posting: '⏳ 投稿中です' }[r.status];
+        if (here && st && why) st.innerHTML += '<br>' + why + (r.error ? '：' + esc(r.error) : '');
+        return;
+      }
+      var acc = meta.account || 'acc1', fresh = { bskyParentUrl: r.parentUrl, bskyReplyUrl: r.replyUrl || '' };
+      mergeDraftPost_(meta.id, fresh);
+      if (here) renderBskyStatus_(loadDraftPost_(meta.id));
+      if (here && st && !r.replyUrl) st.innerHTML += '<br>' + (r.status === 'reply_error' ? '⚠️ 返信(作品リンク)が出せませんでした：' + esc(r.error || '') : '⏳ 返信は次の5分の見回りで出し直します。');
+      var mk = function (u) { return (u && window.Go5MakeShort) ? window.Go5MakeShort(u, { account: acc }).then(function (s) { return (s && (s.shareUrl || s.shortUrl)) || u; }, function () { return u; }) : Promise.resolve(u || ''); };
+      Promise.all([mk(r.parentUrl), mk(r.replyUrl)]).then(function (s) {
+        mergeDraftPost_(meta.id, { bskyParentShortUrl: s[0], bskyReplyShortUrl: s[1] });
+        if (_modalMeta && _modalMeta.id === meta.id) { setDescUrlSlot_(s[1] || s[0]); saveDraftPost_(); }
+        autoRecordBskyHistory_(meta); // 予約シート側の行(同じ背骨ID)へ説明欄の短縮も載せる
+      });
+    });
+  }
   function postDraftBsky_(btn) {
     var meta = _modalMeta; if (!meta) return;
     var st = $('draftBskyStatus');
@@ -3640,19 +3737,8 @@
     if (pd.bskyParentUrl && !window.confirm('このドラフトはBlueskyへ投稿済みです。もう一度投稿しますか？(二重投稿になります)')) return;
     if (!window.confirm('Blueskyへ親(画像+本文)を投稿し、3〜10秒あけて返信に作品リンクを投稿します。よろしいですか？')) return;
     btn.disabled = true; say('投稿中…(親→3〜10秒待機→返信)');
-    var imgP = (_draftImg.id === meta.id && _draftImg.blob) ? Promise.resolve(_draftImg.blob) : resolveSrcImageBlob_(meta.id);
-    // 子(返信)の文=定型文「⇩気になった方は…/新作N%OFF✨️ 等」+作品リンク(Chami msg 1559480072589803612)。
-    //   割引と発売日は投稿の直前に取り直す(取れなければ手元キャッシュ→ドラフト時のスナップ)。定型文の芯が無い時だけX欄の文。
-    var infoP = window.Go5FreshWorkInfo ? window.Go5FreshWorkInfo(meta.workUrl || meta.affiliateUrl || '') : Promise.resolve(null);
-    Promise.all([imgP.catch(function () { return null; }), infoP.catch(function () { return null; })]).then(function (got) {
-      var blob = got[0], core = window.Go5MovieAttrsCore;
-      // 子の文欄(見出し行あり)ならその文の2行目を投稿直前の情報で差し替えて使う=欄の見た目と投稿が一致する(Chami msg 1559679396363636736)。
-      var xv = String(($('draftXText') || {}).value || ''), info = got[1] || meta.priceInfo || null;
-      var childText = (core && core.withAffiStatusLine && core.withAffiStatusLine(xv, info)) || ((core && core.affiPostText) ? core.affiPostText(info, '') : xv);
-      // bskyBody=そのchの🦋投稿本文(テンプレ)。返信はこれを正にし、作品/セールのプレースホルダだけBluesky用短縮で埋める
-      //   (Chami 2026-10-21 msg 1562248434251997204「2枚目のようにしてくれって」)。childTextは本文にプレースホルダが無い時の控え。
-      var bskyBody = applyPromo_(masterBody_(meta), meta, true);
-      return window.Go5DraftBskyThread({ account: meta.account || 'acc1', parentText: parentText, workLink: aff, imageBlob: blob || null, draftId: meta.id, childText: childText, bskyBody: bskyBody });
+    draftBskyArgs_(meta, parentText, aff).then(function (args) {
+      return window.Go5DraftBskyThread(args);
     }).then(function (r) {
       var fresh = { bskyParentUrl: r.parentUrl, bskyReplyUrl: r.replyUrl, bskyWorkShortUrl: r.bskyWorkShortUrl, bskyParentShortUrl: r.parentShortUrl, bskyReplyShortUrl: r.replyShortUrl };
       mergeDraftPost_(meta.id, fresh);
@@ -3777,7 +3863,10 @@
           // 柱分け：Bluesky親(画像+本文)→返信(作品リンク)を自動投稿。成功で説明欄1行目がBluesky親の短縮URLになる。
           '<div id="draftBskyWrap" style="display:none;margin-bottom:18px;">' +
             '<div style="' + sH + 'margin-bottom:8px;">Bluesky(親+返信を自動投稿)</div>' +
-            '<button type="button" id="draftBskyPost" style="' + btnW + '">🦋 Blueskyへ親+返信を投稿</button>' +
+            '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
+              '<button type="button" id="draftBskyPost" style="' + btnW + '">🦋 Blueskyへ親+返信を投稿</button>' +
+              '<button type="button" id="draftBskyReserve" style="' + btnW + '">⏰ Bluesky予約(無人)</button>' +
+            '</div>' +
             '<div id="draftBskyStatus" style="font-size:.78rem;margin-top:8px;line-height:1.6;color:var(--sub);word-break:break-all;"></div>' +
             '<div style="height:1px;background:var(--line);margin:18px 0 0;"></div>' +
           '</div>' +
@@ -3872,6 +3961,7 @@
     $('draftCopyParent').addEventListener('click', function () { copyText_(($('draftParentText') || {}).value || '', this); });
     $('draftCopyXReply').addEventListener('click', function () { copyText_(($('draftXReply') || {}).value || '', this); });
     $('draftBskyPost').addEventListener('click', function () { postDraftBsky_(this); });
+    $('draftBskyReserve').addEventListener('click', function () { reserveDraftBsky_(this); });
     $('draftImgShare').addEventListener('click', function () { shareDraftImg_(this); });
     $('draftCopyYtTitle').addEventListener('click', function () { copyText_(($('draftYtTitleText') || {}).value || '', this); });
     $('draftCopyYtTags').addEventListener('click', function () { copyText_(($('draftYtTagsInput') || {}).value || '', this); }); // タグ欄をコピー(Chami依頼2026-07-30③)

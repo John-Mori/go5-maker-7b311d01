@@ -51,7 +51,7 @@ console.log('--- 配線 ---');
 const bs = read('js/bluesky.js');
 eq(/makeShortAndShare\(out\.replyUrl, \{ account: acc \}\)/.test(bs), true, '投稿後に子のURLを短縮する');
 eq(/setDescUrlSlot_\(r\.replyShortUrl \|\| r\.replyUrl/.test(st), true, '投稿ボタンの後は子の短縮を説明欄へ');
-eq(/bskyReplyShortUrl: r\.replyShortUrl/.test(st) && /'bskyReplyShortUrl'\]/.test(st), true, '子の短縮をドラフトに保存し、保存し直しでも消さない');
+eq(/bskyReplyShortUrl: r\.replyShortUrl/.test(st) && /'bskyReplyShortUrl'[,\]]/.test(st), true, '子の短縮をドラフトに保存し、保存し直しでも消さない');
 eq(/Go5MakeShort\(reply\.postUrl, \{ account: job\.acc \}\)/.test(st), true, '後から出し直した子も短縮して説明欄へ');
 eq(/isBskyShortPh_\(lt\)/.test(bs), true, '🧵一括投稿の説明欄でも(ブルスカ短縮リンク)を目印として扱う');
 if (fails) { console.log(fails + ' FAIL'); process.exit(1); }
