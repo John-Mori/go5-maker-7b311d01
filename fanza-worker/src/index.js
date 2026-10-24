@@ -326,7 +326,7 @@ export default {
       const pcid = String((pbody && pbody.cid) || "").trim();
       const pch = String((pbody && pbody.channel) || "").trim();
       if (!/^[0-9A-Za-z_-]{1,64}$/.test(pcid)) return json({ ok: false, error: "missing_cid" }, 400, corsP);
-      if (pch !== "acc1" && pch !== "acc2") return json({ ok: false, error: "bad_channel" }, 400, corsP);
+      if (pch !== "acc1" && pch !== "acc2" && pch !== "acc3") return json({ ok: false, error: "bad_channel" }, 400, corsP);
       // posted_at は ISO8601 想定。空/不正は現在時刻で埋めず 400=投稿日が正データなので取り違えを黙認しない。
       const pat = String((pbody && pbody.posted_at) || "").trim();
       if (!pat || !Number.isFinite(Date.parse(pat))) return json({ ok: false, error: "bad_posted_at" }, 400, corsP);

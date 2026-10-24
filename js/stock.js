@@ -1121,7 +1121,8 @@
       if (!cid) return; // cidが取れない=daily_pickが引けるキーが無いので送らない
       var cfg = postedWorkerCfg_();
       if (!cfg.url) return; // Worker未設定=送らない(投稿完了は成功のまま)
-      var ch = (meta.account === 'acc2') ? 'acc2' : 'acc1';
+      // acc3(癒やし倉庫)を acc1 と記録していた(設計 2026-10-24 §0-6)。既知の3chはそのまま・不明だけ acc1 へ倒す。
+      var ch = (meta.account === 'acc2' || meta.account === 'acc3') ? meta.account : 'acc1';
       var postedAt = new Date(meta.completedTs || meta.ts || Date.now()).toISOString();
       fetch(cfg.url + '/posted', {
         method: 'POST',

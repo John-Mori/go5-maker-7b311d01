@@ -77,7 +77,7 @@ CREATE INDEX IF NOT EXISTS idx_candpool_cid ON candidate_pool(cid);
 --   PK=(cid,channel)。UPSERTは posted_at が新しい時だけ更新(古い履歴で上書きしない)。書き込みは追加のみ・既存表に非波及。
 CREATE TABLE IF NOT EXISTS posted_log (
   cid        TEXT NOT NULL,
-  channel    TEXT NOT NULL,   -- 'acc1'(月詠み) | 'acc2'(宵桜艶帖)
+  channel    TEXT NOT NULL,   -- 'acc1'(月詠み) | 'acc2'(宵桜艶帖) | 'acc3'(癒やし倉庫)
   posted_at  TEXT NOT NULL,   -- 投稿完了時刻 ISO8601(≒YouTube投稿日)
   yt_url     TEXT,            -- YouTube URL(任意)
   updated_at TEXT,
