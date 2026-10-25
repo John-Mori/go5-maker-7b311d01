@@ -68,13 +68,44 @@ def ffprobe(path):
     }
 
 
-def run_once(mode, image, timeout_s):
+# ドラフト台帳(localStorage go5_stock_meta)に今回の行が着地するのを待ち、R2 に実体があるかを HEAD で実測する。
+# token は Go5Sync がページ内で持つ。ここでは configured() の真偽だけ見て、中身は読まない。
+CLOUD_JS = """async ([t0, waitMs]) => {
+  const end = Date.now() + waitMs; let row = null;
+  while (Date.now() < end) {
+    let arr = []; try { arr = JSON.parse(localStorage.getItem('go5_stock_meta') || '[]') || []; } catch (e) {}
+    row = arr.filter(m => m && m.videoReadyAt && m.videoReadyAt >= t0).sort((x, y) => y.videoReadyAt - x.videoReadyAt)[0] || null;
+    if (row) break; await new Promise(r => setTimeout(r, 1000));
+  }
+  const S = window.Go5Sync; const configured = !!(S && S.configured && S.configured());
+  const out = { stockId: row ? row.id : null, configured, hasBlobR2At: null };
+  if (!row || !configured || !S.hasBlobR2At) return out;
+  while (Date.now() < end) {
+    try { if (await S.hasBlobR2At('go5vid:' + row.id)) { out.hasBlobR2At = true; return out; } } catch (e) {}
+    await new Promise(r => setTimeout(r, 2000));
+  }
+  out.hasBlobR2At = false; return out;
+}"""
+
+
+def measure_cloud(page, t_start, profile):
+    if not profile:
+        return {"hasBlobR2At": "未測(一時プロファイル=sync token無し)"}
+    try:
+        return page.evaluate(CLOUD_JS, [t_start, 90000])
+    except Exception as e:  # noqa: BLE001
+        return {"hasBlobR2At": None, "cloud_error": f"{type(e).__name__}: {str(e)[:200]}"}
+
+
+def run_once(mode, image, timeout_s, profile=None):
     rec = {"at": datetime.datetime.now().isoformat(timespec="seconds"), "mode": mode, "url": PROD_URL}
     args = ["--autoplay-policy=no-user-gesture-required"]
     headless = mode == "headless"
     if not headless:
         args.append("--window-position=-32000,0")
-    prof = tempfile.mkdtemp(prefix="fivesec_autodraft_probe_")
+    # 専用プロファイル(sync token はChamiが⚙から入れた物をChromeが持つ。ここでは読まない)を渡された時は消さない
+    prof = profile or tempfile.mkdtemp(prefix="fivesec_autodraft_probe_")
+    rec["profile"] = "専用" if profile else "一時"
     try:
         with sync_playwright() as p:
             ctx = p.chromium.launch_persistent_context(
@@ -97,6 +128,7 @@ def run_once(mode, image, timeout_s):
                 if page.locator(sel).count():
                     page.locator(sel).fill(val)
             page.wait_for_timeout(1500)
+            t_start = page.evaluate("() => Date.now()")
             page.evaluate("() => window.__go5RequestMake({draft:true})")
             status_js = "() => { const s=document.getElementById('status'); return s ? s.textContent.trim().slice(0,160) : ''; }"
             try:
@@ -109,7 +141,7 @@ def run_once(mode, image, timeout_s):
             rec["status"] = page.evaluate(status_js)
             b64 = pr.pop("b64", None)
             rec.update({k: pr.get(k) for k in ("name", "draft", "test", "type", "size", "hasBlobR2At", "err")})
-            rec["hasBlobR2At"] = "未測(一時プロファイル=sync token無し)"
+            rec.update(measure_cloud(page, t_start, profile))
             if b64:
                 os.makedirs(OUT_DIR, exist_ok=True)
                 ext = "mp4" if "mp4" in (pr.get("type") or "") else "webm"
@@ -123,7 +155,8 @@ def run_once(mode, image, timeout_s):
     except Exception as e:  # noqa: BLE001 - probeは失敗内容を記録して返す
         rec["error"] = f"{type(e).__name__}: {str(e)[:300]}"
     finally:
-        shutil.rmtree(prof, ignore_errors=True)
+        if not profile:
+            shutil.rmtree(prof, ignore_errors=True)
     return rec
 
 
@@ -132,10 +165,11 @@ def main():
     ap.add_argument("--image", required=True)
     ap.add_argument("--modes", default="headless,headful")
     ap.add_argument("--timeout", type=int, default=60)
+    ap.add_argument("--profile", default=None, help="専用プロファイル(例 D:/SougouStartFolder/LocalData/fivesec_autodraft_profile)")
     a = ap.parse_args()
     os.makedirs(LOCAL_ROOT, exist_ok=True)
     for mode in a.modes.split(","):
-        rec = run_once(mode.strip(), a.image, a.timeout)
+        rec = run_once(mode.strip(), a.image, a.timeout, a.profile)
         line = json.dumps(rec, ensure_ascii=False)
         with open(LOG_PATH, "a", encoding="utf-8") as f:
             f.write(line + "\n")
