@@ -160,16 +160,47 @@ def run_once(mode, image, timeout_s, profile=None):
     return rec
 
 
+DISPATCH = r"D:\SougouStartFolder\5SecMovieMaker\scripts\llm\dispatch.py"
+
+
+# 専用プロファイルの結果を5S軍議へ1行で返す=Chamiが「入れ終わった」と言いに来なくて済む(token の中身は載せない)
+def notify_body(rec):
+    if rec.get("error"):
+        state = f"失敗({rec['error'][:120]})"
+    elif rec.get("hasBlobR2At") is True:
+        state = "hasBlobR2At=true。残りはスマホ一覧での再生の目視だけ"
+    elif not rec.get("configured"):
+        state = "同期が未設定(configured=false)。⚙の2欄はまだ入っていない"
+    else:
+        state = f"hasBlobR2At={rec.get('hasBlobR2At')}(同期は設定済み・R2に実体が見えない)"
+    return (f"[β-5a 自動確認・改修β] 専用プロファイルのChromeが閉じられたので probe を1回流した({rec.get('at')})。"
+            f"stockId={rec.get('stockId')} / {state}。記録= {LOG_PATH}"
+            "(--direct: β-5a の依頼元である5S軍議への結果返しのため)")
+
+
+def notify(rec, dry_run=False):
+    cmd = [sys.executable, DISPATCH, "--dept", "gunji-5s", "--from-dept", "system-engineer",
+           "--from", "オタコン", "--audience", "ai", "--direct", "--body", notify_body(rec)]
+    if dry_run:
+        cmd.append("--dry-run")
+    r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    return {"rc": r.returncode, "dry_run": dry_run, "tail": (r.stdout + r.stderr).strip()[-200:]}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--image", required=True)
     ap.add_argument("--modes", default="headless,headful")
     ap.add_argument("--timeout", type=int, default=60)
     ap.add_argument("--profile", default=None, help="専用プロファイル(例 D:/SougouStartFolder/LocalData/fivesec_autodraft_profile)")
+    ap.add_argument("--notify", action="store_true", help="専用プロファイルの結果を5S軍議へ1行返す")
+    ap.add_argument("--notify-dry-run", action="store_true")
     a = ap.parse_args()
     os.makedirs(LOCAL_ROOT, exist_ok=True)
     for mode in a.modes.split(","):
         rec = run_once(mode.strip(), a.image, a.timeout, a.profile)
+        if a.profile and (a.notify or a.notify_dry_run):
+            rec["notify"] = notify(rec, dry_run=a.notify_dry_run)
         line = json.dumps(rec, ensure_ascii=False)
         with open(LOG_PATH, "a", encoding="utf-8") as f:
             f.write(line + "\n")
