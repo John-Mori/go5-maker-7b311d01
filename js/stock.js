@@ -978,6 +978,8 @@
       priceInfo: livePriceInfo_(($('movieWorkUrl') || {}).value || ($('movieWorkAffi') || {}).value || ''),
       youtubeUrl: '',
       srcMark: (evDetail.srcMark && evDetail.srcMark.cid && evDetail.srcMark.hash) ? { cid: String(evDetail.srcMark.cid), hash: String(evDetail.srcMark.hash) } : null, // 動画に使った候補画像(cid+ハッシュ)。投稿完了で使用日を刻む(Chami 2026-08-24)
+      auto: (evDetail.auto && evDetail.auto.date) ? { date: String(evDetail.auto.date), rank: Number(evDetail.auto.rank) || 0 } : null, // 無人自動作成(js/autodraft.js)で作ったドラフトの印
+      autoAlt: (evDetail.auto && evDetail.autoAlt) ? { titles: (evDetail.autoAlt.titles || []).map(String), hookNote: String(evDetail.autoAlt.hookNote || '') } : null, // 朝の見直しで差し替える題名候補(β-6)
       dailyPick: dailyPickMark_(($('movieWorkUrl') || {}).value || '', ($('movieWorkAffi') || {}).value || '') // 今日のおすすめ由来(投稿モードの「おすすめ枠」を出す印)
     };
 

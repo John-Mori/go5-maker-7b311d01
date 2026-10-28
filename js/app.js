@@ -1337,7 +1337,7 @@
       //   Bluesky alt / GAS記録のtitle / 端末予約 / Drive のフォルダ名・ファイル名。
       //   ★空白に置換しない=詰めて連結する(Chami明示「改行や空白を挟まない」)。
       //   ここ1箇所で潰すことで購読側6経路すべてに効く(個別対処だと足し忘れが必ず出る)。
-      document.dispatchEvent(new CustomEvent("video-created", { detail: { title: titleForBurn(els.top.value), blob: lastBlob, name: lastName, videoId: videoId, account: account, test: isTest, sourceImageFile: fgFile, draft: isDraft, srcMark: (window.__go5MovieSrcMark || null) } }));
+      document.dispatchEvent(new CustomEvent("video-created", { detail: { title: titleForBurn(els.top.value), blob: lastBlob, name: lastName, videoId: videoId, account: account, test: isTest, sourceImageFile: fgFile, draft: isDraft, srcMark: (window.__go5MovieSrcMark || null), auto: (opts && opts.auto) || null, autoAlt: (opts && opts.autoAlt) || null } }));
     } catch (e) {
       makeFailed_ = true;
       setStatus("作成に失敗しました：" + e.message);
