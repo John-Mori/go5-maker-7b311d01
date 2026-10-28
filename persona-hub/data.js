@@ -30,9 +30,9 @@ window.PERSONA_HUB_DATA = {
    },
    "原典": {
     "path": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md",
-    "sha1": "f5916cec59482e2f8769ce8d02decab164762b80",
-    "bytes": 10901,
-    "mtime": 1793230685.784
+    "sha1": "99ed81e3b48b3bd8f3555d6c7288fe7bde31aa01",
+    "bytes": 10903,
+    "mtime": 1793231123.239
    }
   },
   "_count": 35
@@ -2678,7 +2678,7 @@ window.PERSONA_HUB_DATA = {
    }
   },
   "ミカヤ": {
-   "所属部門": "health-log(健康管理と記録・ch 1526749845614759967・役職未指定・Chamiを弟として扱う)(Chami 2026-10-29 hr-context msg 1565147112759627798・常駐名簿は基盤へ回送)",
+   "所属部門": "health-log(健康管理と記録・ch 1526749845614759967・メンバー・Chamiを弟として扱う)(Chami 2026-10-29 hr-context msg 1565147112759627798・10/29配線済=イージス d1bc5d2)",
    "設定所在": {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\micaiah.md",
     "口調ルール": null,
