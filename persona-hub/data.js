@@ -18,9 +18,9 @@ window.PERSONA_HUB_DATA = {
    },
    "呼称": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "sha1": "b6c7ea6c0cfb2f97f0c826e7a47f2ca5d08c3f03",
-    "bytes": 145229,
-    "mtime": 1792701325.902
+    "sha1": "383d74f567b2fa7a18d04067e3fb75f1d9203d00",
+    "bytes": 145831,
+    "mtime": 1793230685.788
    },
    "アイコン": {
     "path": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
@@ -30,12 +30,12 @@ window.PERSONA_HUB_DATA = {
    },
    "原典": {
     "path": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md",
-    "sha1": "fac4c9eb95e4023f681d7193d799e58a9f2add91",
-    "bytes": 10680,
-    "mtime": 1792316514.262
+    "sha1": "f5916cec59482e2f8769ce8d02decab164762b80",
+    "bytes": 10901,
+    "mtime": 1793230685.784
    }
   },
-  "_count": 34
+  "_count": 35
  },
  "personas": {
   "アスナ": {
@@ -2672,6 +2672,41 @@ window.PERSONA_HUB_DATA = {
     "この人をどう呼ぶか": {
      "敬称必須(honorific_required)": null,
      "Chami宛の例外": null,
+     "自分を対象にした個別ルール": []
+    },
+    "この人が誰をどう呼ぶか": []
+   }
+  },
+  "ミカヤ": {
+   "所属部門": "health-log(健康管理と記録・ch 1526749845614759967・役職未指定・Chamiを弟として扱う)(Chami 2026-10-29 hr-context msg 1565147112759627798・常駐名簿は基盤へ回送)",
+   "設定所在": {
+    "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\micaiah.md",
+    "口調ルール": null,
+    "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
+    "アイコン差分": null,
+    "スプライト": null,
+    "文脈": null
+   },
+   "口調": null,
+   "アイコン": {
+    "枚数": 0,
+    "url": []
+   },
+   "呼称": {
+    "この人をどう呼ぶか": {
+     "敬称必須(honorific_required)": null,
+     "Chami宛の例外": {
+      "allowed": [
+       "ちゃみ"
+      ],
+      "forbidden": [
+       "ちゃみさん",
+       "ちゃみくん",
+       "ちゃみクン",
+       "Chami"
+      ],
+      "note": "FE暁の女神のミカヤはChamiを弟として扱い、呼び捨て『ちゃみ』で呼ぶ(原典で義弟サザを呼び捨てにする位置・Chami 2026-10-29 人事部門-コンテキスト msg 1565147112759627798「Chamiが弟であるかのように振舞って」)。原典=LocalData/persona_context/micaiah_fe/00_Codex調査_20261029.md"
+     },
      "自分を対象にした個別ルール": []
     },
     "この人が誰をどう呼ぶか": []
