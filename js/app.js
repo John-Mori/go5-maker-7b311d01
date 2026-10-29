@@ -663,11 +663,14 @@
   window.Go5SyncBgPlayback = syncBgPlayback_;
 
   // ---- プレビュー(完全表示状態の1枚) ----
+  let recDrawLock_ = false; // make() の録画ループ中だけ true。録画ループ以外の drawFrame(DURATION) 再描画を止める
   async function preview() {
     await ensureFont();
     // 1フレームだけデコードできれば静止プレビューは描ける。可視・動画作成タブでない限り、
     //   デコード後は即停止して連続再生に戻さない(隠れた動画を回し続けない)。
     if (bg.readyState < 2) { try { await bg.play(); } catch (e) {} }
+    // ★録画中は完成フレームを撃ち込まない=録画中の#cvへ alpha=1 の1コマが混ざり、画像が一瞬出て消えてまた出る(ちらつき)原因になる。録画ループが描き続ける。
+    if (recDrawLock_) return;
     drawFrame(DURATION);
     if (!bgShouldPlay_()) { try { bg.pause(); } catch (e) {} }
   }
@@ -681,6 +684,7 @@
   function renderFinalPreviewDataUrl_() {
     try {
       if (!fgImg) return '';
+      if (recDrawLock_) return ''; // 録画中は#cvを書き換えない(呼び側は従来経路へフォールバック)
       drawFrame(DURATION);
       return cv.toDataURL('image/jpeg', 0.85);
     } catch (e) { return ''; }
@@ -1274,16 +1278,19 @@
       const t0 = performance.now();
       // 1秒ごとにチャンクを確保する。stop時の最後のdataavailable 1回だけに依存すると、
       // iOS Safariの間欠不達で空Blobになっても気付けなかった。
+      recDrawLock_ = true;
       rec.start(1000);
-      await new Promise((resolve) => {
-        const loop = () => {
-          const t = (performance.now() - t0) / 1000;
-          drawFrame(Math.min(t, DURATION));
-          if (t >= REC_SECONDS) return resolve();
-          requestAnimationFrame(loop);
-        };
-        loop();
-      });
+      try {
+        await new Promise((resolve) => {
+          const loop = () => {
+            const t = (performance.now() - t0) / 1000;
+            drawFrame(Math.min(t, DURATION));
+            if (t >= REC_SECONDS) return resolve();
+            requestAnimationFrame(loop);
+          };
+          loop();
+        });
+      } finally { recDrawLock_ = false; }
       try { if (rec.state === "recording") rec.requestData(); } catch (e) {}
       if (rec.state !== "inactive") rec.stop();
       let stopTimer = null;
