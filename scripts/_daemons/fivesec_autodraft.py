@@ -191,7 +191,13 @@ def main():
                                            timeout=30000)
 
                 try:
-                    open_app()
+                    page.goto(a.url, wait_until="load", timeout=60000)
+                except Exception as e:  # noqa: BLE001
+                    # 回線・Pagesの一時的な不調は旧デプロイとは限らない。即の失敗通知にせず次の便で試し直す
+                    return run_error(led, "open_failed", f"本番を開けない url={a.url} {type(e).__name__}: {str(e)[:160]}", a)
+                try:
+                    page.wait_for_function("() => window.FivesecAutoDraft && window.FivesecAutoDraft.version >= 1",
+                                           timeout=30000)
                 except Exception:
                     return run_error(led, "version_missing",
                                      f"本番に FivesecAutoDraft.version が無い(旧デプロイ) url={page.url}", a, fatal=True)
