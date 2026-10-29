@@ -116,17 +116,26 @@ def run_once(mode, image, timeout_s, profile=None):
             console = []
             page.on("console", lambda m: console.append(f"{m.type}: {m.text}"[:200]))
             page.add_init_script(HOOK_JS)
+            # 無人ドラフト(fivesec_autodraft.py)が同じ専用プロファイルに go5_active_tab='tabStock' を残す=開くと動画作成タブが隠れる。本体の定時便と同じく tabMovie へ戻す
+            page.add_init_script("try{ if(!/Stock|StockLists/.test(location.pathname)) localStorage.setItem('go5_active_tab','tabMovie'); }catch(e){}")
             page.goto(PROD_URL, wait_until="load", timeout=60000)
+            rec["page"] = page.url
             rec["ver"] = page.evaluate(
                 "() => { const s=[...document.scripts].map(x=>x.src).find(x=>/app\\.js/.test(x)); return s||''; }")
             rec["ua"] = page.evaluate("() => navigator.userAgent")
             rec["mimes"] = page.evaluate("""() => ['video/mp4;codecs=avc1','video/mp4','video/webm;codecs=vp9','video/webm']
                 .filter(m => window.MediaRecorder && MediaRecorder.isTypeSupported(m))""")
             page.locator("#photo").set_input_files(image)
-            page.locator("#testMode").check(force=True)
-            for sel, val in (("#author", "probe"), ("#top", "無人probe")):
-                if page.locator(sel).count():
-                    page.locator(sel).fill(val)
+            # 画面の見え方(タブ・パネルの開閉)に依存せず、js/autodraft.js と同じく値を直接立てて change/input を投げる
+            page.evaluate("""() => {
+              const t = document.getElementById('testMode');
+              if (t && !t.checked) { t.checked = true; t.dispatchEvent(new Event('change', { bubbles: true })); }
+              for (const [id, v] of [['author', 'probe'], ['top', '無人probe']]) {
+                const el = document.getElementById(id);
+                if (el) { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); }
+              }
+            }""")
+            rec["testMode"] = page.evaluate("() => { const t=document.getElementById('testMode'); return t ? t.checked : null; }")
             page.wait_for_timeout(1500)
             t_start = page.evaluate("() => Date.now()")
             page.evaluate("() => window.__go5RequestMake({draft:true})")
@@ -204,7 +213,7 @@ def main():
         line = json.dumps(rec, ensure_ascii=False)
         with open(LOG_PATH, "a", encoding="utf-8") as f:
             f.write(line + "\n")
-        print(line)
+        print(line.encode(sys.stdout.encoding or "utf-8", "replace").decode(sys.stdout.encoding or "utf-8"))
     return 0
 
 
