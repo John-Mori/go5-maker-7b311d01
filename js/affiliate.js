@@ -174,6 +174,15 @@
     }
     // ★オーバーレイ(予約/カレンダー)は復元対象にしない＝再アクセス時は下の作業タブへ戻す。
     var ok = saved && !OVERLAY_BTNS[saved] && TABS.some(function (t) { return t.btn === saved; }) && document.getElementById(saved);
+    // ★5秒動画の廃止(Chami 2026-11-03・モドリッチ便)=既定で動画作成(pageMovie)を出さず候補(KouhoLists.html)へ移す。
+    //   hidden にしたタブ(動画作成/ドラフト/投稿)の復元も同じく候補へ。戻す時は REDIRECT_LEGACY_LANDING を false にする。
+    //   pageMovie 本体は消さず残す(予約/候補→動画生成の持ち越し先が下地として使うため hidden は付けない)。
+    var REDIRECT_LEGACY_LANDING = true;
+    if (REDIRECT_LEGACY_LANDING) {
+      var savedBtn = ok ? document.getElementById(saved) : null;
+      var landsOnLegacy = !ok || saved === 'tabMovie' || (savedBtn && savedBtn.hidden && saved !== 'tabStock' && saved !== 'tabVerify');
+      if (landsOnLegacy) { location.replace('KouhoLists.html'); return; }
+    }
     var activeId;
     if (ok && saved !== 'tabMovie') {
       showTab(saved); activeId = saved; // 保存タブへ復元(既定=動画作成なら showTab しない)
