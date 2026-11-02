@@ -1079,6 +1079,7 @@ video#result{width:100%;border-radius:12px;background:#000;margin-bottom:8px;}
   border-color:var(--line) var(--line) var(--accent) var(--line);
 }
 .tab:active{filter:brightness(.9);}
+.tab[hidden]{display:none;}/* 5秒動画廃止(2026-11-03): 動画作成/ドラフト/投稿タブを隠す(消さない) */
 /* 絵文字置き換え用の画像アイコン（🔗/🎬/🦋 → 画像）。文字と同じ大きさで並ぶよう調整。 */
 img.emico{height:1.05em;width:auto;vertical-align:-0.16em;object-fit:contain;border-radius:3px;}
 .tab img.emico{height:1.3em;vertical-align:-0.28em;margin-right:1px;border-radius:4px;}
