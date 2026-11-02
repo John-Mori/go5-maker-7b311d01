@@ -10,10 +10,11 @@
 <meta name="referrer" content="no-referrer">
 <meta http-equiv="Cache-Control" content="no-cache, must-revalidate">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0e1422">
+<meta name="theme-color" content="#f6f4ef">
 <title>作品DB 作業場</title>
 <style>
-:root{--bg:#0e1422;--card:#1a2030;--ink:#eef2f7;--sub:#9fb0c3;--accent:#2bb3c0;--warn:#e0a040;--bad:#dc465a;--line:#2a3346;}
+/* 一覧系ツールはダーク禁止・水色ボタン禁止(design-preferences 2026-09-27)。白系の面+墨色の選択ボタン+主ボタンはクレイ橙(§5.95) */
+:root{--bg:#f6f4ef;--card:#fff;--ink:#1f2328;--sub:#6b665c;--accent:#d97757;--ok:#5f7a45;--warn:#b7791f;--bad:#c0392b;--line:#e3ded3;--well:#f1eee7;--link:#2f5f9e;}
 *{box-sizing:border-box;}
 html{-webkit-text-size-adjust:100%;text-size-adjust:100%;}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;font-size:15px;line-height:1.5;}
@@ -22,33 +23,33 @@ header{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px so
 header h1{font-size:17px;margin:0;flex:1 1 auto;min-width:0;}
 main{padding:10px 12px 80px;max-width:760px;margin:0 auto;}
 button{font:inherit;width:auto;flex:0 0 auto;cursor:pointer;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:6px 12px;}
-button.on{background:var(--accent);border-color:var(--accent);color:#0e1422;font-weight:700;}
-button.primary{background:var(--accent);border-color:var(--accent);color:#0e1422;font-weight:700;padding:9px 18px;}
+button.on{background:var(--ink);border-color:var(--ink);color:#fff;font-weight:700;}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:700;padding:9px 18px;}
 .row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;}
 .note{color:var(--sub);font-size:13px;}
 .msg{padding:10px 12px;border-radius:8px;background:var(--card);border:1px solid var(--line);margin:10px 0;}
 .msg.bad{border-color:var(--bad);}
-.msg.ok{border-color:var(--accent);}
-.card{display:flex;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px;margin:8px 0;cursor:pointer;}
-.thumb{flex:0 0 96px;width:96px;height:96px;border-radius:6px;background:#0a0f1a;overflow:hidden;position:relative;}
-.thumb img{position:relative;z-index:1;width:100%;height:100%;object-fit:contain;display:block;background:#0a0f1a;}
+.msg.ok{border-color:var(--ok);}
+.card{display:flex;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px;margin:8px 0;cursor:pointer;box-shadow:0 1px 2px rgba(31,35,40,.05);}
+.thumb{flex:0 0 96px;width:96px;height:96px;border-radius:6px;background:var(--well);overflow:hidden;position:relative;}
+.thumb img{position:relative;z-index:1;width:100%;height:100%;object-fit:contain;display:block;background:var(--well);}
 .thumb .noimg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--sub);text-align:center;padding:4px;}
 .info{flex:1 1 auto;min-width:0;}
 .title{font-weight:700;overflow-wrap:anywhere;}
 .badge{display:inline-block;font-size:12px;border:1px solid var(--line);border-radius:6px;padding:0 6px;margin:2px 4px 0 0;color:var(--sub);}
-.badge.done{border-color:var(--accent);color:var(--accent);}
+.badge.done{border-color:var(--ok);color:var(--ok);}
 .badge.todo{border-color:var(--warn);color:var(--warn);}
 .def{margin:14px 0;}
-.def .lab{font-size:13px;color:var(--accent);font-weight:700;margin-bottom:6px;}
-input[type=text],textarea,select{font:inherit;font-size:16px;width:100%;min-width:0;max-width:100%;background:#0a0f1a;color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:8px;}
+.def .lab{font-size:13px;color:var(--ink);font-weight:700;margin-bottom:6px;}
+input[type=text],textarea,select{font:inherit;font-size:16px;width:100%;min-width:0;max-width:100%;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:8px;}
 select{width:auto;max-width:320px;-webkit-appearance:none;appearance:none;padding-right:28px;
   background-image:linear-gradient(45deg,transparent 50%,var(--ink) 50%),linear-gradient(135deg,var(--ink) 50%,transparent 50%);
   background-position:calc(100% - 15px) 55%,calc(100% - 10px) 55%;background-size:5px 5px;background-repeat:no-repeat;}
-select option{background:#0a0f1a;color:var(--ink);}
+select option{background:var(--card);color:var(--ink);}
 textarea{min-height:140px;resize:vertical;}
 .head{display:flex;gap:10px;margin:6px 0 10px;}
 .savebar{position:sticky;bottom:0;background:var(--bg);border-top:1px solid var(--line);padding:10px 0;margin-top:16px;}
-a{color:var(--accent);}
+a{color:var(--link);}
 </style>
 </head>
 <body>
