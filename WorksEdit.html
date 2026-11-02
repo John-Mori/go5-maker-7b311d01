@@ -2,360 +2,300 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<!-- 作品DBの「組む作業」画面(2026-11-03 新設)。KouhoLists.html と同じく1枚で完結する軽いページ。
-     データは repo に置かない: 作品・タグ・説明は Worker works-db(D1 works_db)から実行時に読む。画像も出さない
-     (作品ページへのリンクだけ)。合言葉は本体アプリと同じ localStorage sync2_token をそのまま送る。
-     保存の決まり(選択肢の検査・「なし」の排他・押していない項目は残す・1回の書き込み)は Worker 側が持つ。 -->
-<meta name="robots" content="noindex,nofollow,noarchive">
+<!-- 作品DBの作業場(2026-11-03 新設・Chami直令 ad研究室 msg 1566888121097003168/1566889169404428309)。
+     5秒動画は廃止し、go5-maker のこの場所で NTR・人妻DBの「組む作業」(候補を見る・タグと説明を入れる)を行う。
+     データは Worker works-db(D1 works_db)から合言葉付きで読む=作品の題名・画像は repo にも Pages の静的ファイルにも置かない。
+     合言葉は本体と同じ localStorage sync2_token(同じオリジン・この端末だけ)。検索に載せない(noindex)。 -->
+<meta name="robots" content="noindex, nofollow, noarchive, noimageindex">
 <meta name="referrer" content="no-referrer">
 <meta http-equiv="Cache-Control" content="no-cache, must-revalidate">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#faf8f5">
-<title>作品DB — 組む作業</title>
+<meta name="theme-color" content="#0e1422">
+<title>作品DB 作業場</title>
 <style>
-:root{--bg:#faf8f5;--card:#fff;--ink:#2f2722;--sub:#7a6d63;--line:#e6ddd3;--acc:#c4622d;--acc-ink:#fff;--soft:#fbe9dd;--ng:#b3261e;--ok:#2e7d32}
-*{box-sizing:border-box}
-html{background:var(--bg);-webkit-text-size-adjust:100%;text-size-adjust:100%}
-body{margin:0;color:var(--ink);font:15px/1.6 -apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;
-  padding:0 0 calc(88px + env(safe-area-inset-bottom))}
-[hidden]{display:none!important}
-header{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line);
-  padding:calc(10px + env(safe-area-inset-top)) 14px 10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-header h1{font-size:17px;margin:0;white-space:nowrap}
-header a{color:var(--acc);font-weight:700;text-decoration:none;white-space:nowrap}
-main{max-width:760px;margin:0 auto;padding:12px 14px}
-.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-button,.btn{font:inherit;width:auto;flex:0 0 auto;white-space:nowrap;min-height:44px;padding:0 16px;border-radius:10px;
-  border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer;text-decoration:none;
-  display:inline-flex;align-items:center;justify-content:center}
-.primary{background:var(--acc);border-color:var(--acc);color:var(--acc-ink);font-weight:700}
-.chip{border-radius:22px;padding:0 14px}
-.chip[aria-pressed="true"]{background:var(--soft);border-color:var(--acc);color:#8a3e14;font-weight:700}
-.chip[aria-pressed="true"]::before{content:"✓ "}
-.small{min-height:36px;padding:0 12px;font-size:14px}
-.note{color:var(--sub);font-size:13px}
-.msg{border-radius:10px;padding:10px 12px;margin:0 0 12px;background:var(--card);border:1px solid var(--line)}
-.msg.ng{border-color:var(--ng);color:var(--ng)}
-.msg.ok{border-color:var(--ok);color:var(--ok)}
-.work{display:block;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin:0 0 8px;color:inherit;text-decoration:none}
-.work .t{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.work .m{color:var(--sub);font-size:13px;display:flex;flex-wrap:wrap;gap:4px 12px}
-.work .m span{white-space:nowrap}
-.badge{display:inline-block;white-space:nowrap;border-radius:6px;padding:0 6px;font-size:12px;border:1px solid var(--line);background:var(--bg)}
-.todo{color:var(--acc);font-weight:700}
-.field{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin:0 0 10px}
-.field h3{font-size:15px;margin:0 0 8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.field h3 .note{font-weight:400}
-input[type=text],textarea{font:inherit;font-size:16px;width:100%;border:1px solid var(--line);border-radius:10px;padding:10px;background:#fff;color:var(--ink)}
-textarea{min-height:9em;resize:vertical}
-.tabs{display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:4px;margin:0 0 10px}
-.tabs .chip{flex:0 0 auto}
-.savebar{position:fixed;left:0;right:0;bottom:0;z-index:6;background:var(--bg);border-top:1px solid var(--line);
-  padding:10px 14px calc(10px + env(safe-area-inset-bottom));display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
-.savebar .st{flex:1 1 140px;min-width:0;font-size:13px;color:var(--sub)}
-h2{font-size:16px;margin:4px 0 6px;overflow-wrap:anywhere}
+:root{--bg:#0e1422;--card:#1a2030;--ink:#eef2f7;--sub:#9fb0c3;--accent:#2bb3c0;--warn:#e0a040;--bad:#dc465a;--line:#2a3346;}
+*{box-sizing:border-box;}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%;}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;font-size:15px;line-height:1.5;}
+[hidden]{display:none !important;}
+header{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line);padding:10px 12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+header h1{font-size:17px;margin:0;flex:1 1 auto;min-width:0;}
+main{padding:10px 12px 80px;max-width:760px;margin:0 auto;}
+button{font:inherit;width:auto;flex:0 0 auto;cursor:pointer;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:6px 12px;}
+button.on{background:var(--accent);border-color:var(--accent);color:#0e1422;font-weight:700;}
+button.primary{background:var(--accent);border-color:var(--accent);color:#0e1422;font-weight:700;padding:9px 18px;}
+.row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;}
+.note{color:var(--sub);font-size:13px;}
+.msg{padding:10px 12px;border-radius:8px;background:var(--card);border:1px solid var(--line);margin:10px 0;}
+.msg.bad{border-color:var(--bad);}
+.msg.ok{border-color:var(--accent);}
+.card{display:flex;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px;margin:8px 0;cursor:pointer;}
+.thumb{flex:0 0 96px;width:96px;height:96px;border-radius:6px;background:#0a0f1a;overflow:hidden;position:relative;}
+.thumb img{position:relative;z-index:1;width:100%;height:100%;object-fit:contain;display:block;background:#0a0f1a;}
+.thumb .noimg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--sub);text-align:center;padding:4px;}
+.info{flex:1 1 auto;min-width:0;}
+.title{font-weight:700;overflow-wrap:anywhere;}
+.badge{display:inline-block;font-size:12px;border:1px solid var(--line);border-radius:6px;padding:0 6px;margin:2px 4px 0 0;color:var(--sub);}
+.badge.done{border-color:var(--accent);color:var(--accent);}
+.badge.todo{border-color:var(--warn);color:var(--warn);}
+.def{margin:14px 0;}
+.def .lab{font-size:13px;color:var(--accent);font-weight:700;margin-bottom:6px;}
+input[type=text],textarea,select{font:inherit;font-size:16px;width:100%;min-width:0;max-width:100%;background:#0a0f1a;color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:8px;}
+select{width:auto;max-width:320px;-webkit-appearance:none;appearance:none;padding-right:28px;
+  background-image:linear-gradient(45deg,transparent 50%,var(--ink) 50%),linear-gradient(135deg,var(--ink) 50%,transparent 50%);
+  background-position:calc(100% - 15px) 55%,calc(100% - 10px) 55%;background-size:5px 5px;background-repeat:no-repeat;}
+select option{background:#0a0f1a;color:var(--ink);}
+textarea{min-height:140px;resize:vertical;}
+.head{display:flex;gap:10px;margin:6px 0 10px;}
+.savebar{position:sticky;bottom:0;background:var(--bg);border-top:1px solid var(--line);padding:10px 0;margin-top:16px;}
+a{color:var(--accent);}
 </style>
 </head>
 <body>
 <header>
-  <h1>作品DB — 組む作業</h1>
-  <a href="#/" id="toList">一覧</a>
-  <a href="KouhoLists.html">候補へ</a>
+  <h1 id="hd">作品DB 作業場(NTR・人妻)</h1>
+  <button id="backBtn" type="button" hidden>一覧へ戻る</button>
 </header>
 <main>
-  <div id="msg" class="msg" hidden></div>
+  <div id="topMsg" class="msg" hidden></div>
 
   <section id="listView" hidden>
-    <div class="row" id="filters" style="margin:0 0 10px"></div>
-    <div id="works"></div>
-    <div class="row"><button id="more" hidden>次の30件</button></div>
+    <div class="row" id="filters"></div>
+    <p class="note" id="listNote"></p>
+    <div id="list"></div>
+    <div class="row" id="pager"></div>
   </section>
 
   <section id="editView" hidden>
-    <h2 id="wTitle"></h2>
-    <div class="row note" id="wMeta" style="margin:0 0 8px"></div>
-    <div class="tabs" id="storyTabs"></div>
-    <div id="fields"></div>
+    <div class="head">
+      <div class="thumb" id="edThumb"></div>
+      <div class="info">
+        <div class="title" id="edTitle"></div>
+        <div class="note" id="edSub"></div>
+        <div class="row" style="margin-top:6px"><a id="edLink" target="_blank" rel="noopener noreferrer">商品ページを開く</a></div>
+      </div>
+    </div>
+    <div class="row">
+      <span class="note">入力する範囲</span>
+      <select id="storySel"></select>
+    </div>
+    <div id="defs"></div>
+    <div class="def" id="bodyWrap">
+      <div class="lab">説明(作品全体だけ)</div>
+      <textarea id="bodyTa"></textarea>
+      <div class="note" id="bodyCount"></div>
+    </div>
+    <div class="savebar">
+      <div class="row"><button id="saveBtn" class="primary" type="button">保存する</button><span class="note" id="saveSt"></span></div>
+      <div id="saveErr" class="msg bad" hidden></div>
+    </div>
   </section>
 </main>
-<div class="savebar" id="saveBar" hidden>
-  <span class="st" id="saveState"></span>
-  <button class="primary" id="saveBtn">保存する</button>
-</div>
-
 <script>
 (function () {
   "use strict";
-  var LS = window.localStorage;
-  var API = String(LS.getItem("works_db_url") || "https://works-db.trustsignalbot.workers.dev").replace(/\/+$/, "");
-  var TOKEN = String(LS.getItem("sync2_token") || "").trim();
+  var API = "https://works-db.trustsignalbot.workers.dev";
+  try { var o = new URLSearchParams(location.search).get("api"); if (o && /^http:\/\/127\.0\.0\.1:\d+$/.test(o)) API = o; } catch (e) {}
   var PAGE = 30;
   var $ = function (id) { return document.getElementById(id); };
-  var esc = function (s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
-    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); };
-  // Worker の時刻はすべて +09:00(JST)で返る。表示は時:分だけ切り出す
-  var hm = function (iso) { var m = /T(\d\d:\d\d)/.exec(iso || ""); return m ? m[1] : ""; };
-  var md = function (iso) { var m = /^\d{4}-(\d\d)-(\d\d)T(\d\d:\d\d)/.exec(iso || ""); return m ? (+m[1]) + "/" + (+m[2]) + " " + m[3] : ""; };
+  var token = "";
+  try { token = (localStorage.getItem("sync2_token") || "").trim(); } catch (e) {}
 
-  function say(text, kind) {
-    var el = $("msg");
-    if (!text) { el.hidden = true; return; }
-    el.className = "msg" + (kind ? " " + kind : "");
-    el.textContent = text;
-    el.hidden = false;
-  }
+  var works = [], filter = "all", page = 0, cur = null, sel = {}, clearSet = {}, dirtyBody = false;
 
-  function api(path, body) {
-    var ac = new AbortController();
-    var timer = setTimeout(function () { ac.abort(); }, 15000);
-    var opt = { method: body ? "POST" : "GET", headers: { "X-Sync-Token": TOKEN }, signal: ac.signal, cache: "no-store" };
-    if (body) { opt.headers["Content-Type"] = "application/json"; opt.body = JSON.stringify(body); }
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
+  function show(el, on) { el.hidden = !on; }
+  function topMsg(text, kind) { var m = $("topMsg"); m.className = "msg" + (kind ? " " + kind : ""); m.textContent = text; show(m, !!text); }
+
+  function api(path, data) {
+    var opt = { headers: { "X-Sync-Token": token }, cache: "no-store" };
+    if (data) { opt.method = "POST"; opt.headers["Content-Type"] = "application/json"; opt.body = JSON.stringify(data); }
     return fetch(API + path, opt).then(function (r) {
-      return r.json().catch(function () { return {}; }).then(function (d) { return { status: r.status, data: d }; });
-    }, function (ex) {
-      return { status: 0, data: { error: ex && ex.name === "AbortError" ? "timeout" : "network" } };
-    }).finally(function () { clearTimeout(timer); });
+      return r.json().catch(function () { return {}; }).then(function (j) { j._status = r.status; return j; });
+    });
   }
 
-  function why(res) {
-    if (res.status === 0) return res.data.error === "timeout" ? "works-db から15秒返事がありませんでした。電波の良い所でもう一度開いてください。"
-      : "works-db に届きませんでした(圏外か、通信が止められています)。";
-    if (res.status === 403) return "合言葉が通りませんでした。5秒動画メーカーの同期の合言葉が今のものか、設定で確かめてください。";
-    if (res.status === 404) return "この作品は作品DBにありません(一覧から開き直してください)。";
-    if (res.data && res.data.errors) return res.data.errors.join(" / ");
-    return "works-db がエラーを返しました(" + res.status + ")。";
+  // 同人は作品の種類で置き場が違う(コミック/ゲーム/CG/音声)。無い置き場は now_printing(90x122)へ飛ぶので、それも外れとして次を試す
+  var DOUJIN_DIRS = ["comic", "game", "cg", "voice"];
+  function imgUrls(w) {
+    if (w.service === "doujin") return DOUJIN_DIRS.map(function (k) { return "https://doujin-assets.dmm.co.jp/digital/" + k + "/" + w.cid + "/" + w.cid + "pl.jpg"; });
+    return ["https://ebook-assets.dmm.co.jp/digital/e-book/" + w.cid + "/" + w.cid + "pl.jpg"];
+  }
+  function thumbHtml(w) {
+    return '<img referrerpolicy="no-referrer" alt="" data-urls="' + esc(imgUrls(w).join(" ")) + '">' +
+      '<span class="noimg">画像が読めない</span>';
+  }
+  function nextImg(img) {
+    var urls = (img.getAttribute("data-urls") || "").split(" ").filter(Boolean);
+    if (!urls.length) { img.remove(); return; }
+    img.setAttribute("data-urls", urls.slice(1).join(" "));
+    img.src = urls[0];
+  }
+  function startImgs(root) {
+    Array.prototype.forEach.call(root.querySelectorAll("img[data-urls]"), function (img) {
+      img.onerror = function () { nextImg(img); };
+      img.onload = function () { if (img.naturalWidth === 90 && img.naturalHeight === 122) nextImg(img); else img.removeAttribute("data-urls"); };
+      nextImg(img);
+    });
   }
 
-  // ---------------- 一覧 ----------------
-  var all = null, filter = "すべて", shown = PAGE;
-  var FILTERS = ["すべて", "NTR", "人妻", "両方", "タグ未入力", "説明が足りない"];
-
-  function pass(w) {
-    if (filter === "すべて") return true;
-    if (filter === "タグ未入力") return !w.tag_n;
-    if (filter === "説明が足りない") return w.body_len < 300;
-    return w.sec === filter;
-  }
-
-  function drawList() {
+  // ---- 一覧 ----
+  var FILTERS = [["all", "すべて"], ["NTR", "NTR"], ["人妻", "人妻・熟女"], ["両方", "両方"], ["todo", "タグ未入力"]];
+  function renderFilters() {
     $("filters").innerHTML = FILTERS.map(function (f) {
-      var n = all.filter(function (w) { var o = filter; filter = f; var p = pass(w); filter = o; return p; }).length;
-      return '<button class="chip small" data-f="' + esc(f) + '" aria-pressed="' + (f === filter) + '">' + esc(f) + " " + n + "</button>";
+      return '<button type="button" data-f="' + f[0] + '" class="' + (filter === f[0] ? "on" : "") + '">' + esc(f[1]) + "</button>";
     }).join("");
-    var hit = all.filter(pass);
-    var box = $("works");
-    if (!all.length) { box.innerHTML = '<p class="note">作品がまだ入っていません(PC で sync_d1.py push を流すと入ります)。</p>'; $("more").hidden = true; return; }
-    if (!hit.length) { box.innerHTML = '<p class="note">「' + esc(filter) + '」に当てはまる作品はありません。</p>'; $("more").hidden = true; return; }
-    box.innerHTML = hit.slice(0, shown).map(function (w) {
-      return '<a class="work" href="#/w/' + encodeURIComponent(w.cid) + '/0">' +
-        '<div class="t">' + esc(w.title) + "</div>" +
-        '<div class="m"><span class="badge">' + esc(w.sec) + "</span>" +
-        "<span>" + esc(w.maker) + "</span>" +
-        "<span" + (w.tag_n ? "" : ' class="todo"') + ">タグ " + w.tag_n + "</span>" +
-        "<span" + (w.body_len >= 300 ? "" : ' class="todo"') + ">説明 " + w.body_len + "/300字</span>" +
-        (w.story_n ? "<span>話別 " + w.story_n + "</span>" : "") +
-        (w.tag_at ? "<span>更新 " + esc(md(w.tag_at)) + "</span>" : "") +
-        "<span>★" + esc(w.review_avg == null ? "-" : w.review_avg) + "(" + esc(w.review_count || 0) + ")</span>" +
-        "</div></a>";
-    }).join("");
-    $("more").hidden = hit.length <= shown;
-    $("more").textContent = "次の30件(残り " + (hit.length - shown) + ")";
   }
-
-  $("filters").addEventListener("click", function (e) {
-    var b = e.target.closest("button[data-f]");
-    if (!b) return;
-    filter = b.getAttribute("data-f"); shown = PAGE; drawList();
-  });
-  $("more").addEventListener("click", function () { shown += PAGE; drawList(); });
-
-  function openList() {
-    $("editView").hidden = true; $("saveBar").hidden = true; $("listView").hidden = false;
-    document.title = "作品DB — 組む作業";
-    if (all) drawList();
-    say(all ? "" : "読み込み中…");
-    return api("/api/works").then(function (res) {
-      if (res.status !== 200) { say(why(res), "ng"); return; }
-      all = res.data.works || []; say(""); drawList();
+  function filtered() {
+    return works.filter(function (w) {
+      if (filter === "all") return true;
+      if (filter === "todo") return !w.tag_n;
+      return w.sec === filter;
     });
   }
-
-  // ---------------- 入力 ----------------
-  var cur = null;      // GET /api/work の中身
-  var sel = {};        // key -> [値](選択肢の項目)
-  var dirty = false, saving = false;
-
-  function setDirty(v) {
-    dirty = v;
-    $("saveState").textContent = v ? "まだ保存していない変更があります" : $("saveState").textContent;
-    $("saveState").style.color = v ? "var(--acc)" : "";
+  function renderList() {
+    renderFilters();
+    var all = filtered(), n = all.length, pages = Math.max(1, Math.ceil(n / PAGE));
+    if (page >= pages) page = pages - 1;
+    var part = all.slice(page * PAGE, page * PAGE + PAGE);
+    var done = works.filter(function (w) { return w.tag_n; }).length;
+    $("listNote").textContent = "全" + works.length + "作品のうちタグ入力済み" + done + "件。表示" + n + "件。";
+    $("list").innerHTML = n ? part.map(function (w) {
+      return '<div class="card" data-cid="' + esc(w.cid) + '"><div class="thumb">' + thumbHtml(w) + '</div><div class="info">' +
+        '<div class="title">' + esc(w.title) + "</div>" +
+        '<div class="note">' + esc(w.maker) + (w.review_count ? " / レビュー" + w.review_count + "件(" + w.review_avg + ")" : "") + "</div>" +
+        '<span class="badge">' + esc(w.sec === "人妻" ? "人妻・熟女" : w.sec) + "</span>" +
+        '<span class="badge ' + (w.tag_n ? "done" : "todo") + '">' + (w.tag_n ? "タグ" + w.tag_n + "項目" : "タグ未入力") + "</span>" +
+        (w.story_n ? '<span class="badge">話別' + w.story_n + "話</span>" : "") +
+        '<span class="badge ' + (w.body_len >= 300 ? "done" : "") + '">説明' + w.body_len + "/300字</span>" +
+        "</div></div>";
+    }).join("") : '<p class="msg">この絞り込みに当たる作品は無い(' + esc(FILTERS.filter(function (f) { return f[0] === filter; })[0][1]) + ")。</p>";
+    startImgs($("list"));
+    $("pager").innerHTML = pages > 1 ? Array.from({ length: pages }, function (_, i) {
+      return '<button type="button" data-p="' + i + '" class="' + (i === page ? "on" : "") + '">' + (i + 1) + "</button>";
+    }).join("") : "";
+  }
+  function loadList() {
+    topMsg("読み込み中…");
+    return api("/api/works").then(function (r) {
+      if (r._status === 403) return topMsg("合言葉が通らない。本体の詳細設定の同期トークンが、この端末に入っているか見てほしい。", "bad");
+      if (!r.ok) return topMsg("一覧が読めない(" + (r.error || r._status) + ")。", "bad");
+      works = r.works || [];
+      topMsg(works.length ? "" : "D1 にまだ作品が無い(sync_d1.py push 前)。");
+      renderList();
+    }).catch(function (e) { topMsg("Worker に届かない(" + e + ")。", "bad"); });
   }
 
-  function drawWork() {
-    var w = cur.work, d = cur;
-    $("wTitle").textContent = w.title;
-    document.title = w.title + " — 作品DB";
-    $("wMeta").innerHTML = '<span class="badge">' + esc(d.sec) + "</span><span>" + esc(w.maker) + "</span>" +
-      (w.campaign ? '<span class="badge">' + esc(w.campaign) + "</span>" : "") +
-      '<a class="btn small" href="' + esc(w.url) + '" target="_blank" rel="noopener noreferrer">FANZAで作品を見る</a>';
-    var stories = [0].concat(d.used.filter(function (n) { return n > 0; }));
-    if (stories.indexOf(d.story) < 0) stories.push(d.story);
-    stories.sort(function (a, b) { return a - b; });
-    var opts = "";
-    for (var i = 1; i <= d.max_story; i++) if (stories.indexOf(i) < 0) opts += '<option value="' + i + '">第' + i + "話</option>";
-    $("storyTabs").innerHTML = stories.map(function (n) {
-      return '<a class="btn chip small" href="#/w/' + encodeURIComponent(w.cid) + "/" + n + '" aria-pressed="' + (n === d.story) + '">' +
-        (n ? "第" + n + "話" : "作品全体") + "</a>";
-    }).join("") + '<select id="addStory" class="btn small" aria-label="話を足す"><option value="">話を足す…</option>' + opts + "</select>";
-
-    sel = {};
-    var html = "";
-    d.defs.forEach(function (f) {
-      var now = d.current[f.key] || "";
-      if (f.choices) {
-        sel[f.key] = now ? now.split(d.join).filter(Boolean) : [];
-        var multi = d.multi.indexOf(f.key) >= 0;
-        html += '<div class="field" data-key="' + esc(f.key) + '"><h3>' + esc(f.label) +
-          '<span class="note">' + (multi ? "いくつでも" : "1つ") + (now ? "" : "・未入力") + "</span>" +
-          (multi ? "" : '<button class="small" data-clear="' + esc(f.key) + '"' + (sel[f.key].length ? "" : " hidden") + ">空にする</button>") +
-          '</h3><div class="row">' + f.choices.map(function (c) {
-            return '<button class="chip" data-k="' + esc(f.key) + '" data-v="' + esc(c) + '" aria-pressed="' + (sel[f.key].indexOf(c) >= 0) + '">' + esc(c) + "</button>";
-          }).join("") + "</div></div>";
-      } else {
-        html += '<div class="field"><h3>' + esc(f.label) + '</h3><input type="text" maxlength="500" data-text="' + esc(f.key) + '" value="' + esc(now) + '"></div>';
+  // ---- 入力画面 ----
+  function openWork(cid, story) {
+    topMsg("読み込み中…");
+    $("saveSt").textContent = ""; show($("saveErr"), false);
+    return api("/api/work?cid=" + encodeURIComponent(cid) + "&story=" + story).then(function (r) {
+      if (!r.ok) return topMsg("作品が読めない(" + (r.error || r._status) + ")。", "bad");
+      topMsg("");
+      cur = r; sel = {}; clearSet = {}; dirtyBody = false;
+      r.defs.forEach(function (d) {
+        var v = r.current[d.key];
+        if (d.choices) sel[d.key] = v ? (r.multi.indexOf(d.key) >= 0 ? v.split(r.join) : [v]) : [];
+      });
+      renderEdit();
+      show($("listView"), false); show($("editView"), true); show($("backBtn"), true);
+      window.scrollTo(0, 0);
+    }).catch(function (e) { topMsg("Worker に届かない(" + e + ")。", "bad"); });
+  }
+  function renderEdit() {
+    var r = cur, w = r.work;
+    $("edThumb").innerHTML = thumbHtml(w);
+    startImgs($("edThumb"));
+    $("edTitle").textContent = w.title;
+    $("edSub").textContent = (w.maker || "") + " / " + (r.sec === "人妻" ? "人妻・熟女" : r.sec) + (w.campaign ? " / " + w.campaign : "");
+    $("edLink").href = w.url;
+    var opts = ['<option value="0">作品全体' + (r.used.indexOf(0) >= 0 ? "(入力あり)" : "") + "</option>"];
+    for (var i = 1; i <= r.max_story; i++) opts.push('<option value="' + i + '">第' + i + "話" + (r.used.indexOf(i) >= 0 ? "(入力あり)" : "") + "</option>");
+    $("storySel").innerHTML = opts.join(""); $("storySel").value = String(r.story);
+    $("defs").innerHTML = r.defs.map(function (d) {
+      if (!d.choices) {
+        var v = r.current[d.key] || "";
+        var inp = d.key === "memo" ? '<textarea data-k="' + d.key + '" style="min-height:70px">' + esc(v) + "</textarea>"
+          : '<input type="text" data-k="' + d.key + '" value="' + esc(v) + '">';
+        return '<div class="def"><div class="lab">' + esc(d.label) + "</div>" + inp + "</div>";
       }
-    });
-    if (d.story === 0) {
-      html += '<div class="field"><h3>説明(作品ページの本文)<span class="note" id="bodyN"></span></h3>' +
-        '<textarea id="body" placeholder="読んだ人が選べるように、どんな話か・どこが刺さるかを書く(目安 ' + d.body_target + '字以上)">' + esc(d.page.body || "") + "</textarea></div>";
-    } else {
-      html += '<p class="note">第' + d.story + "話のタグは作品全体とは別に残ります。説明は「作品全体」で書きます。</p>";
-    }
-    $("fields").innerHTML = html;
+      return '<div class="def"><div class="lab">' + esc(d.label) + '</div><div class="row" data-def="' + d.key + '">' +
+        d.choices.map(function (c) {
+          return '<button type="button" data-c="' + esc(c) + '" class="' + (sel[d.key].indexOf(c) >= 0 ? "on" : "") + '">' + esc(c) + "</button>";
+        }).join("") + "</div></div>";
+    }).join("");
+    show($("bodyWrap"), r.story === 0);
+    $("bodyTa").value = r.story === 0 ? (r.page.body || "") : "";
     countBody();
   }
-
   function countBody() {
-    var b = $("body"), n = $("bodyN");
-    if (!b || !n) return;
-    var len = b.value.trim().length;
-    n.textContent = len + "/" + cur.body_target + "字";
-    n.className = len >= cur.body_target ? "note" : "note todo";
+    var n = $("bodyTa").value.trim().length;
+    $("bodyCount").textContent = n + "/" + cur.body_target + "字";
   }
-
-  function refreshField(key) {
-    var box = document.querySelector('.field[data-key="' + key + '"]');
-    if (!box) return;
-    box.querySelectorAll("button[data-v]").forEach(function (b) {
-      b.setAttribute("aria-pressed", String(sel[key].indexOf(b.getAttribute("data-v")) >= 0));
-    });
-    var c = box.querySelector("button[data-clear]");
-    if (c) c.hidden = !sel[key].length;
-  }
-
-  $("fields").addEventListener("click", function (e) {
-    var b = e.target.closest("button");
-    if (!b) return;
-    var key = b.getAttribute("data-k") || b.getAttribute("data-clear");
-    if (!key) return;
-    if (b.hasAttribute("data-clear")) { sel[key] = []; }
+  function toggle(key, c) {
+    var multi = cur.multi.indexOf(key) >= 0, s = sel[key], had = s.indexOf(c) >= 0;
+    if (!multi) { sel[key] = had ? [] : [c]; if (had) clearSet[key] = 1; else delete clearSet[key]; }
     else {
-      var v = b.getAttribute("data-v"), list = sel[key], on = list.indexOf(v) >= 0;
-      if (cur.multi.indexOf(key) >= 0) {
-        var none = "なし";
-        if (on) list.splice(list.indexOf(v), 1);
-        else if (v === none) sel[key] = [none];            // 「なし」は他と一緒に選べない
-        else { sel[key] = list.filter(function (x) { return x !== none; }); sel[key].push(v); }
-      } else {
-        sel[key] = on ? [] : [v];
-      }
+      var ex = key === "avoid" ? "なし" : null;
+      if (had) sel[key] = s.filter(function (x) { return x !== c; });
+      else if (ex && c === ex) sel[key] = [ex];
+      else sel[key] = s.filter(function (x) { return x !== ex; }).concat([c]);
+      if (!sel[key].length) clearSet[key] = 1; else delete clearSet[key];
     }
-    refreshField(key); setDirty(true);
-  });
-  $("fields").addEventListener("input", function (e) {
-    if (e.target.id === "body") countBody();
-    setDirty(true);
-  });
-  $("storyTabs").addEventListener("change", function (e) {
-    if (e.target.id === "addStory" && e.target.value) location.hash = "#/w/" + encodeURIComponent(cur.work.cid) + "/" + e.target.value;
-  });
-
-  function collect() {
-    var fields = {}, clear = [];
-    cur.defs.forEach(function (f) {
-      if (f.choices) {
-        if (sel[f.key].length) fields[f.key] = sel[f.key].slice();
-        else if (cur.multi.indexOf(f.key) >= 0) fields[f.key] = [];
-        else if (cur.current[f.key]) clear.push(f.key);   // 前は入っていて、今は空=消す
-      } else {
-        var el = document.querySelector('[data-text="' + f.key + '"]');
-        var v = el ? el.value.trim() : "";
-        fields[f.key] = v ? [v] : [];
-      }
-    });
-    var out = { cid: cur.work.cid, story: cur.story, fields: fields, clear: clear };
-    if (cur.story === 0 && $("body")) out.body = $("body").value;
-    return out;
+    var box = document.querySelector('[data-def="' + key + '"]');
+    Array.prototype.forEach.call(box.querySelectorAll("button"), function (b) { b.classList.toggle("on", sel[key].indexOf(b.getAttribute("data-c")) >= 0); });
   }
-
-  $("saveBtn").addEventListener("click", function () {
-    if (saving || !cur) return;
-    saving = true;
-    var btn = $("saveBtn"), st = $("saveState");
-    btn.textContent = "保存中…"; st.textContent = "送っています"; st.style.color = "";
-    var sent = collect();
-    api("/api/work", sent).then(function (res) {
-      if (res.status !== 200 || !res.data.ok) {
-        st.textContent = "保存できませんでした。入力はそのまま残しています。"; st.style.color = "var(--ng)";
-        say(why(res), "ng");
+  function save() {
+    var r = cur, fields = {}, clear = Object.keys(clearSet);
+    r.defs.forEach(function (d) {
+      if (d.choices) { if (sel[d.key].length) fields[d.key] = sel[d.key]; }
+      else { var el = document.querySelector('[data-k="' + d.key + '"]'); fields[d.key] = [el.value]; }
+    });
+    var q = { cid: r.work.cid, story: r.story, fields: fields, clear: clear };
+    if (r.story === 0) q.body = $("bodyTa").value;
+    $("saveSt").textContent = "保存中…"; show($("saveErr"), false);
+    api("/api/work", q).then(function (res) {
+      if (!res.ok) {
+        $("saveSt").textContent = "保存できていない";
+        $("saveErr").innerHTML = (res.errors || [res.error || ("HTTP " + res._status)]).map(esc).join("<br>");
+        show($("saveErr"), true);
         return;
       }
-      // 書いた中身を読み直してから「保存した」を出す
-      return api("/api/work?cid=" + encodeURIComponent(sent.cid) + "&story=" + sent.story).then(function (back) {
-        if (back.status !== 200) {
-          st.textContent = "保存は返事が来ましたが、読み直せませんでした。開き直して確かめてください。"; st.style.color = "var(--ng)";
-          say(why(back), "ng");
-          return;
-        }
-        cur = back.data; dirty = false; all = null;
-        drawWork(); say("");
-        st.textContent = "保存した(" + hm(res.data.saved_at) + " JST)"; st.style.color = "var(--ok)";
+      // 保存できたかは読み直した中身で確かめてから言う
+      return api("/api/work?cid=" + encodeURIComponent(r.work.cid) + "&story=" + r.story).then(function (back) {
+        if (!back.ok) { $("saveSt").textContent = "保存の確認ができていない(" + (back.error || back._status) + ")"; return; }
+        cur = back; clearSet = {};
+        renderEdit();
+        $("saveSt").textContent = "保存した " + String(res.saved_at || "").slice(11, 16);
+        var w = works.filter(function (x) { return x.cid === r.work.cid; })[0];
+        if (w && r.story === 0) { w.tag_n = Object.keys(back.current).length; w.body_len = (back.page.body || "").length; }
       });
-    }).finally(function () { saving = false; btn.textContent = "保存する"; });
-  });
-
-  function openWork(cid, story) {
-    $("listView").hidden = true; $("editView").hidden = true; $("saveBar").hidden = true;
-    say("読み込み中…");
-    return api("/api/work?cid=" + encodeURIComponent(cid) + "&story=" + story).then(function (res) {
-      if (res.status !== 200) { say(why(res), "ng"); return; }
-      cur = res.data; dirty = false;
-      say(""); drawWork();
-      $("saveState").textContent = ""; $("saveState").style.color = "";
-      $("editView").hidden = false; $("saveBar").hidden = false;
-      window.scrollTo(0, 0);
-    });
+    }).catch(function (e) { $("saveSt").textContent = "保存できていない(Worker に届かない: " + e + ")"; });
+  }
+  function backToList() {
+    show($("editView"), false); show($("backBtn"), false); show($("listView"), true); cur = null;
+    renderList();
   }
 
-  // ---------------- 道順 ----------------
-  var lastHash = location.hash;
-  function route() {
-    var m = /^#\/w\/([^/]+)\/(\d+)$/.exec(location.hash);
-    if (m) openWork(decodeURIComponent(m[1]), +m[2]); else openList();
-    lastHash = location.hash;
-  }
-  window.addEventListener("hashchange", function () {
-    if (dirty && !confirm("保存していない変更があります。移ると消えます。移りますか?")) {
-      history.replaceState(null, "", lastHash); return;
-    }
-    dirty = false; route();
+  // ---- つなぎ ----
+  $("filters").addEventListener("click", function (e) { var b = e.target.closest("button"); if (!b) return; filter = b.getAttribute("data-f"); page = 0; renderList(); });
+  $("pager").addEventListener("click", function (e) { var b = e.target.closest("button"); if (!b) return; page = +b.getAttribute("data-p"); renderList(); });
+  $("list").addEventListener("click", function (e) { var c = e.target.closest(".card"); if (c) openWork(c.getAttribute("data-cid"), 0); });
+  $("defs").addEventListener("click", function (e) {
+    var b = e.target.closest("button"); if (!b) return;
+    toggle(b.parentNode.getAttribute("data-def"), b.getAttribute("data-c"));
   });
-  window.addEventListener("beforeunload", function (e) { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
+  $("storySel").addEventListener("change", function () { openWork(cur.work.cid, +this.value); });
+  $("bodyTa").addEventListener("input", countBody);
+  $("saveBtn").addEventListener("click", save);
+  $("backBtn").addEventListener("click", function () { loadList(); backToList(); });
 
-  if (!TOKEN) {
-    say("この端末(このブラウザ)に同期の合言葉がありません。5秒動画メーカーの設定で合言葉を入れたのと同じブラウザで開いてください。", "ng");
+  if (!token) {
+    topMsg("この端末に同期トークンが無いので開けない。本体の詳細設定で同期(sync2)を設定した端末で開いてほしい。", "bad");
   } else {
-    route();
+    show($("listView"), true);
+    loadList();
   }
 })();
 </script>
