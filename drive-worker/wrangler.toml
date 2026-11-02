@@ -1,6 +1,7 @@
 name = "go5-drive-saver"
 main = "src/index.js"
 compatibility_date = "2024-11-01"
+workers_dev = false   # 5秒動画廃止(2026-11-03): workers.devの公開URLを止める。消さない・戻す時はtrueにして再デプロイ。R2 go5-sync-imagesは共有なので触らない
 
 # ── 観測（Workers Logs）──★save_job 完走本体の各終端ログ(console.warn/log)を Cloudflare 側で保持し、
 #    `wrangler tail` / ダッシュボードで「保存がどの段で落ちたか」を実測できるようにする(2026-08-17 オタコン)。
