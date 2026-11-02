@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<!-- 作品DBの「組む作業」画面(2026-11-03 新設)。KouhoLists.html と同じく1枚で完結する軽いページ。
+     データは repo に置かない: 作品・タグ・説明は Worker works-db(D1 works_db)から実行時に読む。画像も出さない
+     (作品ページへのリンクだけ)。合言葉は本体アプリと同じ localStorage sync2_token をそのまま送る。
+     保存の決まり(選択肢の検査・「なし」の排他・押していない項目は残す・1回の書き込み)は Worker 側が持つ。 -->
+<meta name="robots" content="noindex,nofollow,noarchive">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Cache-Control" content="no-cache, must-revalidate">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#faf8f5">
+<title>作品DB — 組む作業</title>
+<style>
+:root{--bg:#faf8f5;--card:#fff;--ink:#2f2722;--sub:#7a6d63;--line:#e6ddd3;--acc:#c4622d;--acc-ink:#fff;--soft:#fbe9dd;--ng:#b3261e;--ok:#2e7d32}
+*{box-sizing:border-box}
+html{background:var(--bg);-webkit-text-size-adjust:100%;text-size-adjust:100%}
+body{margin:0;color:var(--ink);font:15px/1.6 -apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;
+  padding:0 0 calc(88px + env(safe-area-inset-bottom))}
+[hidden]{display:none!important}
+header{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line);
+  padding:calc(10px + env(safe-area-inset-top)) 14px 10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+header h1{font-size:17px;margin:0;white-space:nowrap}
+header a{color:var(--acc);font-weight:700;text-decoration:none;white-space:nowrap}
+main{max-width:760px;margin:0 auto;padding:12px 14px}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+button,.btn{font:inherit;width:auto;flex:0 0 auto;white-space:nowrap;min-height:44px;padding:0 16px;border-radius:10px;
+  border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer;text-decoration:none;
+  display:inline-flex;align-items:center;justify-content:center}
+.primary{background:var(--acc);border-color:var(--acc);color:var(--acc-ink);font-weight:700}
+.chip{border-radius:22px;padding:0 14px}
+.chip[aria-pressed="true"]{background:var(--soft);border-color:var(--acc);color:#8a3e14;font-weight:700}
+.chip[aria-pressed="true"]::before{content:"✓ "}
+.small{min-height:36px;padding:0 12px;font-size:14px}
+.note{color:var(--sub);font-size:13px}
+.msg{border-radius:10px;padding:10px 12px;margin:0 0 12px;background:var(--card);border:1px solid var(--line)}
+.msg.ng{border-color:var(--ng);color:var(--ng)}
+.msg.ok{border-color:var(--ok);color:var(--ok)}
+.work{display:block;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin:0 0 8px;color:inherit;text-decoration:none}
+.work .t{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.work .m{color:var(--sub);font-size:13px;display:flex;flex-wrap:wrap;gap:4px 12px}
+.work .m span{white-space:nowrap}
+.badge{display:inline-block;white-space:nowrap;border-radius:6px;padding:0 6px;font-size:12px;border:1px solid var(--line);background:var(--bg)}
+.todo{color:var(--acc);font-weight:700}
+.field{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin:0 0 10px}
+.field h3{font-size:15px;margin:0 0 8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.field h3 .note{font-weight:400}
+input[type=text],textarea{font:inherit;font-size:16px;width:100%;border:1px solid var(--line);border-radius:10px;padding:10px;background:#fff;color:var(--ink)}
+textarea{min-height:9em;resize:vertical}
+.tabs{display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:4px;margin:0 0 10px}
+.tabs .chip{flex:0 0 auto}
+.savebar{position:fixed;left:0;right:0;bottom:0;z-index:6;background:var(--bg);border-top:1px solid var(--line);
+  padding:10px 14px calc(10px + env(safe-area-inset-bottom));display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.savebar .st{flex:1 1 140px;min-width:0;font-size:13px;color:var(--sub)}
+h2{font-size:16px;margin:4px 0 6px;overflow-wrap:anywhere}
+</style>
+</head>
+<body>
+<header>
+  <h1>作品DB — 組む作業</h1>
+  <a href="#/" id="toList">一覧</a>
+  <a href="KouhoLists.html">候補へ</a>
+</header>
+<main>
+  <div id="msg" class="msg" hidden></div>
+
+  <section id="listView" hidden>
+    <div class="row" id="filters" style="margin:0 0 10px"></div>
+    <div id="works"></div>
+    <div class="row"><button id="more" hidden>次の30件</button></div>
+  </section>
+
+  <section id="editView" hidden>
+    <h2 id="wTitle"></h2>
+    <div class="row note" id="wMeta" style="margin:0 0 8px"></div>
+    <div class="tabs" id="storyTabs"></div>
+    <div id="fields"></div>
+  </section>
+</main>
+<div class="savebar" id="saveBar" hidden>
+  <span class="st" id="saveState"></span>
+  <button class="primary" id="saveBtn">保存する</button>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var LS = window.localStorage;
+  var API = String(LS.getItem("works_db_url") || "https://works-db.trustsignalbot.workers.dev").replace(/\/+$/, "");
+  var TOKEN = String(LS.getItem("sync2_token") || "").trim();
+  var PAGE = 30;
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); };
+  // Worker の時刻はすべて +09:00(JST)で返る。表示は時:分だけ切り出す
+  var hm = function (iso) { var m = /T(\d\d:\d\d)/.exec(iso || ""); return m ? m[1] : ""; };
+  var md = function (iso) { var m = /^\d{4}-(\d\d)-(\d\d)T(\d\d:\d\d)/.exec(iso || ""); return m ? (+m[1]) + "/" + (+m[2]) + " " + m[3] : ""; };
+
+  function say(text, kind) {
+    var el = $("msg");
+    if (!text) { el.hidden = true; return; }
+    el.className = "msg" + (kind ? " " + kind : "");
+    el.textContent = text;
+    el.hidden = false;
+  }
+
+  function api(path, body) {
+    var ac = new AbortController();
+    var timer = setTimeout(function () { ac.abort(); }, 15000);
+    var opt = { method: body ? "POST" : "GET", headers: { "X-Sync-Token": TOKEN }, signal: ac.signal, cache: "no-store" };
+    if (body) { opt.headers["Content-Type"] = "application/json"; opt.body = JSON.stringify(body); }
+    return fetch(API + path, opt).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (d) { return { status: r.status, data: d }; });
+    }, function (ex) {
+      return { status: 0, data: { error: ex && ex.name === "AbortError" ? "timeout" : "network" } };
+    }).finally(function () { clearTimeout(timer); });
+  }
+
+  function why(res) {
+    if (res.status === 0) return res.data.error === "timeout" ? "works-db から15秒返事がありませんでした。電波の良い所でもう一度開いてください。"
+      : "works-db に届きませんでした(圏外か、通信が止められています)。";
+    if (res.status === 403) return "合言葉が通りませんでした。5秒動画メーカーの同期の合言葉が今のものか、設定で確かめてください。";
+    if (res.status === 404) return "この作品は作品DBにありません(一覧から開き直してください)。";
+    if (res.data && res.data.errors) return res.data.errors.join(" / ");
+    return "works-db がエラーを返しました(" + res.status + ")。";
+  }
+
+  // ---------------- 一覧 ----------------
+  var all = null, filter = "すべて", shown = PAGE;
+  var FILTERS = ["すべて", "NTR", "人妻", "両方", "タグ未入力", "説明が足りない"];
+
+  function pass(w) {
+    if (filter === "すべて") return true;
+    if (filter === "タグ未入力") return !w.tag_n;
+    if (filter === "説明が足りない") return w.body_len < 300;
+    return w.sec === filter;
+  }
+
+  function drawList() {
+    $("filters").innerHTML = FILTERS.map(function (f) {
+      var n = all.filter(function (w) { var o = filter; filter = f; var p = pass(w); filter = o; return p; }).length;
+      return '<button class="chip small" data-f="' + esc(f) + '" aria-pressed="' + (f === filter) + '">' + esc(f) + " " + n + "</button>";
+    }).join("");
+    var hit = all.filter(pass);
+    var box = $("works");
+    if (!all.length) { box.innerHTML = '<p class="note">作品がまだ入っていません(PC で sync_d1.py push を流すと入ります)。</p>'; $("more").hidden = true; return; }
+    if (!hit.length) { box.innerHTML = '<p class="note">「' + esc(filter) + '」に当てはまる作品はありません。</p>'; $("more").hidden = true; return; }
+    box.innerHTML = hit.slice(0, shown).map(function (w) {
+      return '<a class="work" href="#/w/' + encodeURIComponent(w.cid) + '/0">' +
+        '<div class="t">' + esc(w.title) + "</div>" +
+        '<div class="m"><span class="badge">' + esc(w.sec) + "</span>" +
+        "<span>" + esc(w.maker) + "</span>" +
+        "<span" + (w.tag_n ? "" : ' class="todo"') + ">タグ " + w.tag_n + "</span>" +
+        "<span" + (w.body_len >= 300 ? "" : ' class="todo"') + ">説明 " + w.body_len + "/300字</span>" +
+        (w.story_n ? "<span>話別 " + w.story_n + "</span>" : "") +
+        (w.tag_at ? "<span>更新 " + esc(md(w.tag_at)) + "</span>" : "") +
+        "<span>★" + esc(w.review_avg == null ? "-" : w.review_avg) + "(" + esc(w.review_count || 0) + ")</span>" +
+        "</div></a>";
+    }).join("");
+    $("more").hidden = hit.length <= shown;
+    $("more").textContent = "次の30件(残り " + (hit.length - shown) + ")";
+  }
+
+  $("filters").addEventListener("click", function (e) {
+    var b = e.target.closest("button[data-f]");
+    if (!b) return;
+    filter = b.getAttribute("data-f"); shown = PAGE; drawList();
+  });
+  $("more").addEventListener("click", function () { shown += PAGE; drawList(); });
+
+  function openList() {
+    $("editView").hidden = true; $("saveBar").hidden = true; $("listView").hidden = false;
+    document.title = "作品DB — 組む作業";
+    if (all) drawList();
+    say(all ? "" : "読み込み中…");
+    return api("/api/works").then(function (res) {
+      if (res.status !== 200) { say(why(res), "ng"); return; }
+      all = res.data.works || []; say(""); drawList();
+    });
+  }
+
+  // ---------------- 入力 ----------------
+  var cur = null;      // GET /api/work の中身
+  var sel = {};        // key -> [値](選択肢の項目)
+  var dirty = false, saving = false;
+
+  function setDirty(v) {
+    dirty = v;
+    $("saveState").textContent = v ? "まだ保存していない変更があります" : $("saveState").textContent;
+    $("saveState").style.color = v ? "var(--acc)" : "";
+  }
+
+  function drawWork() {
+    var w = cur.work, d = cur;
+    $("wTitle").textContent = w.title;
+    document.title = w.title + " — 作品DB";
+    $("wMeta").innerHTML = '<span class="badge">' + esc(d.sec) + "</span><span>" + esc(w.maker) + "</span>" +
+      (w.campaign ? '<span class="badge">' + esc(w.campaign) + "</span>" : "") +
+      '<a class="btn small" href="' + esc(w.url) + '" target="_blank" rel="noopener noreferrer">FANZAで作品を見る</a>';
+    var stories = [0].concat(d.used.filter(function (n) { return n > 0; }));
+    if (stories.indexOf(d.story) < 0) stories.push(d.story);
+    stories.sort(function (a, b) { return a - b; });
+    var opts = "";
+    for (var i = 1; i <= d.max_story; i++) if (stories.indexOf(i) < 0) opts += '<option value="' + i + '">第' + i + "話</option>";
+    $("storyTabs").innerHTML = stories.map(function (n) {
+      return '<a class="btn chip small" href="#/w/' + encodeURIComponent(w.cid) + "/" + n + '" aria-pressed="' + (n === d.story) + '">' +
+        (n ? "第" + n + "話" : "作品全体") + "</a>";
+    }).join("") + '<select id="addStory" class="btn small" aria-label="話を足す"><option value="">話を足す…</option>' + opts + "</select>";
+
+    sel = {};
+    var html = "";
+    d.defs.forEach(function (f) {
+      var now = d.current[f.key] || "";
+      if (f.choices) {
+        sel[f.key] = now ? now.split(d.join).filter(Boolean) : [];
+        var multi = d.multi.indexOf(f.key) >= 0;
+        html += '<div class="field" data-key="' + esc(f.key) + '"><h3>' + esc(f.label) +
+          '<span class="note">' + (multi ? "いくつでも" : "1つ") + (now ? "" : "・未入力") + "</span>" +
+          (multi ? "" : '<button class="small" data-clear="' + esc(f.key) + '"' + (sel[f.key].length ? "" : " hidden") + ">空にする</button>") +
+          '</h3><div class="row">' + f.choices.map(function (c) {
+            return '<button class="chip" data-k="' + esc(f.key) + '" data-v="' + esc(c) + '" aria-pressed="' + (sel[f.key].indexOf(c) >= 0) + '">' + esc(c) + "</button>";
+          }).join("") + "</div></div>";
+      } else {
+        html += '<div class="field"><h3>' + esc(f.label) + '</h3><input type="text" maxlength="500" data-text="' + esc(f.key) + '" value="' + esc(now) + '"></div>';
+      }
+    });
+    if (d.story === 0) {
+      html += '<div class="field"><h3>説明(作品ページの本文)<span class="note" id="bodyN"></span></h3>' +
+        '<textarea id="body" placeholder="読んだ人が選べるように、どんな話か・どこが刺さるかを書く(目安 ' + d.body_target + '字以上)">' + esc(d.page.body || "") + "</textarea></div>";
+    } else {
+      html += '<p class="note">第' + d.story + "話のタグは作品全体とは別に残ります。説明は「作品全体」で書きます。</p>";
+    }
+    $("fields").innerHTML = html;
+    countBody();
+  }
+
+  function countBody() {
+    var b = $("body"), n = $("bodyN");
+    if (!b || !n) return;
+    var len = b.value.trim().length;
+    n.textContent = len + "/" + cur.body_target + "字";
+    n.className = len >= cur.body_target ? "note" : "note todo";
+  }
+
+  function refreshField(key) {
+    var box = document.querySelector('.field[data-key="' + key + '"]');
+    if (!box) return;
+    box.querySelectorAll("button[data-v]").forEach(function (b) {
+      b.setAttribute("aria-pressed", String(sel[key].indexOf(b.getAttribute("data-v")) >= 0));
+    });
+    var c = box.querySelector("button[data-clear]");
+    if (c) c.hidden = !sel[key].length;
+  }
+
+  $("fields").addEventListener("click", function (e) {
+    var b = e.target.closest("button");
+    if (!b) return;
+    var key = b.getAttribute("data-k") || b.getAttribute("data-clear");
+    if (!key) return;
+    if (b.hasAttribute("data-clear")) { sel[key] = []; }
+    else {
+      var v = b.getAttribute("data-v"), list = sel[key], on = list.indexOf(v) >= 0;
+      if (cur.multi.indexOf(key) >= 0) {
+        var none = "なし";
+        if (on) list.splice(list.indexOf(v), 1);
+        else if (v === none) sel[key] = [none];            // 「なし」は他と一緒に選べない
+        else { sel[key] = list.filter(function (x) { return x !== none; }); sel[key].push(v); }
+      } else {
+        sel[key] = on ? [] : [v];
+      }
+    }
+    refreshField(key); setDirty(true);
+  });
+  $("fields").addEventListener("input", function (e) {
+    if (e.target.id === "body") countBody();
+    setDirty(true);
+  });
+  $("storyTabs").addEventListener("change", function (e) {
+    if (e.target.id === "addStory" && e.target.value) location.hash = "#/w/" + encodeURIComponent(cur.work.cid) + "/" + e.target.value;
+  });
+
+  function collect() {
+    var fields = {}, clear = [];
+    cur.defs.forEach(function (f) {
+      if (f.choices) {
+        if (sel[f.key].length) fields[f.key] = sel[f.key].slice();
+        else if (cur.multi.indexOf(f.key) >= 0) fields[f.key] = [];
+        else if (cur.current[f.key]) clear.push(f.key);   // 前は入っていて、今は空=消す
+      } else {
+        var el = document.querySelector('[data-text="' + f.key + '"]');
+        var v = el ? el.value.trim() : "";
+        fields[f.key] = v ? [v] : [];
+      }
+    });
+    var out = { cid: cur.work.cid, story: cur.story, fields: fields, clear: clear };
+    if (cur.story === 0 && $("body")) out.body = $("body").value;
+    return out;
+  }
+
+  $("saveBtn").addEventListener("click", function () {
+    if (saving || !cur) return;
+    saving = true;
+    var btn = $("saveBtn"), st = $("saveState");
+    btn.textContent = "保存中…"; st.textContent = "送っています"; st.style.color = "";
+    var sent = collect();
+    api("/api/work", sent).then(function (res) {
+      if (res.status !== 200 || !res.data.ok) {
+        st.textContent = "保存できませんでした。入力はそのまま残しています。"; st.style.color = "var(--ng)";
+        say(why(res), "ng");
+        return;
+      }
+      // 書いた中身を読み直してから「保存した」を出す
+      return api("/api/work?cid=" + encodeURIComponent(sent.cid) + "&story=" + sent.story).then(function (back) {
+        if (back.status !== 200) {
+          st.textContent = "保存は返事が来ましたが、読み直せませんでした。開き直して確かめてください。"; st.style.color = "var(--ng)";
+          say(why(back), "ng");
+          return;
+        }
+        cur = back.data; dirty = false; all = null;
+        drawWork(); say("");
+        st.textContent = "保存した(" + hm(res.data.saved_at) + " JST)"; st.style.color = "var(--ok)";
+      });
+    }).finally(function () { saving = false; btn.textContent = "保存する"; });
+  });
+
+  function openWork(cid, story) {
+    $("listView").hidden = true; $("editView").hidden = true; $("saveBar").hidden = true;
+    say("読み込み中…");
+    return api("/api/work?cid=" + encodeURIComponent(cid) + "&story=" + story).then(function (res) {
+      if (res.status !== 200) { say(why(res), "ng"); return; }
+      cur = res.data; dirty = false;
+      say(""); drawWork();
+      $("saveState").textContent = ""; $("saveState").style.color = "";
+      $("editView").hidden = false; $("saveBar").hidden = false;
+      window.scrollTo(0, 0);
+    });
+  }
+
+  // ---------------- 道順 ----------------
+  var lastHash = location.hash;
+  function route() {
+    var m = /^#\/w\/([^/]+)\/(\d+)$/.exec(location.hash);
+    if (m) openWork(decodeURIComponent(m[1]), +m[2]); else openList();
+    lastHash = location.hash;
+  }
+  window.addEventListener("hashchange", function () {
+    if (dirty && !confirm("保存していない変更があります。移ると消えます。移りますか?")) {
+      history.replaceState(null, "", lastHash); return;
+    }
+    dirty = false; route();
+  });
+  window.addEventListener("beforeunload", function (e) { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
+
+  if (!TOKEN) {
+    say("この端末(このブラウザ)に同期の合言葉がありません。5秒動画メーカーの設定で合言葉を入れたのと同じブラウザで開いてください。", "ng");
+  } else {
+    route();
+  }
+})();
+</script>
+</body>
+</html>
