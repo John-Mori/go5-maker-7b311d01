@@ -60,6 +60,12 @@ jobs:
       - name: 全称スタイル波及(裸セレクタ)検査
         run: node scripts/check_css_global_scope.mjs
 
+      # 新しいページを「サイト種別」を決めずに作らせない門。<meta name="site-type"> 必須+一覧系(list-tool)は
+      #   ダーク地・ティール色で赤。WorksEdit.html を本体のダーク+ティールで作った件(Chami 2026-11-03 msg 1566918391460266096)。
+      #   依頼文の言葉で着手前チェックが載らなかった作業でも、ページ側で止まる。既存ページはBASELINEで据え置き。
+      - name: ページのサイト種別検査
+        run: node scripts/check_page_site_type.mjs
+
       # 「外へ出る待ちに時限が無い」新規コードを止める門《番犬》。fetch/IndexedDB を AbortController/番犬タイマー
       #   無しで新規に書くと応答が返らない時「保存中…」が永久固着する(INC-108/116/125/132/134 の再発源)。
       #   既存はベースライン凍結し新規の裸待ちだけ弾く。型=preflight_net-wait-watchdog.md(アスナ依頼2026-08-16)。
