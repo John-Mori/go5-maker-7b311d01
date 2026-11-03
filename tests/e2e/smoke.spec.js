@@ -40,15 +40,22 @@ test.describe('go5-maker 公開URL スモーク', () => {
       tabStock: 'Stock.html',
     };
     expect(ids.length).toBeGreaterThanOrEqual(8);
+    // 5秒動画の廃止(2026-11-03 Chami「5秒動画やらないから廃止して」)で隠したタブ。消さず hidden で残す決まりなので、
+    //   見えないことを固定しつつ、残した中身の回帰は JS の click で引き続き走らせる(hidden のボタンは人の操作では押せない)。
+    const RETIRED = ['tabMovie', 'tabStock', 'tabYT', 'tabPost'];
+    for (const id of RETIRED) await expect(page.locator('#' + id), `#${id} は廃止で隠したはず`).toBeHidden();
+    const tapOrInvoke = (id) => (RETIRED.includes(id)
+      ? page.evaluate((x) => document.getElementById(x).click(), id)
+      : page.locator('#' + id).click());
     for (const id of ids) {
       await page.goto('index.html', { waitUntil: 'domcontentloaded' });
       if (dedicatedPages[id]) {
         await Promise.all([
           page.waitForURL(new RegExp('/' + dedicatedPages[id].replace('.', '\\.') + '$')),
-          page.locator('#' + id).click(),
+          tapOrInvoke(id),
         ]);
       } else {
-        await page.locator('#' + id).click();
+        await tapOrInvoke(id);
       }
       const dataTab = await page.evaluate(() => document.documentElement.getAttribute('data-tab'));
       expect(dataTab, `#${id} クリック後に表示先の data-tab が更新されない`).toBe(id);
@@ -73,7 +80,7 @@ test.describe('go5-maker 公開URL スモーク', () => {
 
   test('動画作成タブの中核UI(写真選択)が生きている', async ({ page }) => {
     await page.goto('index.html', { waitUntil: 'domcontentloaded' });
-    await page.locator('#tabMovie').click();
+    await page.evaluate(() => document.getElementById('tabMovie').click()); // 廃止で hidden のタブ=中身の回帰だけ見る
     // 写真選択の file input が存在する(録画パイプラインの入口)
     const fileInput = page.locator('#pageMovie input[type="file"]').first();
     await expect(fileInput).toHaveCount(1);
@@ -974,7 +981,7 @@ test.describe('ドラフト軽量ページ', () => {
 
   test('本体のドラフトボタンは専用ページへ遷移する', async ({ page }) => {
     await page.goto('index.html', { waitUntil: 'domcontentloaded' });
-    await page.locator('#tabStock').click();
+    await page.evaluate(() => document.getElementById('tabStock').click()); // 廃止で hidden のタブ=遷移の配線だけ見る
     await expect(page).toHaveURL(/\/Stock\.html$/);
   });
 

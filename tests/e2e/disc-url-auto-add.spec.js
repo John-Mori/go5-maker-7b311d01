@@ -9,7 +9,7 @@ test('名前とURLを入れて欄を離れると、＋追加を押さなくて�
     localStorage.setItem('disc_urls_seeded__acc3', '1'); // 既定のセールページ無し=Chamiの癒やし倉庫と同じ空の一覧から
   });
   await page.goto('index.html', { waitUntil: 'domcontentloaded' });
-  await page.locator('#tabPost').click();
+  await page.evaluate(() => document.getElementById('tabPost').click()); // 廃止で hidden のタブ(2026-11-03)
   await page.locator('#discUrlsDetails > summary').click();
   await expect(page.locator('#discUrlList')).toContainText('未登録');
   await page.locator('#discUrlName').fill('秋セール');
@@ -43,7 +43,7 @@ test('同じURLのセールが2件あると開いた時に1件へ畳まれ、捨
     localStorage.setItem('bsky_discount_selected__acc3', 'dnew');
   });
   await page.goto('index.html', { waitUntil: 'domcontentloaded' });
-  await page.locator('#tabPost').click();
+  await page.evaluate(() => document.getElementById('tabPost').click()); // 廃止で hidden のタブ(2026-11-03)
   await page.locator('#discUrlsDetails > summary').click();
   await expect(page.locator('#discUrlList label')).toHaveCount(2);
   await expect(page.locator('#discUrlList label', { hasText: '秋セール' }).locator('input[type=radio]')).toBeChecked();
@@ -63,7 +63,7 @@ test('同じURLのセールが2件あると開いた時に1件へ畳まれ、捨
   await expect(page.locator('#discUrlHint')).toContainText('登録済み');
   // 再読込しても2件のまま
   await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.locator('#tabPost').click();
+  await page.evaluate(() => document.getElementById('tabPost').click()); // 廃止で hidden のタブ(2026-11-03)
   await page.locator('#discUrlsDetails > summary').click();
   await expect(page.locator('#discUrlList label')).toHaveCount(2);
 });
