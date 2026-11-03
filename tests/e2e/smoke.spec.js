@@ -48,8 +48,17 @@ test.describe('go5-maker 公開URL スモーク', () => {
       ? page.evaluate((x) => document.getElementById(x).click(), id)
       : page.locator('#' + id).click());
     for (const id of ids) {
+      // 前の周で保存されたタブ(例: tabVerify)の復元が StockLists.html へ移すと、JS の click がその移動と競る。
+      //   この検査は「切替」を見るもので「復元」ではないため、毎周 保存タブを消してから開く。
+      await page.evaluate(() => localStorage.removeItem('go5_active_tab'));
       await page.goto('index.html', { waitUntil: 'domcontentloaded' });
-      if (dedicatedPages[id]) {
+      if (dedicatedPages[id] && RETIRED.includes(id)) {
+        // tabStock は onclick とタブの処理の両方が移動を起こし、先の1本が中断される。waitForURL はその中断を拾って
+        //   落ちるため、着地先の URL を待つ形にする(下の「本体のドラフトボタン」検査と同じ)。
+        await tapOrInvoke(id);
+        await expect(page).toHaveURL(new RegExp('/' + dedicatedPages[id].replace('.', '\\.') + '$'));
+        await page.waitForLoadState('domcontentloaded');
+      } else if (dedicatedPages[id]) {
         await Promise.all([
           page.waitForURL(new RegExp('/' + dedicatedPages[id].replace('.', '\\.') + '$')),
           tapOrInvoke(id),
