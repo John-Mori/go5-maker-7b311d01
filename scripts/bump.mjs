@@ -99,6 +99,27 @@ if (check) {
   process.exit(0);
 }
 
+// ★恒久(2026-11-04 朝の振り返り): smoke が赤のまま次の版を出さない。
+//   11/3 は cf34b87 で赤になった後、92de71d・83b8bcb・00aa1e9 と赤の上へ3版重ね、83b8bcb が赤を34本増やしたことに
+//   誰も気づかないまま「済み」と報告していた(緑に戻ったのは 0a811c0)。規則はあったが、版を上げる入口に門が無かった。
+//   → main の最新の smoke 結果を gh で読み、failure なら止める。赤を直す版そのものは SMOKE_RED_FIX="<何を直すか>" で通す。
+//   gh が無い/時間切れの時は警告だけで通す(門の故障で出荷を止めない)。
+{
+  const r = spawnSync("gh", ["run", "list", "-w", "smoke.yml", "-b", "main", "-s", "completed", "-L", "1", "--json", "conclusion,headSha,databaseId"],
+    { encoding: "utf8", cwd: ROOT, timeout: 20000 });
+  let last = null;
+  try { last = JSON.parse(r.stdout || "[]")[0] || null; } catch { last = null; }
+  if (!last) {
+    console.error("⚠ smoke の最新結果を読めなかった(gh 無し/時間切れ)。赤のまま出していないか gh run list -w smoke.yml で確かめること。");
+  } else if (last.conclusion === "failure" && !process.env.SMOKE_RED_FIX) {
+    console.error(`✗ main の smoke が赤(run ${last.databaseId} / ${String(last.headSha).slice(0, 7)})。赤の上に次の版を重ねない。`);
+    console.error("  この版が赤を直すものなら SMOKE_RED_FIX=\"<直す中身>\" node scripts/bump.mjs で通す。");
+    process.exit(9);
+  } else if (last.conclusion === "failure") {
+    console.log(`↳ smoke 赤(run ${last.databaseId})を直す版として通す: ${process.env.SMOKE_RED_FIX}`);
+  }
+}
+
 const next = explicit != null && !Number.isNaN(explicit) ? explicit : cur + 1;
 if (next <= cur && explicit == null) {
   console.error(`次の版数(${next})が現在(${cur})以下。中止する。`);
