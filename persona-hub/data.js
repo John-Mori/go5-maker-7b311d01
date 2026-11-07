@@ -12,9 +12,9 @@ window.PERSONA_HUB_DATA = {
   "_source_fingerprint": {
    "口調": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
-    "sha1": "c92e93af979d456263e1959964751b0eeb71237d",
-    "bytes": 60119,
-    "mtime": 1794062336.571
+    "sha1": "0189006891dcece67a7387711069ba8318501db3",
+    "bytes": 60227,
+    "mtime": 1794062656.573
    },
    "呼称": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
