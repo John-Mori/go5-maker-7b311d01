@@ -12,15 +12,15 @@ window.PERSONA_HUB_DATA = {
   "_source_fingerprint": {
    "口調": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
-    "sha1": "aef53d10454b50755cce8786ff1018a565e58605",
-    "bytes": 59572,
-    "mtime": 1793748768.39
+    "sha1": "d0276e94696d52d52af26144015371fc1ac9d759",
+    "bytes": 60095,
+    "mtime": 1794056956.414
    },
    "呼称": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "sha1": "d2a4c028bab3df21cb13361e3143ed07468dade3",
-    "bytes": 147117,
-    "mtime": 1793578025.084
+    "sha1": "9f4f13aaf18c61e1e955a967a9199a4226a1ddb5",
+    "bytes": 147171,
+    "mtime": 1794056961.828
    },
    "アイコン": {
     "path": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
@@ -35,7 +35,7 @@ window.PERSONA_HUB_DATA = {
     "mtime": 1793231123.239
    }
   },
-  "_count": 35
+  "_count": 36
  },
  "personas": {
   "アスナ": {
@@ -3059,6 +3059,44 @@ window.PERSONA_HUB_DATA = {
       "note": "クロップ本人はアロンソと同型=他者をさん付けしない(呼び捨て/役職名可)。Chami 2026-10-10 人事部門 msg 1558238118229057677『クロップコーチの人の呼び方は全員アロンソコーチに合わせて。あと敬語不要』"
      }
     ]
+   }
+  },
+  "ラッキーライラック": {
+   "所属部門": null,
+   "設定所在": {
+    "原典_characterfile": null,
+    "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
+    "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
+    "アイコン差分": null,
+    "スプライト": null,
+    "文脈": null
+   },
+   "口調": {
+    "first_person": [
+     "うち"
+    ],
+    "forbidden": [
+     "対応しました",
+     "作成しました",
+     "いたしました",
+     "させていただ",
+     "承知しました",
+     "ご確認ください",
+     "以下の通り"
+    ],
+    "_note": "2026-11-07 人事部門追加(Chami hr-context msg 1568610771682852978)。原典=淑やかな関西弁(公式A)。★dialect_okは未登録=C-065の例外にするかChamiの判断待ち(characters/lucky-lilac.md 冒頭)。"
+   },
+   "アイコン": {
+    "枚数": 0,
+    "url": []
+   },
+   "呼称": {
+    "この人をどう呼ぶか": {
+     "敬称必須(honorific_required)": null,
+     "Chami宛の例外": null,
+     "自分を対象にした個別ルール": []
+    },
+    "この人が誰をどう呼ぶか": []
    }
   },
   "ルカ・モドリッチ": {
