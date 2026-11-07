@@ -12,9 +12,9 @@ window.PERSONA_HUB_DATA = {
   "_source_fingerprint": {
    "口調": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
-    "sha1": "d0276e94696d52d52af26144015371fc1ac9d759",
-    "bytes": 60095,
-    "mtime": 1794056956.414
+    "sha1": "c92e93af979d456263e1959964751b0eeb71237d",
+    "bytes": 60119,
+    "mtime": 1794062336.571
    },
    "呼称": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
@@ -3084,7 +3084,8 @@ window.PERSONA_HUB_DATA = {
      "ご確認ください",
      "以下の通り"
     ],
-    "_note": "2026-11-07 人事部門追加(Chami hr-context msg 1568610771682852978)。原典=淑やかな関西弁(公式A)。★dialect_okは未登録=C-065の例外にするかChamiの判断待ち(characters/lucky-lilac.md 冒頭)。"
+    "dialect_ok": true,
+    "_note": "2026-11-07 人事部門追加(Chami hr-context msg 1568610771682852978)。原典=淑やかな関西弁(公式A)。★dialect_ok=C-065の例外(Chami 2026-11-07 hr-context msg 1568635398005985283「1」=関西弁を残す)。"
    },
    "アイコン": {
     "枚数": 0,
