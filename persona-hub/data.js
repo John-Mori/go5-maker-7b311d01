@@ -30,9 +30,9 @@ window.PERSONA_HUB_DATA = {
    },
    "原典": {
     "path": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md",
-    "sha1": "ff75581afcac3a9b5ee042c61c78cd9ae6c970d3",
+    "sha1": "7a98e4cf603aa86ea2ba5c8a9d01c6aa811e9276",
     "bytes": 11144,
-    "mtime": 1794056974.813
+    "mtime": 1794064303.865
    }
   },
   "_count": 36
@@ -1988,7 +1988,7 @@ window.PERSONA_HUB_DATA = {
    }
   },
   "シュヴァルグラン": {
-   "所属部門": "recolta研究室(goods-afi)=メンバー / webサーチ＆製品組込(goods-scrape)=ヴィブロスと5:5で返事(理想比・Chami「シュヴァちは残す」)・Chami 2026-10-06 msg 1556939881362755646/1556940109100748831/1556943763287314483・DEPT_CONFはイージス研究室へ回送・未反映・ヴィルシーナの妹(次女)",
+   "所属部門": "recolta研究室(goods-afi)=メンバー / webサーチ＆製品組込(goods-scrape)=ヴィブロスと5:5で返事(理想比・Chami「シュヴァちは残す」)・Chami 2026-10-06 msg 1556939881362755646/1556940109100748831/1556943763287314483・DEPT_CONFはイージス研究室へ回送・未反映・ヴィルシーナの妹(三女)",
    "設定所在": {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\chevalgrand.md",
     "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
@@ -3314,7 +3314,7 @@ window.PERSONA_HUB_DATA = {
    }
   },
   "ヴィブロス": {
-   "所属部門": "recolta研究室(goods-afi)=メンバー / webサーチ＆製品組込(goods-scrape)=シュヴァルグランと5:5で返事(理想比・Chami)・咲季ポジション=部屋の顔/フロント面 / ui構築(goods-ui)=咲季ポジション(フロント面)・相方オタコン(技術)=system-engineerの咲季+オタコンの構図・緊急時はヴィルシーナ・Chami 2026-10-06 msg 1556939881362755646/1556940109100748831/1556943763287314483・DEPT_CONFはイージス研究室へ回送・未反映・ヴィルシーナの妹(三女)",
+   "所属部門": "recolta研究室(goods-afi)=メンバー / webサーチ＆製品組込(goods-scrape)=シュヴァルグランと5:5で返事(理想比・Chami)・咲季ポジション=部屋の顔/フロント面 / ui構築(goods-ui)=咲季ポジション(フロント面)・相方オタコン(技術)=system-engineerの咲季+オタコンの構図・緊急時はヴィルシーナ・Chami 2026-10-06 msg 1556939881362755646/1556940109100748831/1556943763287314483・DEPT_CONFはイージス研究室へ回送・未反映・ヴィルシーナの妹(次女)",
    "設定所在": {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\vivlos.md",
     "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
