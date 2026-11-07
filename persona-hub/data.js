@@ -24,9 +24,9 @@ window.PERSONA_HUB_DATA = {
    },
    "アイコン": {
     "path": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
-    "sha1": "2d4e3b4508185db39302fb27de6ed59506fffbd7",
-    "bytes": 20480,
-    "mtime": 1794063049.588
+    "sha1": "50b47da9efc69aa5a5d9a1632f0cec11a71c1057",
+    "bytes": 20763,
+    "mtime": 1794063975.116
    },
    "原典": {
     "path": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md",
@@ -3072,7 +3072,7 @@ window.PERSONA_HUB_DATA = {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\lucky-lilac.md",
     "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": null,
+    "アイコン差分": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
     "スプライト": null,
     "文脈": null
    },
@@ -3093,8 +3093,11 @@ window.PERSONA_HUB_DATA = {
     "_note": "2026-11-07 人事部門追加(Chami hr-context msg 1568610771682852978)。原典=淑やかな関西弁(公式A)。★dialect_ok=C-065の例外(Chami 2026-11-07 hr-context msg 1568635398005985283「1」=関西弁を残す)。"
    },
    "アイコン": {
-    "枚数": 0,
-    "url": []
+    "枚数": 2,
+    "url": [
+     "https://go5-sync.trustsignalbot.workers.dev/img/3cc6f14cecde36e55afd23b0e768a90aaf2e2b7ec7224e4b4877bb61d34f9f7d",
+     "https://go5-sync.trustsignalbot.workers.dev/img/5726d4687ef39859e5242b093b6330e41496aa63d46de59d1ca58ee10f97de4a"
+    ]
    },
    "呼称": {
     "この人をどう呼ぶか": {
