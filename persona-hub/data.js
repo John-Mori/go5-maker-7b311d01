@@ -24,9 +24,9 @@ window.PERSONA_HUB_DATA = {
    },
    "アイコン": {
     "path": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
-    "sha1": "a45b82bc84de8f469cb1658896e689eefd2baeb5",
-    "bytes": 20094,
-    "mtime": 1794062455.742
+    "sha1": "0b17a17133154882899f3bf0c9045702b0786106",
+    "bytes": 20359,
+    "mtime": 1794063012.019
    },
    "原典": {
     "path": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md",
@@ -2694,14 +2694,17 @@ window.PERSONA_HUB_DATA = {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\micaiah.md",
     "口調ルール": null,
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": null,
+    "アイコン差分": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
     "スプライト": null,
     "文脈": null
    },
    "口調": null,
    "アイコン": {
-    "枚数": 0,
-    "url": []
+    "枚数": 2,
+    "url": [
+     "https://go5-sync.trustsignalbot.workers.dev/img/01c64f49b4e8e351f5800e8df513310f377a0fc2d2068ebb3dc7ce85e6f652fb",
+     "https://go5-sync.trustsignalbot.workers.dev/img/1021cbe6fd84fe7bca5c708884ac4def84090d2a07ffebe7aa8eb51f643f5c36"
+    ]
    },
    "呼称": {
     "この人をどう呼ぶか": {
