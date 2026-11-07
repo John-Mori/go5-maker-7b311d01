@@ -24,9 +24,9 @@ window.PERSONA_HUB_DATA = {
    },
    "アイコン": {
     "path": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
-    "sha1": "416aa0590bcc00fba32cd293143c230b1f86b9d7",
-    "bytes": 21126,
-    "mtime": 1794064054.994
+    "sha1": "53210048e99dd5002222f572ec6797707ef3b1c9",
+    "bytes": 21489,
+    "mtime": 1794064178.984
    },
    "原典": {
     "path": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md",
@@ -3093,13 +3093,14 @@ window.PERSONA_HUB_DATA = {
     "_note": "2026-11-07 人事部門追加(Chami hr-context msg 1568610771682852978)。原典=淑やかな関西弁(公式A)。★dialect_ok=C-065の例外(Chami 2026-11-07 hr-context msg 1568635398005985283「1」=関西弁を残す)。"
    },
    "アイコン": {
-    "枚数": 5,
+    "枚数": 6,
     "url": [
      "https://go5-sync.trustsignalbot.workers.dev/img/3cc6f14cecde36e55afd23b0e768a90aaf2e2b7ec7224e4b4877bb61d34f9f7d",
      "https://go5-sync.trustsignalbot.workers.dev/img/5726d4687ef39859e5242b093b6330e41496aa63d46de59d1ca58ee10f97de4a",
      "https://go5-sync.trustsignalbot.workers.dev/img/319088fcceed7555ef01fab015e4469b4674d7bba15234304259fb131637965e",
      "https://go5-sync.trustsignalbot.workers.dev/img/7b4c5d46e466b8bbea8d54026fa5bce258bbc6056434d931f95a577d261f4ad8",
-     "https://go5-sync.trustsignalbot.workers.dev/img/7eefd5dc2e0d2598395a8d0adb49a56b9189a8455673f6474ede0891b8e28597"
+     "https://go5-sync.trustsignalbot.workers.dev/img/7eefd5dc2e0d2598395a8d0adb49a56b9189a8455673f6474ede0891b8e28597",
+     "https://go5-sync.trustsignalbot.workers.dev/img/1098f81b20e852961169110e873128a80034b490a77de89cc97622f9c33e65d7"
     ]
    },
    "呼称": {
@@ -3330,10 +3331,12 @@ window.PERSONA_HUB_DATA = {
     "_note": "一人称『私』は確かさA(公式)。characterfile=characters/vivlos.md。配属先未定。2026-10-06 人事ククール・Chami msg 1556936849581150259・原典=LocalData/persona_context/vivlos_cheval_調査/00_Codex調査_20261006.md"
    },
    "アイコン": {
-    "枚数": 2,
+    "枚数": 4,
     "url": [
      "https://go5-sync.trustsignalbot.workers.dev/img/af09db52447b105e2d390bd35498a19d4542bdd40c35fb997d81deb84e9c8728",
-     "https://go5-sync.trustsignalbot.workers.dev/img/ee917e9b451f631552f7878bc8b4ebacaf5b78c73d954287e210f3c86da3c992"
+     "https://go5-sync.trustsignalbot.workers.dev/img/ee917e9b451f631552f7878bc8b4ebacaf5b78c73d954287e210f3c86da3c992",
+     "https://go5-sync.trustsignalbot.workers.dev/img/2df7bb054bfc3da68e9595a28b4b21c615263a6bf78d995184f45d9f414d5804",
+     "https://go5-sync.trustsignalbot.workers.dev/img/f73681beabb8982e08f3193831704311594a6015e8139c2094fc02e9ac290764"
     ]
    },
    "呼称": {
