@@ -30,9 +30,9 @@ window.PERSONA_HUB_DATA = {
    },
    "原典": {
     "path": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md",
-    "sha1": "dc16ef575207e532f97f1bffa0826810124cb70d",
-    "bytes": 11342,
-    "mtime": 1794064579.301
+    "sha1": "a6ba848caa4c1af5bb61f97c83a2bce88066b5f8",
+    "bytes": 11351,
+    "mtime": 1794065435.83
    }
   },
   "_count": 36
@@ -3067,7 +3067,7 @@ window.PERSONA_HUB_DATA = {
    }
   },
   "ラッキーライラック": {
-   "所属部門": "shorts-analyst(分析部門・アーモンドアイと同室・役職未指定)(Chami 2026-11-07 hr-context msg 1568610771682852978・03c4106で配線済) / アイが居る部屋は全部(Chami 2026-11-08 msg 1568644620361928756)=軍議(gunji)/gunji-5s/consult-intel/分析＆品質管理(goods-qa)/アイドル分析(idol-analysis)/fivesecmm・イージス研究室へ回送・未反映",
+   "所属部門": "shorts-analyst(分析部門・アーモンドアイと同室・役職未指定)(Chami 2026-11-07 hr-context msg 1568610771682852978・03c4106で配線済) / アイが居る部屋は全部(Chami 2026-11-08 msg 1568644620361928756)=軍議(gunji)/gunji-5s/consult-intel/分析＆品質管理(goods-qa)/アイドル分析(idol-analysis)/fivesecmm・b2fe480で配線済(各室の初投稿は未確認)",
    "設定所在": {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\lucky-lilac.md",
     "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
