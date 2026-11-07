@@ -30,9 +30,9 @@ window.PERSONA_HUB_DATA = {
    },
    "原典": {
     "path": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md",
-    "sha1": "99ed81e3b48b3bd8f3555d6c7288fe7bde31aa01",
-    "bytes": 10903,
-    "mtime": 1793231123.239
+    "sha1": "ff75581afcac3a9b5ee042c61c78cd9ae6c970d3",
+    "bytes": 11144,
+    "mtime": 1794056974.813
    }
   },
   "_count": 36
@@ -3062,9 +3062,9 @@ window.PERSONA_HUB_DATA = {
    }
   },
   "ラッキーライラック": {
-   "所属部門": null,
+   "所属部門": "shorts-analyst(分析部門・アーモンドアイと同室・役職未指定)(Chami 2026-11-07 hr-context msg 1568610771682852978・DEPT_CONFはイージス研究室へ回送・未反映)",
    "設定所在": {
-    "原典_characterfile": null,
+    "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\lucky-lilac.md",
     "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
     "アイコン差分": null,
