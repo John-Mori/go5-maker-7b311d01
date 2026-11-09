@@ -114,5 +114,53 @@
     }
   }
 
-  window.FivesecAutoDraft = { version: VERSION, run: run };
+  // ── 重複ドラフトの片付け(Chami 2026-11-10「被ってるやつ消しといて」) ──
+  //   同じ作品(srcMark.cid)のドラフトが2本以上ある時、1本だけ残して自動ドラフトを消す。
+  //   ★手で作ったドラフト(auto無し)と、Bluesky予約・投稿済みのドラフトは消さない(残す側に数える)。
+  //   残す側が無ければ、動画が出来ている中で一番新しい自動ドラフトを残す。
+  //   削除は一覧の「削除」ボタンと同じ Go5Stock.deleteDraft(墓標→同期)=他の端末でも消える。
+  //   opts.dryRun=true なら消さずに計画だけ返す。
+  function draftPost_(id) { try { return JSON.parse(localStorage.getItem('go5_draft_post_' + id) || 'null') || {}; } catch (e) { return {}; } }
+  function pinned_(m) { var pd = draftPost_(m.id); return !m.auto || !!(pd.bskyReserveId || pd.bskyParentUrl); }
+  function dedupePlan_() {
+    var groups = {}, order = [];
+    metaList_().forEach(function (m) {
+      if (!m || !m.id || !m.srcMark || !m.srcMark.cid) return;
+      var c = String(m.srcMark.cid);
+      if (!groups[c]) { groups[c] = []; order.push(c); }
+      groups[c].push(m);
+    });
+    var plan = [];
+    order.forEach(function (cid) {
+      var g = groups[cid];
+      if (g.length < 2) return;
+      var keep = g.filter(pinned_);
+      var autos = g.filter(function (m) { return !pinned_(m); }).sort(function (a, b) {
+        return ((b.videoReadyAt ? 1 : 0) - (a.videoReadyAt ? 1 : 0)) || ((b.ts || 0) - (a.ts || 0));
+      });
+      if (!keep.length) keep = [autos.shift()];
+      if (!autos.length) return;
+      var row = function (m) { return { id: m.id, label: m.label || '', ts: m.ts || 0, autoDate: m.auto ? String(m.auto.date || '') : '' }; };
+      plan.push({ cid: cid, keep: keep.map(row), del: autos.map(row) });
+    });
+    return plan;
+  }
+  async function dedupe(opts) {
+    opts = opts || {};
+    var plan = dedupePlan_();
+    var n = plan.reduce(function (a, p) { return a + p.del.length; }, 0);
+    if (opts.dryRun || !n) return { ok: true, dryRun: !!opts.dryRun, plan: plan, deleted: 0, wanted: n };
+    if (!(window.Go5Stock && window.Go5Stock.deleteDraft)) return { ok: false, reason: 'no_delete_api', plan: plan };
+    var deleted = 0, failed = [];
+    plan.forEach(function (p) {
+      p.del.forEach(function (d) { if (window.Go5Stock.deleteDraft(d.id)) deleted++; else failed.push(d.id); });
+    });
+    var synced = null;
+    if (syncConfigured_()) {
+      try { synced = await Promise.race([window.Go5Sync.flushSync(), sleep_(45000).then(function () { return { ok: false, timeout: true }; })]); } catch (e) { synced = { ok: false, error: String(e) }; }
+    }
+    return { ok: !failed.length, plan: plan, deleted: deleted, wanted: n, failed: failed, synced: synced };
+  }
+
+  window.FivesecAutoDraft = { version: VERSION, run: run, dedupe: dedupe, dedupePlan: dedupePlan_ };
 })();

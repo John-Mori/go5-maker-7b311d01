@@ -134,6 +134,47 @@ test('A-8: stock.js の saveStock_ は auto/autoAlt を evDetail から受け取
   assert.ok(/auto: \(opts && opts\.auto\) \|\| null, autoAlt: \(opts && opts\.autoAlt\) \|\| null/.test(app));
 });
 
+// ── 重複ドラフトの片付け(Chami 2026-11-10「被ってるやつ消しといて」) ──
+function dupEnv(rows, posts) {
+  const e = makeEnv({ seedMeta: rows });
+  Object.keys(posts || {}).forEach((id) => { e.store['go5_draft_post_' + id] = JSON.stringify(posts[id]); });
+  const deleted = [];
+  e.win.Go5Stock = { deleteDraft: (id) => {
+    deleted.push(id);
+    e.store.go5_stock_meta = JSON.stringify(JSON.parse(e.store.go5_stock_meta).filter((m) => m.id !== id));
+    return true;
+  } };
+  e.win.Go5Sync.flushSync = () => Promise.resolve({ ok: true });
+  return { e, deleted };
+}
+const A = (id, cid, ts, date) => ({ id, ts, videoReadyAt: ts, srcMark: { cid }, auto: { date, rank: 1 } });
+test('D-1: 同じ作品の自動ドラフトは一番新しい1本だけ残し、他は消す(違う作品は触らない)', async () => {
+  const { e, deleted } = dupEnv([A('a1', 'd_1', 100, '20261029'), A('a2', 'd_1', 300, '20261031'), A('a3', 'd_1', 200, '20261030'), A('b1', 'd_2', 150, '20261029')]);
+  const r = await e.win.FivesecAutoDraft.dedupe();
+  assert.deepStrictEqual(deleted.slice().sort(), ['a1', 'a3']);
+  assert.deepStrictEqual([r.ok, r.deleted, r.wanted], [true, 2, 2]);
+  assert.deepStrictEqual(JSON.parse(e.store.go5_stock_meta).map((m) => m.id).sort(), ['a2', 'b1']);
+});
+test('D-2: 手で作ったドラフトと予約・投稿済みのドラフトは消さず、それがあれば自動の重複を全部消す', async () => {
+  const manual = { id: 'm1', ts: 50, videoReadyAt: 50, srcMark: { cid: 'd_1' } };
+  const { e, deleted } = dupEnv([manual, A('a1', 'd_1', 100, '20261029'), A('a2', 'd_1', 300, '20261031'),
+    A('c1', 'd_3', 100, '20261029'), A('c2', 'd_3', 300, '20261031')], { c1: { bskyReserveId: 'r1' } });
+  await e.win.FivesecAutoDraft.dedupe();
+  assert.deepStrictEqual(deleted.slice().sort(), ['a1', 'a2', 'c2']);
+});
+test('D-3: dryRun は計画だけ返して消さない・重複が無ければ何もしない', async () => {
+  const { e, deleted } = dupEnv([A('a1', 'd_1', 100, '20261029'), A('a2', 'd_1', 300, '20261031')]);
+  const r = await e.win.FivesecAutoDraft.dedupe({ dryRun: true });
+  assert.deepStrictEqual([deleted.length, r.wanted, r.plan[0].keep[0].id, r.plan[0].del[0].id], [0, 1, 'a2', 'a1']);
+  const z = dupEnv([A('a1', 'd_1', 100, '20261029'), A('b1', 'd_2', 300, '20261031')]);
+  const r2 = await z.e.win.FivesecAutoDraft.dedupe();
+  assert.deepStrictEqual([z.deleted.length, r2.wanted], [0, 0]);
+});
+test('D-4: stock.js は一覧の削除ボタンと同じ deleteStock_ を Go5Stock.deleteDraft で公開する', () => {
+  const stock = fs.readFileSync(path.join(__dirname, '..', 'js', 'stock.js'), 'utf8');
+  assert.ok(/deleteDraft: function \(id\) \{ var ok = deleteStock_\(/.test(stock));
+});
+
 Promise.all(pending).then(() => {
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

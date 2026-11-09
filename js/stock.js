@@ -4661,7 +4661,9 @@
   // ★土台(Go5Stock)はモジュールスコープで即公開する=init()を待たない/init()が途中で転んでも生きる。
   //   参照する5関数は全てモジュールスコープの関数宣言(巻き上げ済み)で、依存するモジュール変数も宣言時初期化
   //   =init時セットアップに依存しない(検証済み)。投稿履歴ページ(StockLists.html)からも regenDataset を確実に呼べる。
-  window.Go5Stock = { render: render, previewForVideoId: previewForVideoId_, previewFromVideoBlob: previewFromVideoBlob_, videoBlobForId: videoBlobForId_, regenDataset: regenDataset_ };
+  // deleteDraft= 一覧の「削除」ボタンと同じ deleteStock_(墓標→同期)を外から呼ぶ口。重複ドラフトの片付け(autodraft.js dedupe)が使う。
+  window.Go5Stock = { render: render, previewForVideoId: previewForVideoId_, previewFromVideoBlob: previewFromVideoBlob_, videoBlobForId: videoBlobForId_, regenDataset: regenDataset_,
+    deleteDraft: function (id) { var ok = deleteStock_(String(id || '')); try { render(); } catch (e) {} return ok; } };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
