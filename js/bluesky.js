@@ -2454,7 +2454,7 @@
   try { window.Go5DraftBskyThread = draftBskyThread_; } catch (e) {}
 
   // ドラフトのスレッド(親+返信)を無人予約へ(設計 §2)。GASの予約シートへ親画像・返信文・返信画像を渡し、5分トリガーが
-  //   T_b に親→3〜10秒→返信を出す。投稿はGASのch別資格(BSKY_HANDLE_ACCn)=端末のアプリパスワードは使わない。
+  //   T_b に親→3〜7秒(端数つき)→返信を出す。投稿はGASのch別資格(BSKY_HANDLE_ACCn)=端末のアプリパスワードは使わない。
   //   o: prepareBskyThread_ と同じ + {atMs, slotId, meta}。戻り値 {id, scheduledAt, bskyWorkShortUrl}。
   function blobToDataUrl_(b) {
     return new Promise(function (res) {
@@ -2475,7 +2475,7 @@
     }).then(function (urls) {
       var meta = Object.assign({}, o.meta || {}, { draftId: o.draftId || '', workUrl: o.workLink || '', pillar: 'bsky', bskyWorkShortUrl: prep.bskyWorkShortUrl });
       var payload = { type: 'reserve', channel: prep.acc, scheduled_at: new Date(o.atMs).toISOString(), text: prep.parentText, slot_id: o.slotId || '', meta: meta,
-        thread: { reply_text: prep.replyText, reply_image: urls[1] || '', delay_ms: 3000 + Math.floor(Math.random() * 7000) } };
+        thread: { reply_text: prep.replyText, reply_image: urls[1] || '', delay_ms: 3000 + Math.floor(Math.random() * 4001) } };
       if (urls[0]) payload.image = urls[0];
       return fetch(gasUrl, { method: 'POST', body: JSON.stringify(payload) }).then(function (r) { return r.json(); });
     }).then(function (j) {
@@ -3255,7 +3255,7 @@
       if (!replyUrl) { setThreadStatus('リプライに吊り下げるURLを入力してください。'); return; }
       var c = creds(); if (!c.handle || !c.appPw) { setThreadStatus('⚙設定でハンドルとアプリパスワードを入れてください。'); return; }
       if (!window.BlueskyCore || !window.BlueskyCore.blueskyPostThread) { setThreadStatus('投稿モジュール未読込。'); return; }
-      if (!window.confirm('親の投稿(本文はそのまま)を投稿し、ランダムな秒数(3〜10秒)を空けてからリプライにURLを投稿します。よろしいですか？')) return;
+      if (!window.confirm('親の投稿(本文はそのまま)を投稿し、ランダムな秒数(3〜7秒)を空けてからリプライにURLを投稿します。よろしいですか？')) return;
       els.threadPostBtn.disabled = true; setThreadStatus('リンクを準備中…');
       var f = selectedPostFile || photoFile();
       threadReplyLink_(replyUrl)
@@ -3271,7 +3271,7 @@
         })
         .then(function (res) {
           dropPendingReply_(res.parent.uri); delete _bskyReplyInflight[res.parent.uri];
-          setThreadStatus('✅ 親を投稿 → ' + Math.round(res.delayMs / 1000) + '秒後にリプライへURLを投稿しました。<br>親：<a href="' + res.parent.postUrl + '" target="_blank" rel="noopener">開く</a>／リプ：<a href="' + res.reply.postUrl + '" target="_blank" rel="noopener">開く</a>', true);
+          setThreadStatus('✅ 親を投稿 → ' + (res.delayMs / 1000).toFixed(2) + '秒後にリプライへURLを投稿しました。<br>親：<a href="' + res.parent.postUrl + '" target="_blank" rel="noopener">開く</a>／リプ：<a href="' + res.reply.postUrl + '" target="_blank" rel="noopener">開く</a>', true);
           // 子(リプ)の投稿URLを短縮してYouTube説明欄の「(ブルスカ短縮URL)」へ入れる(Chami 2026-10-13 msg 1559249835989925978)。
           //   同時に投稿履歴へ自動で載せる(Chami 2026-10-13 msg 1559255858628534303)=単独投稿と同じ notifyPosted→shortenAndShow
           //   (短縮→説明欄→histAdd)を子の投稿で通す。短縮に失敗しても投稿失敗として出さない(生URLのまま入る)。

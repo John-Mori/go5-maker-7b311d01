@@ -84,7 +84,7 @@ test('投稿モードのBluesky予約がacc3・枠の30分前・Bluesky用af_id�
   expect(p.thread.reply_text).not.toContain('xside-990');
   expect(p.thread.reply_image).toMatch(/^data:image\//);
   expect(p.thread.delay_ms).toBeGreaterThanOrEqual(3000);
-  expect(p.thread.delay_ms).toBeLessThanOrEqual(10000);
+  expect(p.thread.delay_ms).toBeLessThanOrEqual(7000);
   const saved = await page.evaluate((id) => JSON.parse(localStorage.getItem('go5_draft_post_' + id) || '{}'), draftId);
   expect(saved.bskyReserveId).toBe('rsv_e2e_1');
 

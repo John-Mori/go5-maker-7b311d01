@@ -245,7 +245,7 @@
    * 一括投稿：親(本文はそのまま・手入力想定)を投稿 → ランダムな秒数を空ける →
    * リプライ(URLを本文として)を親へぶら下げる。(Chami依頼2026-10-09「同時には出さない。
    * 親を出した後、ランダムな秒数を空けてリプライを出す。1分以内に収め、その範囲から乱数で選ぶ」)
-   * delayMinMs/delayMaxMs は既定 3000〜10000(3〜10秒)。(Chami 2026-10-13 msg 1559260340318109789「子のリプライもっと早くして3〜10秒でいい」で旧8〜55秒から短縮)
+   * delayMinMs/delayMaxMs は既定 3000〜7000(3〜7秒・ミリ秒単位の乱数=3.35秒のように端数が出る)。(Chami 2026-11-10 msg 1569446443834408980「10秒は長いから3〜7秒に」で3〜10秒から短縮・旧々8〜55秒)
    * 呼び出し側で上書き可。
    * @returns Promise<{ parent:{uri,cid,handle,rkey,postUrl}, reply:{...}, delayMs }>
    */
@@ -256,7 +256,7 @@
     var parentText = String(o.parentText || '');
     var replyText = String(o.replyText || '');
     var delayMin = (typeof o.delayMinMs === 'number') ? o.delayMinMs : 3000;
-    var delayMax = (typeof o.delayMaxMs === 'number') ? o.delayMaxMs : 10000;
+    var delayMax = (typeof o.delayMaxMs === 'number') ? o.delayMaxMs : 7000;
     var delayMs = Math.round(delayMin + Math.random() * Math.max(0, delayMax - delayMin));
     var sess;
     var blobs = (o.imageBlobs || []).concat(o.imageBlob ? [o.imageBlob] : []).filter(Boolean);

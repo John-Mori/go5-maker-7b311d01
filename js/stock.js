@@ -3929,7 +3929,7 @@
     if (pd.bskyReserveId && !window.confirm('このドラフトは既に予約済みです(' + fmtMd_(Date.parse(pd.bskyReserveAt) || 0) + ')。もう1件予約しますか？')) return;
     var dayN = bskyReservedOnDay_(acc, atMs, meta.id), cap = bskyDailyCap_(acc);
     if (dayN >= cap && !window.confirm(fmtMd_(atMs).split(' ')[0] + ' のBluesky予約は既に' + dayN + '本です(1日' + cap + '本まで)。' + (dayN + 1) + '本目を予約しますか？')) return;
-    if (!window.confirm(fmtMd_(atMs) + ' にBlueskyへ親(画像+本文)→3〜10秒後に返信(作品リンク)を無人で投稿します。よろしいですか？')) return;
+    if (!window.confirm(fmtMd_(atMs) + ' にBlueskyへ親(画像+本文)→3〜7秒後に返信(作品リンク)を無人で投稿します。よろしいですか？')) return;
     btn.disabled = true; say('予約中…');
     var vid = ensureVideoId_(meta);
     draftBskyArgs_(meta, parentText, aff).then(function (args) {
@@ -3993,8 +3993,8 @@
     var parentText = String(($('draftParentText') || {}).value || '').trim();
     var aff = (meta.affiliateUrl || meta.workUrl || '').trim();
     if (pd.bskyParentUrl && !window.confirm('このドラフトはBlueskyへ投稿済みです。もう一度投稿しますか？(二重投稿になります)')) return;
-    if (!window.confirm('Blueskyへ親(画像+本文)を投稿し、3〜10秒あけて返信に作品リンクを投稿します。よろしいですか？')) return;
-    btn.disabled = true; say('投稿中…(親→3〜10秒待機→返信)');
+    if (!window.confirm('Blueskyへ親(画像+本文)を投稿し、3〜7秒あけて返信に作品リンクを投稿します。よろしいですか？')) return;
+    btn.disabled = true; say('投稿中…(親→3〜7秒待機→返信)');
     draftBskyArgs_(meta, parentText, aff).then(function (args) {
       return window.Go5DraftBskyThread(args);
     }).then(function (r) {
