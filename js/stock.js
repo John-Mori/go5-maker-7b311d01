@@ -3021,8 +3021,16 @@
         return Go5Sync.fetchBlobR2At('go5prev:' + m.id, 15000).then(function (pb) { return isImg_(pb) ? pb : null; });
       }).then(function (b) {
         if (!b) { ent.miss = true; return null; }
-        _thumbCache[m.id] = _thumbCache[m.id] || URL.createObjectURL(b);
-        return _thumbCache[m.id];
+        // ★元画像(1080x1920級)をそのまま48px枠へ貼ると、iPhoneは1枚ごとに約8MBの画素を展開して重い
+        //   (ページが重い・Chami msg 1569398578898669671)。90px幅へ1回だけ縮め、手元IDBの stock_t_ へも置いて
+        //   次回からは雲へ取りに行かない。縮小が4秒で返らない端末(iOSのtoBlob無応答)は元画像で出す。
+        var small = new Promise(function (res) { setTimeout(function () { res(null); }, 4000); scaleBlobToThumb_(b).then(res, function () { res(null); }); });
+        return small.then(function (sb) {
+          var use = (sb && sb.size) ? sb : b;
+          if (sb && sb.size && store && !idbSick_(store)) { try { store.set('stock_t_' + m.id, sb).catch(function () {}); } catch (e) {} }
+          _thumbCache[m.id] = _thumbCache[m.id] || URL.createObjectURL(use);
+          return _thumbCache[m.id];
+        });
       }).catch(function () { ent.miss = true; return null; });
       _r2ThumbP[m.id] = ent;
       return ent.p;

@@ -982,6 +982,9 @@ test.describe('ドラフト軽量ページ', () => {
 
     await expect(page.locator('#draftPostModal')).toBeHidden();
     await expect(page.locator(`.stk-mode[data-id="${draftId}"]`)).toHaveCount(0);
+    // 作成履歴は開いた時だけ描く(重さ対策 v1108・Chami msg 1569398578898669671)=開いてから復元ボタンを見る。
+    const archOpen = await page.locator('#stkArchDetails').evaluate((d) => d.open);
+    if (!archOpen) await page.locator('#stkArchDetails summary').click();
     await expect(page.locator(`.stk-restore[data-id="${draftId}"]`)).toHaveCount(1);
     const state = await page.evaluate(({ draftId }) => ({
       archived: JSON.parse(localStorage.getItem('go5_stock_archive') || '[]').some((m) => m.id === draftId),
