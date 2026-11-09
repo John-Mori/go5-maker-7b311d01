@@ -75,6 +75,23 @@ eq(Core.resolvePromoTemplate(TPL, { noPromo: true }).indexOf(SL), -1, 'keepSaleL
 // 2026-10-21 Chami msg 1562266602194337793「2」: X用の子の文欄にもセール行を戻す(v1066の除去を外した)。
 eq(/function composeXForModal_[\s\S]*?return applyPromo_\(base, meta, true\);/.test(st) && !/dropSaleLines_/.test(st), true, 'Xの子の文もセール案内行を残す(dropSaleLines_へ戻さない)');
 eq(Core.resolvePromoTemplate('見出し\n今だけN%OFF', { noPromo: true, keepSaleLines: true }), '見出し', '作品の割引率(N%)の行はBluesky返信でも外す');
+console.log('--- 子の文欄=実際に投稿されるBluesky用短縮(Chami 2026-11-10 msg 1569446046004682874) ---');
+const stN = st.replace(/\r\n/g, '\n');
+function grabSt(name) {
+  const i = stN.indexOf('  function ' + name + '(');
+  if (i < 0) throw new Error('not found: ' + name);
+  return stN.slice(i, stN.indexOf('\n  }\n', i) + 4);
+}
+const swap = new Function(grabSt('swapChildLinks_') + '\nreturn swapChildLinks_;')();
+const RAW = 'https://al.fanza.co.jp/?lurl=https%3A%2F%2Fwww.dmm.co.jp%2Fdc%2Fdoujin%2F-%2Fdetail%2F%3D%2Fcid%3Dd_1%2F&af_id=x-001&ch=link_tool&ch_id=link';
+const BSKYS = 'https://xdgh3.com/AbC12';
+const CHILD = '⇩気になった方はコチラから💕 #PR #漫画\n準新作80%OFF✨\n' + RAW;
+eq(swap(CHILD, [RAW], BSKYS), '⇩気になった方はコチラから💕 #PR #漫画\n準新作80%OFF✨\n' + BSKYS, '生アフィリンクをBluesky用短縮へ差し替える(他の行はそのまま)');
+eq(swap(CHILD + '\n\n⇩セール\nhttps://al.fanza.co.jp/?lurl=sale', [RAW], BSKYS).indexOf('https://al.fanza.co.jp/?lurl=sale') > 0, true, 'セールのリンクは触らない');
+eq(swap(CHILD, [RAW.slice(0, 40), RAW], BSKYS), CHILD.replace(RAW, BSKYS), '長い候補から置換=前方一致の短い候補で壊さない');
+eq(swap(CHILD, [RAW], ''), CHILD, '短縮が無ければ何もしない');
+eq(/return bskyWorkLinkFor_\(aff, acc\)\.then\(function \(link\)/.test(src) && /window\.Go5BskyWorkLinkFor = bskyWorkLinkFor_/.test(src), true, '投稿の返信リンクと欄の表示は同じ bskyWorkLinkFor_ を通る');
+eq(/function setXSys_[\s\S]*?v = withBskyChildLink_\(meta, v\);[\s\S]*?mintBskyChildLink_\(meta\);/.test(stN) && /window\.Go5BskyWorkLinkFor\(aff, meta\.account \|\| 'acc1'\)/.test(stN), true, '子の文欄を書く時にBluesky用短縮へ差し替える');
 Promise.all(tasks).then(() => {
   if (fails) { console.log(fails + ' FAIL'); process.exit(1); }
   console.log('all ok');

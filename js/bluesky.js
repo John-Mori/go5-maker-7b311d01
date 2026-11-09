@@ -2382,6 +2382,19 @@
   //   成功時は親投稿URLも同じchドメインで短縮して返す(YouTube説明欄の1行目=A=1)。
   // 即時投稿と無人予約の共通材料(設計_daily_pick予約投稿 §2)=af_id差し替え・短縮・返信文・画像を1か所で作る(af_id混線を構造で防ぐ)。
   //   o.forReserve=予約(GASのch別資格で投稿)=端末のアプリパスワードは要らない。
+  // Bluesky返信に載る作品リンク=このchのBluesky用af_idへ付け替え→#go5=bsky の印→自前ドメインで短縮(2026-10-21)。
+  //   短縮に失敗したら生アフィリンク(印なし)=リンクは生かす。link-workerはドメイン+URLで決定的にコードを作るので、
+  //   ドラフトの「子の文」欄の表示(stock.js)と投稿(prepareBskyThread_)が同じこの関数を通れば欄のリンク=実際に投稿されるリンク
+  //   (Chami 2026-11-10 msg 1569446046004682874「子の文のところも実際に投稿する短縮リンクにして」)。
+  function bskyWorkLinkFor_(workLink, acc) {
+    var aff = swapAfForBsky_(String(workLink || '').trim(), acc); // ドラフトの作品リンク(X用af_idで保存)をBluesky用af_idへ(出先別af_id)
+    var tagged = aff + (aff.indexOf('#') < 0 ? '#go5=bsky' : '&go5=bsky');
+    return makeShortAndShare(tagged, { account: acc, bsky: true }).then(function (r) {
+      var sv = r && (r.shareUrl || r.shortUrl);
+      return (sv && ourShortBase(sv)) ? sv : aff;
+    }, function () { return aff; });
+  }
+  try { window.Go5BskyWorkLinkFor = bskyWorkLinkFor_; } catch (e) {}
   function prepareBskyThread_(o) {
     o = o || {};
     var acc = o.account || acctId();
@@ -2397,13 +2410,8 @@
     if (countGraphemes(parentText) > 300) return Promise.reject(new Error('parent-too-long'));
     var aff = String(o.workLink || '').trim();
     if (!/^https?:\/\//.test(aff)) return Promise.reject(new Error('no-work-link'));
-    aff = swapAfForBsky_(aff, acc); // ドラフトの作品リンク(X用af_idで保存)をこのchのBluesky用af_idへ(出先別af_id)
-    var tagged = aff + (aff.indexOf('#') < 0 ? '#go5=bsky' : '&go5=bsky');
     var prep = { acc: acc, handle: handle, appPw: appPw, parentText: parentText, bskyWorkShortUrl: '', replyText: '', imageBlob: null, replyImageBlob: null };
-    return makeShortAndShare(tagged, { account: acc, bsky: true }).then(function (r) { // Bluesky返信の作品リンク=短縮(2026-10-21)
-      var sv = r && (r.shareUrl || r.shortUrl);
-      return (sv && ourShortBase(sv)) ? sv : aff; // 短縮失敗=生アフィリンク(印なし)で返信=リンクは生かす
-    }, function () { return aff; }).then(function (link) {
+    return bskyWorkLinkFor_(aff, acc).then(function (link) {
       if (ourShortBase(link)) prep.bskyWorkShortUrl = link;
       // ★返信文=そのchの🦋投稿本文(テンプレ)どおり。作品プレースホルダの無い本文の時だけ子の文(リンクだけBluesky用)。
       return bskyReplyFromBody_(o.bskyBody, link).then(function (t) {

@@ -3447,9 +3447,55 @@
   }
   function setXSys_(meta, v, master) {
     var el = $('draftXText'); if (!el) return;
+    v = withBskyChildLink_(meta, v);
     el.value = v;
     if (master != null || _xBase.id !== meta.id) _xBase = { id: meta.id, master: master != null ? master : masterBody_(meta), sys: v };
     else _xBase.sys = v;
+    mintBskyChildLink_(meta);
+  }
+  // ★柱分けchの子の文=Blueskyの返信。欄の作品リンク(X側の生アフィリンク/X用短縮)を、投稿で実際に載るBluesky用の短縮へ
+  //   差し替えて見せる(Chami 2026-11-10 msg 1569446046004682874「子の文のところも実際に投稿する短縮リンクにして」)。
+  //   リンクは投稿(bluesky.js prepareBskyThread_)と同じ Go5BskyWorkLinkFor で作る=欄のリンク=投稿されるリンク。
+  //   短縮が取れない間は今までどおり生アフィリンクを出す(踏める)。手直し中の欄は触らない。
+  var _bskyChildLink = {}, _bskyChildInflight = {}; // acc|作品リンク → Bluesky返信に載る短縮
+  function bskyChildKey_(meta) { return (meta.account || 'acc1') + '|' + String(meta.affiliateUrl || meta.workUrl || '').trim(); }
+  // 欄に出ている「X側の作品リンク」の候補=保存済みX短縮・生アフィリンク・発番キャッシュ(X用af_idで包んだリンク含む)
+  function childXWorkLinks_(meta) {
+    var toks = workLinkTokens_(meta, loadDraftPost_(meta.id)), aff = String(meta.affiliateUrl || meta.workUrl || '').trim();
+    var c = _shortMintCache[aff]; if (c) toks.push(String(c.shareUrl || ''), String(c.shortUrl || ''));
+    return toks;
+  }
+  // 純関数: 文中の候補リンク(長い順=部分一致の取り違え防止)を link へ置き換える。
+  function swapChildLinks_(v, toks, link) {
+    var s = String(v || '');
+    if (!link) return s;
+    toks.filter(function (t, i, a) { return /^https?:\/\//.test(t) && t !== link && a.indexOf(t) === i; })
+      .sort(function (a, b) { return b.length - a.length; })
+      .forEach(function (t) { s = s.split(t).join(link); });
+    return s;
+  }
+  function withBskyChildLink_(meta, v) {
+    if (!meta || !pillarSplitOn_(meta)) return v;
+    var link = _bskyChildLink[bskyChildKey_(meta)];
+    return link ? swapChildLinks_(v, childXWorkLinks_(meta), link) : v;
+  }
+  function mintBskyChildLink_(meta) {
+    if (!meta || !pillarSplitOn_(meta) || !window.Go5BskyWorkLinkFor) return;
+    var key = bskyChildKey_(meta), aff = String(meta.affiliateUrl || meta.workUrl || '').trim();
+    if (!/^https?:\/\//.test(aff) || _bskyChildLink[key] || _bskyChildInflight[key]) return;
+    _bskyChildInflight[key] = 1;
+    window.Go5BskyWorkLinkFor(aff, meta.account || 'acc1').then(function (link) {
+      delete _bskyChildInflight[key];
+      var go5 = window.Go5Short || {};
+      if (!(link && go5.ourBase && go5.ourBase(link))) return; // 短縮が取れなかった=生リンクのまま(次に開いた時にまた取りに行く)
+      _bskyChildLink[key] = link;
+      var el = $('draftXText');
+      if (!el || _modalMeta !== meta || _xBase.id !== meta.id || el.value !== _xBase.sys) return; // 別作品/手直し中は触らない
+      var nv = swapChildLinks_(el.value, childXWorkLinks_(meta), link);
+      if (nv === el.value) return;
+      el.value = nv; _xBase.sys = nv;
+      try { var _sv = JSON.parse(localStorage.getItem('go5_draft_post_' + meta.id) || '{}'); if (_sv && _sv.xText) saveDraftPost_(); } catch (e) {}
+    }, function () { delete _bskyChildInflight[key]; });
   }
   // 投稿本文が変わったら(同期で届いた/別タブで直した/テンプレ帳を反映した)、開いている子の文も作り直す。
   //   その場で手直し中(欄が自動で出した文と違う)なら触らない=打っている文を消さない。
