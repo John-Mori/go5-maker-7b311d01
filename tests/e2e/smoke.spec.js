@@ -42,8 +42,10 @@ test.describe('go5-maker 公開URL スモーク', () => {
     expect(ids.length).toBeGreaterThanOrEqual(8);
     // 5秒動画の廃止(2026-11-03 Chami「5秒動画やらないから廃止して」)で隠したタブ。消さず hidden で残す決まりなので、
     //   見えないことを固定しつつ、残した中身の回帰は JS の click で引き続き走らせる(hidden のボタンは人の操作では押せない)。
-    const RETIRED = ['tabMovie', 'tabStock', 'tabYT', 'tabPost'];
-    for (const id of RETIRED) await expect(page.locator('#' + id), `#${id} は廃止で隠したはず`).toBeHidden();
+    //   ★2026-11-10 再開(Chami ad研究室 msg 1569391416776462467「ドラフトに全自動で作られてること」)で4タブを戻した=人が押せることを固定する。
+    const RETIRED = [];
+    for (const id of ['tabMovie', 'tabStock', 'tabYT', 'tabPost']) await expect(page.locator('#' + id), `#${id} は再開で戻したはず`).toBeVisible();
+    const NAV_RACE = ['tabStock']; // onclick とタブの処理の両方が移動を起こすタブ
     const tapOrInvoke = (id) => (RETIRED.includes(id)
       ? page.evaluate((x) => document.getElementById(x).click(), id)
       : page.locator('#' + id).click());
@@ -52,7 +54,7 @@ test.describe('go5-maker 公開URL スモーク', () => {
       //   この検査は「切替」を見るもので「復元」ではないため、毎周 保存タブを消してから開く。
       await page.evaluate(() => localStorage.removeItem('go5_active_tab'));
       await page.goto('index.html', { waitUntil: 'domcontentloaded' });
-      if (dedicatedPages[id] && RETIRED.includes(id)) {
+      if (dedicatedPages[id] && NAV_RACE.includes(id)) {
         // tabStock は onclick とタブの処理の両方が移動を起こし、先の1本が中断される。waitForURL はその中断を拾って
         //   落ちるため、着地先の URL を待つ形にする(下の「本体のドラフトボタン」検査と同じ)。
         await tapOrInvoke(id);

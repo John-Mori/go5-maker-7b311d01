@@ -177,7 +177,7 @@
     // ★5秒動画の廃止(Chami 2026-11-03・モドリッチ便)=既定で動画作成(pageMovie)を出さず候補(KouhoLists.html)へ移す。
     //   hidden にしたタブ(動画作成/ドラフト/投稿)の復元も同じく候補へ。戻す時は REDIRECT_LEGACY_LANDING を false にする。
     //   pageMovie 本体は消さず残す(予約/候補→動画生成の持ち越し先が下地として使うため hidden は付けない)。
-    var REDIRECT_LEGACY_LANDING = true;
+    var REDIRECT_LEGACY_LANDING = false; // 2026-11-10 5秒動画を自己アフィで再開(Chami ad研究室 msg 1569391416776462467)=タブを戻し着地の移動を止めた
     //   自動ブラウザ(Playwrightのe2e=navigator.webdriver)だけは移さない。残した本体の回帰検査を走らせ続けるため
     //   (83b8bcb で e2e 34本が候補ページへ飛ばされ赤になった・2026-11-03)。
     if (REDIRECT_LEGACY_LANDING && !navigator.webdriver) {
