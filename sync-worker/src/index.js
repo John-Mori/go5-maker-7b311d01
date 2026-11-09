@@ -90,6 +90,14 @@ export default {
     // 候補の受け箱 — PCのGrok候補パイプ(scripts/grok_fanza)が R2 cand_inbox/latest.json へ置いた
     //   候補を、候補一覧(candidates.js)が取り込むための読み取り口。teian と同じく書き込みは wrangler、
     //   読み取りはトークン必須。重複除け(cid)はフロント側=端末の一覧と墓標を見て行う。
+    // 追っかけるXアカウント — 候補タブ「自動追加」の[アカウント追加]がポストURLから @名 を足す(Chami 2026-11-10 msg 1569398154971975710)。
+    //   R2 x_accounts/list.json が受け箱。PCの grok_fanza_pipe が起動時に wrangler で読み、target_accounts.json へ混ぜて書き戻す。
+    if (path === "/api/x-accounts") {
+      if (!authOk(request, env)) return json({ ok: false, error: "bad_token" }, 403, cors);
+      if (request.method === "GET" || request.method === "HEAD") return xAccountsGet(env, cors);
+      if (request.method === "POST") return xAccountsAdd(request, env, cors);
+      return json({ ok: false, error: "method_not_allowed" }, 405, cors);
+    }
     if (path === "/api/cand-inbox") {
       if (request.method !== "GET" && request.method !== "HEAD") return json({ ok: false, error: "method_not_allowed" }, 405, cors);
       if (!authOk(request, env)) return json({ ok: false, error: "bad_token" }, 403, cors);
@@ -282,6 +290,32 @@ async function serveDailyPick(name, env, cors) {
   if (!obj) return json({ ok: true, empty: true, items: [] }, 200, cors);
   const body = await obj.text();
   return new Response(body, { status: 200, headers: Object.assign({ "Content-Type": "application/json", "Cache-Control": "no-store" }, cors || {}) });
+}
+const XACC_KEY = "x_accounts/list.json";
+async function xAccountsRead(env) {
+  const obj = await env.SYNC_IMAGES.get(XACC_KEY);
+  if (!obj) return { accounts: [] };
+  try { const d = JSON.parse(await obj.text()); return (d && Array.isArray(d.accounts)) ? d : { accounts: [] }; } catch (e) { return { accounts: [] }; }
+}
+async function xAccountsGet(env, cors) {
+  if (!env.SYNC_IMAGES) return json({ ok: false, error: "r2_unset" }, 500, cors);
+  const d = await xAccountsRead(env);
+  return json({ ok: true, accounts: d.accounts, updatedAt: d.updatedAt || "" }, 200, cors);
+}
+async function xAccountsAdd(request, env, cors) {
+  if (!env.SYNC_IMAGES) return json({ ok: false, error: "r2_unset" }, 500, cors);
+  let body = {};
+  try { body = await request.json(); } catch (e) { return json({ ok: false, error: "bad_json" }, 400, cors); }
+  const handle = String((body && body.handle) || "").trim().replace(/^@/, "");
+  if (!/^[A-Za-z0-9_]{1,15}$/.test(handle)) return json({ ok: false, error: "bad_handle" }, 400, cors);
+  const d = await xAccountsRead(env);
+  const hit = d.accounts.find((a) => String(a.handle || "").toLowerCase() === handle.toLowerCase());
+  if (hit) return json({ ok: true, dup: true, handle: hit.handle, accounts: d.accounts }, 200, cors);
+  const jst = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 19) + "+09:00";
+  d.accounts.push({ handle, added: jst.slice(0, 10), from: "app", url: String((body && body.url) || "").slice(0, 300) });
+  d.updatedAt = jst;
+  await env.SYNC_IMAGES.put(XACC_KEY, JSON.stringify(d), { httpMetadata: { contentType: "application/json", cacheControl: "no-store" } });
+  return json({ ok: true, dup: false, handle, accounts: d.accounts }, 200, cors);
 }
 async function serveCandInbox(env, cors) {
   if (!env.SYNC_IMAGES) return json({ ok: false, error: "r2_unset" }, 500, cors);

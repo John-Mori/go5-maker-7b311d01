@@ -432,6 +432,77 @@
     $('candBiCancel').addEventListener('click', function () { f.innerHTML = ''; });
     $('candBiSave').addEventListener('click', function () { setBuiltinTabLabel_(id, $('candBiName').value || ''); f.innerHTML = ''; render(); });
   }
+  // 🤖自動追加タブの[アカウント追加]= Xのポスト(またはプロフィール)URLを貼って、追っかけるアカウントを登録する
+  //   (Chami 2026-11-10 msg 1569398154971975710「このタブに追加は自動追加では使わないからアカウント追加で…URL貼ってアカウントを追加する」)。
+  //   登録先= sync-worker /api/x-accounts(R2 x_accounts/list.json)。PCの毎日14:00の収集(grok_fanza_pipe)が起動時に取り込む。
+  var X_RESERVED = { i: 1, home: 1, intent: 1, search: 1, hashtag: 1, explore: 1, notifications: 1, messages: 1, settings: 1, share: 1, compose: 1 };
+  function xHandleFromInput_(s) {
+    s = String(s || '').trim();
+    var m = s.match(/^https?:\/\/(?:www\.|mobile\.)?(?:x|twitter)\.com\/([A-Za-z0-9_]{1,15})(?:[\/?#]|$)/i);
+    var h = m ? m[1] : (s.match(/^@?([A-Za-z0-9_]{1,15})$/) || [])[1];
+    if (!h || X_RESERVED[h.toLowerCase()]) return '';
+    return h;
+  }
+  function xAccountsApi_(method, body) {
+    var c = null; try { c = window.Go5Sync && window.Go5Sync.getConfig && window.Go5Sync.getConfig(); } catch (e) {}
+    var url = (c && c.url) || '', token = (c && c.token) || '';
+    if (!/^https?:\/\//.test(url) || !token) return Promise.resolve({ ok: false, error: 'sync_unset' });
+    var ctrl = new AbortController(), tm = setTimeout(function () { ctrl.abort(); }, 15000);
+    var opts = { method: method, headers: { 'X-Sync-Token': token }, cache: 'no-store', signal: ctrl.signal };
+    if (body) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+    return fetch(url + '/api/x-accounts', opts).then(function (r) { return r.json().catch(function () { return { ok: false, error: 'http_' + r.status }; }); })
+      .catch(function () { return { ok: false, error: 'network' }; })
+      .then(function (d) { clearTimeout(tm); return d; });
+  }
+  function showXAccountForm_() {
+    var f = $('candEditForm');
+    if (!f) return;
+    f.innerHTML = '<div class="card" style="margin:8px 0;">' +
+      '<div class="field-label" style="margin-top:0;">アカウント追加</div>' +
+      '<label class="hint" for="candXUrl" style="display:block;margin-bottom:2px;">追っかけるXアカウントのポストURL(@名だけでも可)</label>' +
+      '<input id="candXUrl" type="url" inputmode="url" autocomplete="off" placeholder="https://x.com/○○/status/…" style="width:100%;min-width:0;box-sizing:border-box;">' +
+      '<div id="candXMsg" class="hint" role="status" aria-live="polite" style="margin-top:6px;min-height:1.2em;"></div>' +
+      '<div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap;">' +
+      '<button id="candXAdd" type="button" class="primary" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:8px 14px;">登録</button>' +
+      '<button id="candXClose" type="button" class="ghost" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:8px 12px;">閉じる</button>' +
+      '</div>' +
+      '<div class="field-label" style="margin-top:10px;">登録済み <span id="candXCount" class="hint"></span></div>' +
+      '<div id="candXList" class="hint" style="line-height:1.7;word-break:break-all;">読み込み中…</div>' +
+      '<div class="hint" style="margin-top:6px;">登録したアカウントは、PCの毎日14:00の収集から対象になります。</div>' +
+      '</div>';
+    var msg = $('candXMsg'), inp = $('candXUrl'), busy = false;
+    function drawList(list) {
+      list = list || [];
+      $('candXCount').textContent = '(' + list.length + '件)';
+      $('candXList').innerHTML = list.length ? list.slice().reverse().map(function (a) {
+        return '<a href="https://x.com/' + esc(a.handle) + '" target="_blank" rel="noopener">@' + esc(a.handle) + '</a>' + (a.added ? ' <span style="opacity:.7;">' + esc(a.added) + '</span>' : '');
+      }).join('<br>') : 'まだ1件もありません。';
+    }
+    function load() {
+      xAccountsApi_('GET').then(function (r) {
+        if (r && r.ok) drawList(r.accounts);
+        else $('candXList').textContent = r && r.error === 'sync_unset' ? '⚙同期の設定が無いので一覧を読めません。' : '一覧を読めませんでした(' + esc((r && r.error) || '?') + ')。';
+      });
+    }
+    function add() {
+      if (busy) return;
+      var raw = inp.value || '';
+      if (!raw.trim()) return;
+      var h = xHandleFromInput_(raw);
+      if (!h) { msg.textContent = 'XのURLからアカウント名を読めませんでした。x.com/○○/status/… の形で貼ってください。'; return; }
+      busy = true; msg.textContent = '@' + h + ' を登録中…';
+      xAccountsApi_('POST', { handle: h, url: raw.trim() }).then(function (r) {
+        busy = false;
+        if (r && r.ok) { msg.textContent = r.dup ? '@' + r.handle + ' はもう登録済みです。' : '@' + r.handle + ' を登録しました。'; inp.value = ''; drawList(r.accounts); }
+        else msg.textContent = r && r.error === 'sync_unset' ? '⚙同期の設定が無いので登録できません。' : '登録できませんでした(' + ((r && r.error) || '?') + ')。';
+      });
+    }
+    $('candXAdd').addEventListener('click', add);
+    inp.addEventListener('change', add); // 貼って欄を離れたら登録(小さいボタンの空振りに頼らない)
+    inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); add(); } });
+    $('candXClose').addEventListener('click', function () { f.innerHTML = ''; });
+    load();
+  }
   // 組込タブの「✏️ 名前」ボタン(id=candEditBuiltin)を配線。フォームは candEditForm へ出す。
   function wireBuiltinRename_(id) {
     var b = $('candEditBuiltin');
@@ -5800,7 +5871,9 @@
       (isBuiltin
         ? '<button id="candEditBuiltin" type="button" class="ghost" title="タブ名を変更" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">✏️ 名前</button>'
         : '<button id="candEditTab" type="button" class="ghost" title="タブ名を変更・タブを削除" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">✏️ 編集</button>') +
-      '<button id="candAddOpen" type="button" class="primary" style="flex:0 0 auto;width:auto;margin:0;font-size:12px;padding:6px 12px;">➕ ' + (isMain ? '追加' : 'このタブに追加') + '</button>' +
+      (isAuto
+        ? '<button id="candXAccOpen" type="button" class="primary" title="追っかけるXアカウントを登録" style="flex:0 0 auto;width:auto;margin:0;font-size:12px;padding:6px 12px;">➕ アカウント追加</button>'
+        : '<button id="candAddOpen" type="button" class="primary" style="flex:0 0 auto;width:auto;margin:0;font-size:12px;padding:6px 12px;">➕ ' + (isMain ? '追加' : 'このタブに追加') + '</button>') +
       // 手動追加タブのコントロール行の一番右へ「提案ページを開く」導線(Chami依頼2026-08-23・REQ-gunji-f13dc8bd42)。
       //   [✏️名前][➕追加]と同じ行・同スタイル(ghost)。押すと同オリジンの KouhoTeian.html へ遷移。main(手動追加)限定。
       (isMain ? '<button id="candTeianOpen" type="button" class="ghost" title="提案ページを開く" style="flex:0 0 auto;width:auto;margin:0;font-size:13px;padding:6px 11px;">💡 提案</button>' : '') +
@@ -5829,7 +5902,8 @@
     wireKindFilter_(function () { renderCandList(tabId); });
     $('candReload').addEventListener('click', function () { refreshCandItems(tabId); });
     bindPcRun_($('candPcRun'), 'candList');
-    $('candAddOpen').addEventListener('click', function () { openAddModal_(tabId, isMain); });
+    if ($('candAddOpen')) $('candAddOpen').addEventListener('click', function () { openAddModal_(tabId, isMain); });
+    if ($('candXAccOpen')) $('candXAccOpen').addEventListener('click', showXAccountForm_);
     if (isMain) {
       wireBuiltinRename_('main'); // 組込タブ(手動追加)の改名。candEditForm へフォームを出す。
       var teianBtn = $('candTeianOpen'); // 提案ページへ遷移(同オリジン・同タブ)。Chami依頼2026-08-23。
