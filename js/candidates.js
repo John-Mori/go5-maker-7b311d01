@@ -476,7 +476,7 @@
       $('candXCount').textContent = '(' + list.length + '件)';
       $('candXList').innerHTML = list.length ? list.slice().reverse().map(function (a) {
         // 押すとそのXアカウントへ飛ぶ(Chami 2026-11-10 msg 1569399782676631726)。iPhoneで空振りしないよう行全体を中身幅のボタン形にする。
-        return '<div style="margin:4px 0;"><a class="cand-xacc" href="https://x.com/' + esc(a.handle) + '" target="_blank" rel="noopener" style="display:inline-block;width:auto;padding:6px 12px;border:1px solid var(--border,#3a4a5e);border-radius:999px;text-decoration:none;font-size:13px;">@' + esc(a.handle) + '</a>' + (a.added ? ' <span style="opacity:.7;">' + esc(a.added) + '</span>' : '') + '</div>';
+        return '<div style="margin:4px 0;"><a class="cand-xacc" href="https://x.com/' + esc(a.handle) + '" target="_blank" rel="noopener" style="display:inline-block;width:auto;padding:6px 12px;border:1px solid var(--accent);border-radius:999px;text-decoration:none;font-size:13px;color:var(--ink);">@' + esc(a.handle) + '</a>' + (a.added ? ' <span style="opacity:.7;">' + esc(a.added) + '</span>' : '') + '</div>';
       }).join('') : 'まだ1件もありません。';
     }
     function load() {
