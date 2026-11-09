@@ -130,13 +130,15 @@
       if (!groups[c]) { groups[c] = []; order.push(c); }
       groups[c].push(m);
     });
-    var plan = [];
+    var plan = [], d = new Date(), today = String(d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate());
     order.forEach(function (cid) {
       var g = groups[cid];
       if (g.length < 2) return;
       var keep = g.filter(pinned_);
+      // 未来日付(20991231 等の試走)の自動ドラフトは本物より後回し=残す側に選ばない
+      var real = function (m) { return String((m.auto && m.auto.date) || '') <= today ? 1 : 0; };
       var autos = g.filter(function (m) { return !pinned_(m); }).sort(function (a, b) {
-        return ((b.videoReadyAt ? 1 : 0) - (a.videoReadyAt ? 1 : 0)) || ((b.ts || 0) - (a.ts || 0));
+        return (real(b) - real(a)) || ((b.videoReadyAt ? 1 : 0) - (a.videoReadyAt ? 1 : 0)) || ((b.ts || 0) - (a.ts || 0));
       });
       if (!keep.length) keep = [autos.shift()];
       if (!autos.length) return;

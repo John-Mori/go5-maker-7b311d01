@@ -170,6 +170,11 @@ test('D-3: dryRun は計画だけ返して消さない・重複が無ければ�
   const r2 = await z.e.win.FivesecAutoDraft.dedupe();
   assert.deepStrictEqual([z.deleted.length, r2.wanted], [0, 0]);
 });
+test('D-5: 未来日付(20991231の試走)のドラフトは、新しくても残す側に選ばない', async () => {
+  const { e, deleted } = dupEnv([A('t1', 'd_1', 900, '20991231'), A('a2', 'd_1', 300, '20261102'), A('a1', 'd_1', 100, '20261101')]);
+  await e.win.FivesecAutoDraft.dedupe();
+  assert.deepStrictEqual(deleted.slice().sort(), ['a1', 't1']);
+});
 test('D-4: stock.js は一覧の削除ボタンと同じ deleteStock_ を Go5Stock.deleteDraft で公開する', () => {
   const stock = fs.readFileSync(path.join(__dirname, '..', 'js', 'stock.js'), 'utf8');
   assert.ok(/deleteDraft: function \(id\) \{ var ok = deleteStock_\(/.test(stock));
