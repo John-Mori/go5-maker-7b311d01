@@ -1104,14 +1104,15 @@ test.describe('ドラフト軽量ページ', () => {
   });
 });
 
-// 作品・セールのDMM/FANZA行きは短縮しない(Chami決定 2026-10-18 5Sec軍議 msg 1561272541387948148)。
-//   プレースホルダはアフィリンク(al.fanza)で埋まり、短縮APIは呼ばれないこと。
+// セールのDMM/FANZA行きは短縮しない(Chami決定 2026-10-18 5Sec軍議 msg 1561272541387948148)。
+//   ただし稼働chは acc3(柱分け)だけ(app.js ONLY_ACCOUNT)で、その「子の文」はBluesky返信に実際に載る作品の短縮を出す
+//   (Chami 2026-11-10 msg 1569446046004682874「子の文のところも実際に投稿する短縮リンクにして」)。=作品だけ短縮・セールはアフィリンク。
 test.describe('ドラフト投稿モードのリンク置換', () => {
   for (const accountCase of [
     { domain: 'e2e-short-a.example', suffix: 'visible-a' },
     { domain: 'e2e-short-b.example', suffix: 'visible-b' },
   ]) {
-    test('保存済みX本文の作品・セールのプレースホルダを短縮せずアフィリンクで埋める(' + accountCase.domain + ')', async ({ page }) => {
+    test('保存済み子の文の作品は短縮・セールはアフィリンクで埋める(' + accountCase.domain + ')', async ({ page }) => {
       const draftId = 'stk_e2e_short_' + accountCase.suffix;
       let shortenCalls = 0;
       const workUrl = 'https://www.dmm.co.jp/dc/doujin/-/detail/=/cid=d_e2e_short/';
@@ -1169,15 +1170,15 @@ test.describe('ドラフト投稿モードのリンク置換', () => {
           workPlaceholder: value.includes('(商品紹介短縮URL)'),
           salePlaceholder: value.includes('(セール紹介短縮用URL)'),
           affCount: value.split('https://al.fanza.co.jp/').length - 1,
+          workShort: value.includes('https://' + accountCase.domain + '/unexpected'),
         };
-      }).toEqual({ workPlaceholder: false, salePlaceholder: false, affCount: 2 });
+      }).toEqual({ workPlaceholder: false, salePlaceholder: false, affCount: 1, workShort: true });
       const replacedText = await page.locator('#draftXText').inputValue();
       const links = replacedText.match(/https:\/\/al\.fanza\.co\.jp\/\S+/g) || [];
-      expect(links.map((u) => new URL(u).searchParams.get('lurl'))).toEqual([workUrl, saleUrl]);
+      expect(links.map((u) => new URL(u).searchParams.get('lurl')), '作品の生アフィリンクが残っている').toEqual([saleUrl]);
       links.forEach((u) => expect(new URL(u).searchParams.get('af_id')).toBe('e2e-affiliate-001'));
-      expect(replacedText).not.toContain('https://' + accountCase.domain + '/');
       expect(replacedText).not.toContain('短縮リンク取得中');
-      expect(shortenCalls).toBe(0);
+      expect(shortenCalls).toBeGreaterThan(0);
 
       const persistedFinal = await page.evaluate((id) => {
         const saved = JSON.parse(localStorage.getItem('go5_draft_post_' + id) || '{}');
@@ -1185,7 +1186,8 @@ test.describe('ドラフト投稿モードのリンク置換', () => {
       }, draftId);
       expect(persistedFinal).not.toContain('(商品紹介短縮URL)');
       expect(persistedFinal).not.toContain('(セール紹介短縮用URL)');
-      expect(persistedFinal.split('https://al.fanza.co.jp/').length - 1).toBe(2);
+      expect(persistedFinal.split('https://al.fanza.co.jp/').length - 1).toBe(1);
+      expect(persistedFinal).toContain('https://' + accountCase.domain + '/unexpected');
     });
   }
 });
