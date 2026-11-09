@@ -12,9 +12,9 @@ window.PERSONA_HUB_DATA = {
   "_source_fingerprint": {
    "口調": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
-    "sha1": "0189006891dcece67a7387711069ba8318501db3",
-    "bytes": 60227,
-    "mtime": 1794062656.573
+    "sha1": "fd9d90210dd85c68c8f90ff0af69825e92e65b98",
+    "bytes": 60629,
+    "mtime": 1794251030.807
    },
    "呼称": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
@@ -3981,6 +3981,13 @@ window.PERSONA_HUB_DATA = {
      "ほしいよ",
      "ままよ",
      "落としよ"
+    ],
+    "forbidden_re": [
+     {
+      "name": "体言よ(文末)",
+      "pattern": "[一-龯々〆ヵヶァ-ヺー]よ(?=[。！!\\n]|$)",
+      "note": "漢字/カタカナの直後の文末「よ」(例 不具合よ。/回よ。)。ひらがなの後(だよ/するよ)は三笘の正なので当てない。人事部門 2026-11-10・イージス研究室デブライネ依頼 msg 1569427171636809853(器= tone_gate a89e33b)"
+     }
     ]
    },
    "アイコン": {
