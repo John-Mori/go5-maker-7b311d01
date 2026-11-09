@@ -829,7 +829,13 @@
 
   // ── 保存 ──
   var _thumbCache = {}; // id → ObjectURL
-  var _r2ThumbTried = {}; // id → 1(R2 go5srcサムネ取得を1回試した=null連打防止)
+  // id → { p: Promise<url|null>, t: 開始時刻, miss: 雲にも無かった }。
+  // ★2026-11-10 改修β(Chami msg 1569398578898669671「自動で作成した動画のサムネが表示されない」):
+  //   旧 _r2ThumbTried は「1回試したら以後 null」だった。1回目の描画が雲から絵を取っている間に同期で2回目の描画が
+  //   始まると、2回目は「試し済み」で null を受け取り、1回目は世代切れで差し替えを捨てる=絵は届いているのに
+  //   誰も貼らない(2台目相当の実測: R2取得50件成功・差し替え0件)。取得中の Promise を描画をまたいで共有する。
+  var _r2ThumbP = {};
+  var R2_THUMB_RETRY_MS = 10 * 60 * 1000; // 雲にも無かった時の再照会間隔(404連打を防ぐ)
 
   // 動画作成タブのカテゴリ(ジャンル)チェックを読む。投稿完了時に投稿履歴へ引き継ぐ(Chami依頼2026-07-30)。
   //   これが無いと下書き→投稿完了で履歴にジャンルのチェックが渡らず、毎回手で入れ直しになる。
@@ -1239,12 +1245,16 @@
   //   作成直後/一度取得後の動画をメモリに持てば、DLはタップ即応=activation内でshareが確実に出る。最大2件。
   var _vidMem = {};
   var _vidMemOrder = [];
+  var VID_MEM_MAX = 6;
+  var _vidInflight = {}; // id → 取得中の Promise(先読みとタップで同じ取得を共有=二重取得しない)
   var _persisted = null; // navigator.storage.persisted() の実値(C-1・DL診断へ載せる)
   function putVidMem_(id, blob) {
     if (!id || !isUsableVideoBlob_(blob)) return;
-    if (!_vidMem[id]) _vidMemOrder.push(id);
     _vidMem[id] = blob;
-    while (_vidMemOrder.length > 2) {
+    // ★2→6件(2026-11-10 改修β・Chami「ダウンロードが一発でできずに準備中になる」)。見えているドラフトを先読みして
+    //   ここへ置く(prefetchVisibleVideos_)=タップ時は通信なしで共有シートを出せる。5秒動画1本は数MB。
+    _vidMemOrder = _vidMemOrder.filter(function (x) { return x !== id; }); _vidMemOrder.push(id); // 使った分を最新へ(LRU)
+    while (_vidMemOrder.length > VID_MEM_MAX) {
       var drop = _vidMemOrder.shift();
       if (drop !== id) { delete _vidMem[drop]; }
     }
@@ -1286,6 +1296,14 @@
   var VID_IDB_HEAD_START_MS = 2500;
   function resolveVideoBlob_(id) {
     if (_vidMem[id] && isUsableVideoBlob_(_vidMem[id])) return Promise.resolve(_vidMem[id]); // 第1層=メモリ(IDB非依存)
+    if (_vidInflight[id]) return _vidInflight[id]; // 先読み中=同じ取得に相乗り
+    var p = resolveVideoBlobCore_(id);
+    _vidInflight[id] = p;
+    var clear = function () { if (_vidInflight[id] === p) delete _vidInflight[id]; };
+    p.then(clear, clear);
+    return p;
+  }
+  function resolveVideoBlobCore_(id) {
     var store = idb();
     if (!store) return resolveVideoFromR2_(id);
     // ★手元IDB→雲R2 の「直列」をやめ、IDBが2.5秒で答えなければR2を並走させる(Chami報告2026-10-11
@@ -1323,6 +1341,42 @@
         }).catch(function () {});
       });
     });
+  }
+
+  // ★画面に見えている「⬇ 動画DL」の動画を1本ずつ先読みする(2026-11-10 改修β・Chami msg 1569398578898669671
+  //   「ダウンロードが一発でできずに準備中になる」)。iPhoneの共有シートはタップから約3秒以内にしか出せない
+  //   (downloadStock_ の注記)ので、タップ時に雲から取り寄せていると「準備完了→もう一度タップ」になる。
+  //   見えた時点で取り寄せてメモリ(_vidMem)へ置けば、タップは通信なしで即シートを出せる。
+  //   逐次1本ずつ・待ち行列は VID_MEM_MAX 本まで(スクロールで通り過ぎた古い予約は捨てる)・非表示タブでは止める。
+  var _pfQueue = [], _pfBusy = false, _pfObs = null;
+  function prefetchVideo_(id) {
+    if (!id || (_vidMem[id] && isUsableVideoBlob_(_vidMem[id])) || _vidInflight[id]) return;
+    _pfQueue = _pfQueue.filter(function (x) { return x !== id; });
+    _pfQueue.push(id);
+    while (_pfQueue.length > VID_MEM_MAX) _pfQueue.shift();
+    pumpPrefetch_();
+  }
+  function pumpPrefetch_() {
+    if (_pfBusy || document.hidden) return;
+    var id = _pfQueue.shift();
+    if (!id) return;
+    _pfBusy = true;
+    var next = function () { _pfBusy = false; setTimeout(pumpPrefetch_, 50); };
+    resolveVideoBlob_(id).then(next, next);
+  }
+  function observeDlButtons_(page) {
+    if (!page || typeof window.IntersectionObserver !== 'function') return;
+    if (!_pfObs) {
+      _pfObs = new IntersectionObserver(function (ents) {
+        ents.forEach(function (en) {
+          if (!en.isIntersecting) return;
+          _pfObs.unobserve(en.target);
+          prefetchVideo_(en.target.getAttribute('data-id'));
+        });
+      }, { rootMargin: '200px 0px' });
+    }
+    _pfObs.disconnect();
+    Array.prototype.forEach.call(page.querySelectorAll('.stk-dl[data-id]'), function (b) { _pfObs.observe(b); });
   }
 
   // ── 動画DL ──
@@ -2847,6 +2901,11 @@
   // 作成履歴(details)の開閉状態を再描画をまたいで保持する。render毎に<details>を作り直すと
   //   open属性が消えて閉じる=「削除を押すと作成履歴が閉じる」の真因(Chami報告2026-08-13③)。
   var _archOpen = false;
+  // ★ページの重さ(2026-11-10 改修β・Chami msg 1569398578898669671「ページが重い」):
+  //   一覧を全件描画+全件サムネ読みしていた(acc3でドラフト49件=IDB最大4段×49+雲照会×49)。
+  //   描くのは新しい順に30件だけ・作成履歴は開いた時だけ組み立てる。表示順(古いのが上)は従来どおり。
+  var PAGE_SIZE = 30;
+  var _draftShow = PAGE_SIZE, _archShow = PAGE_SIZE;
   // ★軽量化(2026-10-20): 署名の元は META_KEY / go5_stock_del / ARCHIVE_KEY の生文字列だけ。
   //   3つとも前回と同じなら前回の署名を返す=作成履歴(最大約4.8MB)を描画・同期通知のたびに解析し直さない。
   var _sigMemo = null;
@@ -2883,9 +2942,12 @@
     var sig = stockViewSig_(curAcct), seq = ++_renderSeq;
 
     var store = idb();
-    var all = metas.concat(arch);
+    // 描く分だけ(PAGE_SIZE の注記)。新しい側=配列の末尾から数える。
+    var metasShown = metas.length > _draftShow ? metas.slice(metas.length - _draftShow) : metas;
+    var archShown = !_archOpen ? [] : (arch.length > _archShow ? arch.slice(arch.length - _archShow) : arch);
+    var all = metasShown.concat(archShown);
     // ★保存中(pending)のDrive保存は、この端末が開くたびに実物照会を再起動する=前回タブを閉じた後に着地した分も拾って確認中→実物確認へ上げる。
-    all.forEach(function (m) { if (m && m.id) { var _ds = driveSavedState_(m.id); if (_ds && _ds.state === 'pending') verifyDriveLanded_(m.id); } });
+    metas.concat(arch).forEach(function (m) { if (m && m.id) { var _ds = driveSavedState_(m.id); if (_ds && _ds.state === 'pending') verifyDriveLanded_(m.id); } });
 
     // 一覧HTMLを thumbFor(id→サムネURL/null)から組み立てて描画する。(サムネの有無に依らず同じ骨格)
     function paint_(thumbFor) {
@@ -2902,8 +2964,10 @@
       }
       html += '<div class="card">';
       if (metas.length) {
+        var hiddenN = metas.length - metasShown.length;
         html += '<div style="font-size:.95rem;font-weight:700;color:var(--accent);margin-bottom:10px;">📦 ドラフト(' + metas.length + '件)</div>' +
-          metas.map(function (m) { return renderItem_(m, thumbFor[m.id]); }).join('');
+          (hiddenN > 0 ? '<button type="button" class="stk-more" data-more="draft" style="width:auto;flex:0 0 auto;margin:0 0 8px;padding:6px 12px;font-size:.8rem;border-radius:6px;border:1px solid #3a4a5e;background:transparent;color:#9fb0c3;cursor:pointer;">古いドラフトをもっと見る(残り' + hiddenN + '件)</button>' : '') +
+          metasShown.map(function (m) { return renderItem_(m, thumbFor[m.id]); }).join('');
       } else {
         html += '<div style="color:var(--sub);text-align:center;padding:28px 16px;font-size:.9rem;">' +
           'このアカウントのドラフトはまだありません。<br>動画作成タブの「📦 ドラフトで作成」で動画をここへ貯められます。</div>';
@@ -2913,12 +2977,15 @@
       if (arch.length) {
         html += '<details id="stkArchDetails"' + (_archOpen ? ' open' : '') + ' style="margin-top:12px;">' +
           '<summary style="cursor:pointer;font-size:.86rem;font-weight:700;color:var(--sub);padding:11px 14px;background:var(--card);border:1px solid var(--line);border-radius:12px;">🗂 作成履歴(投稿完了ぶん・' + arch.length + '件) — タップで開く/復元</summary>' +
-          '<div class="card" style="margin-top:8px;">' +
-          arch.map(function (m) { return renderArchItem_(m, thumbFor[m.id]); }).join('') +
+          '<div class="card" id="stkArchBody"' + (_archOpen ? '' : ' data-lazy="1"') + ' style="margin-top:8px;">' +
+          (!_archOpen ? '<div style="color:var(--sub);font-size:.8rem;padding:6px 0;">読み込み中…</div>' :
+            ((arch.length > archShown.length ? '<button type="button" class="stk-more" data-more="arch" style="width:auto;flex:0 0 auto;margin:0 0 8px;padding:6px 12px;font-size:.8rem;border-radius:6px;border:1px solid #3a4a5e;background:transparent;color:#9fb0c3;cursor:pointer;">古い履歴をもっと見る(残り' + (arch.length - archShown.length) + '件)</button>' : '') +
+             archShown.map(function (m) { return renderArchItem_(m, thumbFor[m.id]); }).join(''))) +
           '</div></details>';
       }
       page.innerHTML = html;
       _lastRenderedStockSig = sig;
+      try { observeDlButtons_(page); } catch (e) {}
     }
 
     // ★まず同期で即描画する=IDBサムネ読込を待たずに一覧の文字(件数/空メッセージ/作成履歴)を必ず出す。
@@ -2940,13 +3007,25 @@
         idbSick_(store) ? 0 : 3000, function (u) { return !!u; });
     });
     function thumbFromR2_(m) {
-      // 「1回だけ」取り寄せる(null時は _r2ThumbTried で再取得を止め、毎描画のfetch連打を防ぐ)。
-      if (_r2ThumbTried[m.id] || !(window.Go5Sync && Go5Sync.fetchBlobR2At)) return Promise.resolve(null);
-      _r2ThumbTried[m.id] = 1;
-      return Go5Sync.fetchBlobR2At('go5src:' + m.id).then(function (rb) {
-        if (rb && rb.size) { putSrcMem_(m.id, rb); _thumbCache[m.id] = _thumbCache[m.id] || URL.createObjectURL(rb); return _thumbCache[m.id]; }
-        return null;
-      }).catch(function () { return null; });
+      // 取得中/取得済みの Promise を描画をまたいで共有する(_r2ThumbP の注記)。雲にも無かった分だけ
+      //   R2_THUMB_RETRY_MS の間は再照会しない=毎描画の404連打は従来どおり防ぐ。元画像(go5src)が無ければ
+      //   仕上がりプレビュー(go5prev)を絵として使う。
+      if (_thumbCache[m.id]) return Promise.resolve(_thumbCache[m.id]);
+      if (!(window.Go5Sync && Go5Sync.fetchBlobR2At)) return Promise.resolve(null);
+      var e = _r2ThumbP[m.id];
+      if (e && (!e.miss || Date.now() - e.t < R2_THUMB_RETRY_MS)) return e.p;
+      var ent = { t: Date.now(), miss: false };
+      function isImg_(b) { return !!(b && b.size && (!b.type || /^image\//.test(b.type))); }
+      ent.p = Go5Sync.fetchBlobR2At('go5src:' + m.id, 15000).then(function (rb) {
+        if (isImg_(rb)) { putSrcMem_(m.id, rb); return rb; }
+        return Go5Sync.fetchBlobR2At('go5prev:' + m.id, 15000).then(function (pb) { return isImg_(pb) ? pb : null; });
+      }).then(function (b) {
+        if (!b) { ent.miss = true; return null; }
+        _thumbCache[m.id] = _thumbCache[m.id] || URL.createObjectURL(b);
+        return _thumbCache[m.id];
+      }).catch(function () { ent.miss = true; return null; });
+      _r2ThumbP[m.id] = ent;
+      return ent.p;
     }
     function thumbFromIdb_(m) {
       return store.get('stock_t_' + m.id).then(function (blob) {
@@ -2985,7 +3064,12 @@
     thumbPs.forEach(function (p, idx) {
       var m = all[idx];
       p.then(function (url) {
-        if (!url || !_stillCurrent_()) return;
+        // ★世代(seq/署名)が変わっていても、画面に同じidのカードが居れば貼る(2026-11-10 改修β)。
+        //   絵はidに対して一意=古い描画の取得結果でも正しい。旧実装は同期の再描画1回で差し替えを全部捨てていた。
+        //   アカウントが変わった時だけは貼らない(別アカウントの一覧に同じidは出ないが念のため)。
+        if (!url || page.hidden) return;
+        var nowAcct_ = (window.Go5Acct && Go5Acct.current && Go5Acct.current()) || 'acc1';
+        if (nowAcct_ !== curAcct) return;
         var sel = (window.CSS && CSS.escape) ? CSS.escape(m.id) : m.id;
         var card = page.querySelector('[data-item-id="' + sel + '"]');
         if (!card) return;
@@ -2994,7 +3078,8 @@
         if (cur.tagName === 'IMG' && cur.getAttribute('src') === url) return; // 既に同じ絵=何もしない
         var img = document.createElement('img');
         img.src = url; img.alt = '';
-        img.style.cssText = 'width:40px;height:71px;object-fit:cover;border-radius:5px;flex:0 0 auto;';
+        // 枠の大きさは差し替え前の枠に合わせる(ドラフト48×85・作成履歴40×71)=差し替えで行がガタつかない。
+        img.style.cssText = 'width:' + (cur.style.width || '48px') + ';height:' + (cur.style.height || '85px') + ';object-fit:cover;border-radius:5px;flex:0 0 auto;';
         card.replaceChild(img, cur);
         delete _missingThumbs[m.id];
       }).catch(function () {});
@@ -4467,15 +4552,27 @@
       //   これで再描画(削除/復元など)後もrenderが open を復元し、開いたまま維持できる。
       page.addEventListener('toggle', function (e) {
         var d = e.target;
-        if (d && d.id === 'stkArchDetails') _archOpen = !!d.open;
+        if (d && d.id === 'stkArchDetails') {
+          _archOpen = !!d.open;
+          // 作成履歴は開いた時に初めて組み立てる(PAGE_SIZE の注記)。組み立て済みなら再描画しない=開閉の連鎖を作らない。
+          var body = $('stkArchBody');
+          if (_archOpen && body && body.getAttribute('data-lazy') === '1') render();
+        }
       }, true);
       // 投稿モードは指が触れた瞬間に投稿画像の取り出しを始める=開いた時には手元に揃っている(Chami msg 1561074852478062743)。
       page.addEventListener('pointerdown', function (e) {
         var b = e.target;
         if (b && b.classList && b.classList.contains('stk-mode') && b.dataset && b.dataset.id) resolveSrcImageBlob_(b.dataset.id).catch(function () {});
+        // 動画DLも指が触れた瞬間に取り寄せを始める(clickまでの時間を稼ぐ・取得は resolveVideoBlob_ で相乗り)。
+        if (b && b.classList && b.classList.contains('stk-dl') && b.dataset && b.dataset.id) resolveVideoBlob_(b.dataset.id).catch(function () {});
       }, true);
       page.addEventListener('click', function (e) {
         var btn = e.target;
+        if (btn && btn.classList && btn.classList.contains('stk-more')) {
+          if (btn.getAttribute('data-more') === 'arch') _archShow += PAGE_SIZE; else _draftShow += PAGE_SIZE;
+          render();
+          return;
+        }
         if (!btn || !btn.dataset || !btn.dataset.id) return;
         var id = btn.dataset.id;
         // meta はドラフト本体・作成履歴のどちらにあるか分からない(動画DLは両方から押せる)ので両方から探す。
@@ -4533,7 +4630,7 @@
     // 最大50件を同時発火していた旧30秒sweepはiOSのメモリ圧を上げるため、逐次処理＋2分周期へ変更。
     setTimeout(sweepVideoMirror_, 1000);  // 起動直後(sync設定の読み込みを少し待つ・追いつきを速く)
     setTimeout(sweepVideoMirror_, 6000);  // 1本目でsync未設定だった時の取りこぼしを拾う二度目(重複はbusyガード)
-    document.addEventListener('visibilitychange', function () { if (!document.hidden) sweepVideoMirror_(); });
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) { sweepVideoMirror_(); pumpPrefetch_(); } });
     setInterval(sweepVideoMirror_, 120000);
 
     // ★save_job 永続pending の再送。ドラフト確定時にqueueSaveが届かなかったぶんを、
