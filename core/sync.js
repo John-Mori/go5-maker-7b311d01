@@ -1830,17 +1830,25 @@
   var ACTIVE_POLL_MS = 20000, ACTIVE_WINDOW_MS = 5 * 60000;
   function startAuto() {
     if (_timer || !configured()) return;
-    syncOnce(false);
+    // ★ドラフト専用ページ(Stock.html)は候補一式の全同期が一番重い処理だった(4倍減速の計測で sync.js が
+    //   CPUの大半・stock.js は1割未満・Chami msg 1569398578898669671「ページが重い」)。このページでは
+    //   起動直後はドラフト台帳だけ取り込み、全同期は描画とサムネが落ち着く5秒後へ回す。操作中の20秒周期も
+    //   ドラフト台帳だけにし、全同期は60秒ごと(放置時と同じ)に間引く。離脱/復帰時の全同期は従来どおり。
+    var draftPage = !!root.__go5StockStandalone;
+    if (draftPage) { syncDraftsNow(); root.setTimeout(function () { syncOnce(false); }, 5000); }
+    else syncOnce(false);
     // 非表示タブでは回さない＝裏で開きっぱなしのタブがWorkerを叩き続けるのを止める。
     //   表示に戻った瞬間に1回同期するため、体感の反映速度は落とさない。
     // ★受け取り側の待ちを縮める(Chami msg 1559251833242001409): 直近5分に操作がある表示中の端末は20秒ごと、
     //   放置中は従来どおり60秒ごとに取り込む。押し通知は無いので、操作中だけ間隔を詰めてWorker枠を守る。
-    var _lastTickAt = 0;
+    var _lastTickAt = 0, _lastFullAt = Date.now();
     _timer = root.setInterval(function () {
       if (root.document && root.document.visibilityState === "hidden") return;
       var t = Date.now();
       if (t - _lastUserAt > ACTIVE_WINDOW_MS && t - _lastTickAt < AUTO_MS - 1000) return;
-      _lastTickAt = t; syncOnce(false);
+      _lastTickAt = t;
+      if (draftPage && t - _lastFullAt < AUTO_MS - 1000) { syncDraftsNow(); return; }
+      _lastFullAt = t; syncOnce(false);
     }, ACTIVE_POLL_MS);
     if (root.document && root.document.addEventListener) {
       ["pointerdown", "keydown", "touchstart"].forEach(function (ev) {
