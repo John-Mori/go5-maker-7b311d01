@@ -24,9 +24,9 @@ window.PERSONA_HUB_DATA = {
    },
    "アイコン": {
     "path": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
-    "sha1": "53210048e99dd5002222f572ec6797707ef3b1c9",
-    "bytes": 21489,
-    "mtime": 1794064178.984
+    "sha1": "b6c1b31ff3dbc27870b0f83c6b9945d01ab36026",
+    "bytes": 21622,
+    "mtime": 1794592923.952
    },
    "原典": {
     "path": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md",
