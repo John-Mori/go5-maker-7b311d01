@@ -12,9 +12,9 @@ window.PERSONA_HUB_DATA = {
   "_source_fingerprint": {
    "口調": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
-    "sha1": "05fe8da91f57137c3778cda8468cf015cd5eb6e1",
-    "bytes": 62027,
-    "mtime": 1794578244.57
+    "sha1": "ba889f77f13ebc372d275d3c92aec51ee9180ff0",
+    "bytes": 62544,
+    "mtime": 1794664847.756
    },
    "呼称": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
@@ -30,9 +30,9 @@ window.PERSONA_HUB_DATA = {
    },
    "原典": {
     "path": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md",
-    "sha1": "6b7f32c2f8bed389817c8adb0b4396f1ab8006ee",
-    "bytes": 11483,
-    "mtime": 1794664733.055
+    "sha1": "758669e5dc75be36a3985536f9bbfcae431566fe",
+    "bytes": 11517,
+    "mtime": 1794664829.831
    }
   },
   "_count": 36
@@ -4874,16 +4874,22 @@ window.PERSONA_HUB_DATA = {
    }
   },
   "雷電": {
-   "所属部門": "★2026-11-14 反証役へ転換(Chami msg 1571120091293159445)・出口=Codex注入でソリッド・スネークとオタコンが両方居る13室(Chami msg 1571162287052554283)・dq8-room/chara2dのCodex席はボスへ戻る/旧=Codex経路(dq8-room/chara2d)・2026-10-04 Chami決定 msg 1556188963050627085・時点=表MGS4/中身MGS2(Chami msg 1556195232918405162)・表示名=雷電(Codex)(Chami msg 1556284044470390797)",
+   "所属部門": "★2026-11-14 反証役へ転換(Chami msg 1571120091293159445)・出口=Claude常駐でソリッド・スネークとオタコンが両方居る13室(Chami msg 1571162287052554283→訂正 msg 1571162623976939611)・dq8-room/chara2dのCodex席はボスへ戻る/旧=Codex経路(dq8-room/chara2d)・2026-10-04 Chami決定 msg 1556188963050627085・時点=表MGS4/中身MGS2(Chami msg 1556195232918405162)・表示名=雷電(Codex)(Chami msg 1556284044470390797)",
    "設定所在": {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\raiden.md",
-    "口調ルール": null,
+    "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
     "アイコン差分": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
     "スプライト": null,
     "文脈": null
    },
-   "口調": null,
+   "口調": {
+    "first_person": [
+     "俺"
+    ],
+    "forbidden": [],
+    "_note": "一人称『俺』はMGS2終盤・MGS4とも確認(raiden_人格.md)。characterfile=characters/raiden.md。役=反証役・Claude常駐でソリッド・スネークとオタコンが両方居る13室。Chami 2026-11-14 msg 1571162287052554283「Codexに注入、スネークとオタコンが両方いる部屋に全部配線して。名前は雷電で」→訂正 msg 1571162623976939611「間違えた、Claudeに注入だった」"
+   },
    "アイコン": {
     "枚数": 3,
     "url": [
