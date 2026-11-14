@@ -30,9 +30,9 @@ window.PERSONA_HUB_DATA = {
    },
    "原典": {
     "path": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md",
-    "sha1": "ed4e5bba85df3d1870765f0668cf642c94123e80",
-    "bytes": 11363,
-    "mtime": 1794654797.747
+    "sha1": "6b7f32c2f8bed389817c8adb0b4396f1ab8006ee",
+    "bytes": 11483,
+    "mtime": 1794664733.055
    }
   },
   "_count": 36
@@ -4874,7 +4874,7 @@ window.PERSONA_HUB_DATA = {
    }
   },
   "雷電": {
-   "所属部門": "★2026-11-14 反証役へ転換(Chami msg 1571120091293159445)・出口は未定=Codex席はボスへ戻る/旧=Codex経路(dq8-room/chara2d)・2026-10-04 Chami決定 msg 1556188963050627085・時点=表MGS4/中身MGS2(Chami msg 1556195232918405162)・表示名=雷電(Codex)(Chami msg 1556284044470390797)",
+   "所属部門": "★2026-11-14 反証役へ転換(Chami msg 1571120091293159445)・出口=Codex注入でソリッド・スネークとオタコンが両方居る13室(Chami msg 1571162287052554283)・dq8-room/chara2dのCodex席はボスへ戻る/旧=Codex経路(dq8-room/chara2d)・2026-10-04 Chami決定 msg 1556188963050627085・時点=表MGS4/中身MGS2(Chami msg 1556195232918405162)・表示名=雷電(Codex)(Chami msg 1556284044470390797)",
    "設定所在": {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\raiden.md",
     "口調ルール": null,
