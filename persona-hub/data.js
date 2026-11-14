@@ -18,9 +18,9 @@ window.PERSONA_HUB_DATA = {
    },
    "呼称": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "sha1": "7c3196e61f45ede4a3d38424321a77ff0bbf9df4",
-    "bytes": 151078,
-    "mtime": 1794244727.028
+    "sha1": "b5b55967888298022e5a81164dba738fbbf7bd8f",
+    "bytes": 151924,
+    "mtime": 1794654817.252
    },
    "アイコン": {
     "path": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
@@ -30,9 +30,9 @@ window.PERSONA_HUB_DATA = {
    },
    "原典": {
     "path": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md",
-    "sha1": "81c7aad464ec534c58ca03608dfc1020fe5b35db",
-    "bytes": 11351,
-    "mtime": 1794071959.434
+    "sha1": "ed4e5bba85df3d1870765f0668cf642c94123e80",
+    "bytes": 11363,
+    "mtime": 1794654797.747
    }
   },
   "_count": 36
@@ -4874,7 +4874,7 @@ window.PERSONA_HUB_DATA = {
    }
   },
   "雷電": {
-   "所属部門": "Codex経路(dq8-room/chara2d)・2026-10-04 Chami決定 msg 1556188963050627085・ネイキッドの後任・時点=表MGS4/中身MGS2(Chami msg 1556195232918405162)・表示名=雷電(Codex)(Chami msg 1556284044470390797)",
+   "所属部門": "★2026-11-14 反証役へ転換(Chami msg 1571120091293159445)・出口は未定=Codex席はボスへ戻る/旧=Codex経路(dq8-room/chara2d)・2026-10-04 Chami決定 msg 1556188963050627085・時点=表MGS4/中身MGS2(Chami msg 1556195232918405162)・表示名=雷電(Codex)(Chami msg 1556284044470390797)",
    "設定所在": {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\raiden.md",
     "口調ルール": null,
