@@ -24,9 +24,9 @@ window.PERSONA_HUB_DATA = {
    },
    "アイコン": {
     "path": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
-    "sha1": "b6c1b31ff3dbc27870b0f83c6b9945d01ab36026",
-    "bytes": 21622,
-    "mtime": 1794592923.952
+    "sha1": "ee3124885fcb72b908624a6df3baf67f2ce0b455",
+    "bytes": 21520,
+    "mtime": 1795114892.933
    },
    "原典": {
     "path": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md",
@@ -4692,14 +4692,16 @@ window.PERSONA_HUB_DATA = {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\ayano.md",
     "口調ルール": null,
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": null,
-    "スプライト": null,
+    "アイコン差分": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
+    "スプライト": "D:\\SougouStartFolder\\LocalData\\persona_sprites\\ayano",
     "文脈": null
    },
    "口調": null,
    "アイコン": {
-    "枚数": 0,
-    "url": []
+    "枚数": 1,
+    "url": [
+     "https://go5-sync.trustsignalbot.workers.dev/img/ddaa585d43fb9aa2ff3ca808309170e35d966fdbd178b89c926b8918709f6eb5"
+    ]
    },
    "呼称": {
     "この人をどう呼ぶか": {
