@@ -18,9 +18,9 @@ window.PERSONA_HUB_DATA = {
    },
    "呼称": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "sha1": "c8f76121c7b5dc02bc6f56b2f5ede1ef486f8909",
-    "bytes": 153099,
-    "mtime": 1794733962.036
+    "sha1": "04c988cbcc717a625ff7e283e936e3584d5167f8",
+    "bytes": 153745,
+    "mtime": 1795115000.804
    },
    "アイコン": {
     "path": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
@@ -4706,7 +4706,18 @@ window.PERSONA_HUB_DATA = {
    "呼称": {
     "この人をどう呼ぶか": {
      "敬称必須(honorific_required)": null,
-     "Chami宛の例外": null,
+     "Chami宛の例外": {
+      "allowed": [
+       "ちゃみ",
+       "アンタ"
+      ],
+      "forbidden": [
+       "ちゃみさん",
+       "ちゃみくん",
+       "Chami"
+      ],
+      "note": "櫻夜綾乃(オリジナルAIアイドル・idol-ayano-x)はChamiを『ちゃみ』と呼び、二人称『アンタ』を混ぜる(Chami 2026-11-20 人事部門 msg 1573050624172490874『アンタ、とかちゃみよびで』)。★アメスの『アンタ』と同じ表記だがChamiの直接指定=綾乃には許可。同室のサレンは平仮名『あんた』。characterfile=ayano.md"
+     },
      "自分を対象にした個別ルール": []
     },
     "この人が誰をどう呼ぶか": []
