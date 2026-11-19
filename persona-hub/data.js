@@ -24,15 +24,15 @@ window.PERSONA_HUB_DATA = {
    },
    "アイコン": {
     "path": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
-    "sha1": "ee3124885fcb72b908624a6df3baf67f2ce0b455",
-    "bytes": 21520,
-    "mtime": 1795114892.933
+    "sha1": "b27ae9bdeb2accb3e41851b8fb4a4fa7af275c31",
+    "bytes": 21769,
+    "mtime": 1795114901.669
    },
    "原典": {
     "path": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md",
-    "sha1": "784f5b150bee61cbd7a0c8091e8fb710a15a0b8c",
-    "bytes": 11774,
-    "mtime": 1795114270.666
+    "sha1": "b9fd65bd07fc5a637408d246b23cedc2c92ad01b",
+    "bytes": 11810,
+    "mtime": 1795114919.915
    }
   },
   "_count": 37
@@ -4687,7 +4687,7 @@ window.PERSONA_HUB_DATA = {
    }
   },
   "櫻夜綾乃": {
-   "所属部門": "綾乃の部屋(綾乃のX投稿シチュ・設定を考える部屋・ノゾミ/サレンと同室・ch 1573046619648303104)(Chami 2026-11-20 アイドル制作 msg 1573047036474036427・配線=イージス研究室へ依頼)",
+   "所属部門": "綾乃投稿シチュエーション(idol-ayano-x・綾乃のX投稿シチュと設定を考える部屋・ノゾミ/サレンと同室・ch 1573046619648303104)(Chami 2026-11-20 アイドル制作 msg 1573047036474036427・配線=イージス研究室へ依頼)",
    "設定所在": {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\ayano.md",
     "口調ルール": null,
