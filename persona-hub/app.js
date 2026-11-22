@@ -280,8 +280,18 @@
         "</li>";
     }).join("");
     Array.prototype.forEach.call(els.list.querySelectorAll(".persona-item"), function (li) {
-      li.addEventListener("click", function () { selectPersona(li.getAttribute("data-name")); });
+      li.addEventListener("click", function () {
+        selectPersona(li.getAttribute("data-name"));
+        // スマホは詳細が一覧の上にある=押した人の詳細が見える所まで戻す(PCは横並びなので動かさない)
+        if (window.matchMedia && window.matchMedia("(max-width:860px)").matches) scrollToDetail();
+      });
     });
+  }
+
+  function scrollToDetail() {
+    var top = 0;
+    try { top = Math.max(0, els.detail.getBoundingClientRect().top + window.pageYOffset - 8); } catch (e) {}
+    try { window.scrollTo({ top: top, behavior: "smooth" }); } catch (e) { window.scrollTo(0, top); }
   }
 
   function selectPersona(name) {
@@ -340,7 +350,7 @@
     Array.prototype.forEach.call(els.roster.querySelectorAll(".roster-member"), function (btn) {
       btn.addEventListener("click", function () {
         selectPersona(btn.getAttribute("data-name"));
-        try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch (e) { window.scrollTo(0, 0); }
+        scrollToDetail();
       });
     });
   }
