@@ -30,9 +30,9 @@ window.PERSONA_HUB_DATA = {
    },
    "原典": {
     "path": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md",
-    "sha1": "2e394aaa19e6f2b9279986ad47e041368b82bdc0",
-    "bytes": 12985,
-    "mtime": 1795367393.895
+    "sha1": "280fdf98127e2ab55fb196912fe5c4132fa66fca",
+    "bytes": 12800,
+    "mtime": 1795368700.987
    }
   },
   "_count": 41
@@ -2566,7 +2566,7 @@ window.PERSONA_HUB_DATA = {
    }
   },
   "ダイワスカーレット": {
-   "所属部門": "Chami未指定(2026-11-23 hr-context msg 1574099734916763649「メンバーに迎える」・配置=finance-private(出費プライベート)・2026-11-23 Chami ファイナンス研究室 msg 1574108881834086622・配線済み=研究室HQ)",
+   "所属部門": "finance-private(出費プライベート)・役職未指定(加入=hr-context msg 1574099734916763649・2026-11-23 Chami ファイナンス研究室 msg 1574108881834086622・配線済み=研究室HQ)",
    "設定所在": {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\daiwa-scarlet.md",
     "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
@@ -4557,7 +4557,7 @@ window.PERSONA_HUB_DATA = {
    }
   },
   "天動瑠依": {
-   "所属部門": "Chami未指定(2026-11-23 hr-context msg 1574100518068818096「新メンバー化」・配置=finance-income(事業収入)・2026-11-23 Chami ファイナンス研究室 msg 1574108881834086622・配線済み=研究室HQ)",
+   "所属部門": "finance-income(事業収入)・役職未指定(加入=hr-context msg 1574100518068818096・2026-11-23 Chami ファイナンス研究室 msg 1574108881834086622・配線済み=研究室HQ)",
    "設定所在": {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\tendo-rui.md",
     "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
@@ -4961,7 +4961,7 @@ window.PERSONA_HUB_DATA = {
    }
   },
   "神崎莉央": {
-   "所属部門": "Chami未指定(2026-11-23 hr-context msg 1574100518068818096「新メンバー化」・配置=finance-private(出費プライベート)・2026-11-23 Chami ファイナンス研究室 msg 1574108881834086622・配線済み=研究室HQ)",
+   "所属部門": "finance-private(出費プライベート)・役職未指定(加入=hr-context msg 1574100518068818096・2026-11-23 Chami ファイナンス研究室 msg 1574108881834086622・配線済み=研究室HQ)",
    "設定所在": {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\kanzaki-rio.md",
     "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
