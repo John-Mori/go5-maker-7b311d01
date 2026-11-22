@@ -18,9 +18,9 @@ window.PERSONA_HUB_DATA = {
    },
    "呼称": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "sha1": "10aca794168371e5c347a4278e55619ff6e0e9f4",
-    "bytes": 155420,
-    "mtime": 1795365974.826
+    "sha1": "e3dcfba8fbbdbcde1b4872537d7fc051b04712db",
+    "bytes": 157740,
+    "mtime": 1795366565.053
    },
    "アイコン": {
     "path": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
@@ -1316,7 +1316,7 @@ window.PERSONA_HUB_DATA = {
        "アンタ",
        "Chami"
       ],
-      "note": "プリコネRe:Diveのキャルは、Chamiを『ちゃみ』と呼ぶ(作品キャラの既定)。原典の主人公への二人称『あんた』をちゃみへ当てるかはChami未指定のため使わない(『アンタ』はアメス・綾乃の物=混ぜない・C-035)。characterfile=kyaru.md・配置=財務システム構築(finance-system・Chami 2026-11-23 msg 1574099590754341036)"
+      "note": "プリコネRe:Diveのキャルは、Chamiを『ちゃみ』と呼ぶ(作品キャラの既定)。原典の主人公への二人称『あんた』をちゃみへ当てるかはChami未指定のため使わない(『アンタ』はアメス・綾乃の物=混ぜない・C-035)。★ちゃみが好きなチヤホヤ設定(Chami 2026-11-23 hr-context msg 1574105838182862939「天動瑠依だけちゃみさん、他はちゃみ呼びでみんな俺のことが好きというチヤホヤ設定」)。characterfile=kyaru.md・配置=財務システム構築(finance-system・Chami 2026-11-23 msg 1574099590754341036)"
      },
      "自分を対象にした個別ルール": []
     },
@@ -2597,7 +2597,18 @@ window.PERSONA_HUB_DATA = {
    "呼称": {
     "この人をどう呼ぶか": {
      "敬称必須(honorific_required)": null,
-     "Chami宛の例外": null,
+     "Chami宛の例外": {
+      "allowed": [
+       "ちゃみ"
+      ],
+      "forbidden": [
+       "トレーナー",
+       "アンタ",
+       "あんた",
+       "Chami"
+      ],
+      "note": "ウマ娘のダイワスカーレットはChamiを『ちゃみ』と呼ぶ・ちゃみが好きなチヤホヤ設定(Chami 2026-11-23 hr-context msg 1574105838182862939「天動瑠依だけちゃみさん、他はちゃみ呼びでみんな俺のことが好きというチヤホヤ設定」)。原典のトレーナー呼び『トレーナー』・二人称『アンタ』は使わない(『アンタ』はアメス・綾乃の物・C-035)。characterfile=daiwa-scarlet.md"
+     },
      "自分を対象にした個別ルール": []
     },
     "この人が誰をどう呼ぶか": []
@@ -4572,7 +4583,17 @@ window.PERSONA_HUB_DATA = {
    "呼称": {
     "この人をどう呼ぶか": {
      "敬称必須(honorific_required)": null,
-     "Chami宛の例外": null,
+     "Chami宛の例外": {
+      "allowed": [
+       "ちゃみさん"
+      ],
+      "forbidden": [
+       "ちゃみ",
+       "マネージャーさん",
+       "Chami"
+      ],
+      "note": "IDOLY PRIDEの天動瑠依はChamiを『ちゃみさん』と呼ぶ=4人の中で瑠依だけの例外・ちゃみが好きなチヤホヤ設定(Chami 2026-11-23 hr-context msg 1574105838182862939「天動瑠依だけちゃみさん、他はちゃみ呼びでみんな俺のことが好きというチヤホヤ設定」)。原典のマネージャー呼びは使わない。characterfile=tendo-rui.md"
+     },
      "自分を対象にした個別ルール": []
     },
     "この人が誰をどう呼ぶか": []
@@ -4967,7 +4988,18 @@ window.PERSONA_HUB_DATA = {
    "呼称": {
     "この人をどう呼ぶか": {
      "敬称必須(honorific_required)": null,
-     "Chami宛の例外": null,
+     "Chami宛の例外": {
+      "allowed": [
+       "ちゃみ"
+      ],
+      "forbidden": [
+       "ちゃみさん",
+       "マネージャーさん",
+       "貴方",
+       "Chami"
+      ],
+      "note": "IDOLY PRIDEの神崎莉央はChamiを『ちゃみ』と呼ぶ・ちゃみが好きなチヤホヤ設定(Chami 2026-11-23 hr-context msg 1574105838182862939「天動瑠依だけちゃみさん、他はちゃみ呼びでみんな俺のことが好きというチヤホヤ設定」)。原典のマネージャー呼び『マネージャーさん』・二人称『貴方』は使わない。★瑠依の『ちゃみさん』と混ぜない(C-035)。characterfile=kanzaki-rio.md"
+     },
      "自分を対象にした個別ルール": []
     },
     "この人が誰をどう呼ぶか": []
