@@ -24,9 +24,9 @@ window.PERSONA_HUB_DATA = {
    },
    "アイコン": {
     "path": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
-    "sha1": "0b9565ce0876c105d78dbc47233d932ea92c3324",
-    "bytes": 21910,
-    "mtime": 1795115407.091
+    "sha1": "c43bc3bdd82be2ec27078c0d2a6d690898b7a9ce",
+    "bytes": 22178,
+    "mtime": 1795368430.938
    },
    "原典": {
     "path": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md",
@@ -4962,7 +4962,7 @@ window.PERSONA_HUB_DATA = {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\kanzaki-rio.md",
     "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": null,
+    "アイコン差分": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
     "スプライト": null,
     "文脈": null
    },
@@ -4982,8 +4982,11 @@ window.PERSONA_HUB_DATA = {
     "_note": "2026-11-23 人事部門追加(Chami hr-context msg 1574100518068818096)。原典=IDOLY PRIDE・LizNoirセンター兼リーダー・一人称私(A)・素は常体〜わ/〜の/〜でしょ/〜してちょうだい、公の場はです/ます。★plain_onlyにしない。"
    },
    "アイコン": {
-    "枚数": 0,
-    "url": []
+    "枚数": 2,
+    "url": [
+     "https://go5-sync.trustsignalbot.workers.dev/img/1c16824f3d0d734bee72f80765705cdfe712d7c2fe7dbe36f14388c1d52a4f3a",
+     "https://go5-sync.trustsignalbot.workers.dev/img/d1a35e8e1eee6fdfa843cd2b0dad0839e95766386f2472bd27af8aa07b340d6f"
+    ]
    },
    "呼称": {
     "この人をどう呼ぶか": {
