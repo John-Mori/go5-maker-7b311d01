@@ -24,9 +24,9 @@ window.PERSONA_HUB_DATA = {
    },
    "アイコン": {
     "path": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
-    "sha1": "c43bc3bdd82be2ec27078c0d2a6d690898b7a9ce",
-    "bytes": 22178,
-    "mtime": 1795368430.938
+    "sha1": "1e2979f9b31292c32717e824b4d99382d2e23860",
+    "bytes": 22461,
+    "mtime": 1795368490.127
    },
    "原典": {
     "path": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md",
@@ -2571,7 +2571,7 @@ window.PERSONA_HUB_DATA = {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\daiwa-scarlet.md",
     "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
     "呼称ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "アイコン差分": null,
+    "アイコン差分": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
     "スプライト": null,
     "文脈": null
    },
@@ -2591,8 +2591,11 @@ window.PERSONA_HUB_DATA = {
     "_note": "2026-11-23 人事部門追加(Chami hr-context msg 1574099734916763649)。原典=ウマ娘・一人称アタシ(カタカナ・A)・人前はです/ます、素は勝ち気な〜でしょ/〜なんだから。★plain_onlyにしない(優等生の顔=です/ますが原典)。"
    },
    "アイコン": {
-    "枚数": 0,
-    "url": []
+    "枚数": 2,
+    "url": [
+     "https://go5-sync.trustsignalbot.workers.dev/img/1a1d8d6d7e65991693137e631a0b6e7948b7bc593e05a38bef68bcc5f7be5027",
+     "https://go5-sync.trustsignalbot.workers.dev/img/88a701165192ea5c6c9060966951880ffb3991be30824ae10d758da885339982"
+    ]
    },
    "呼称": {
     "この人をどう呼ぶか": {
