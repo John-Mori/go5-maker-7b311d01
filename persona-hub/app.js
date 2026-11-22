@@ -62,6 +62,9 @@
   var LIST_HIDDEN_KEY = "persona_hub_list_hidden_v1";
   // 削除した差分(この端末で即時に消す)。台帳から外れて data.js へ着地したら自然に不要になる。
   var DELETED_KEY = "persona_hub_deleted_avatars_v1";
+  // 詳細(選んだキャラの1枚)を丸ごと閉じたか(この端末だけ)。Chami要望 2026-11-23 人事部門 msg 1574113368917278820
+  // 「アーモンドアイが出てるけど、これごと閉じれるように」。閉じたら次に開いた時も自動で1人目を出さない。
+  var DETAIL_CLOSED_KEY = "persona_hub_detail_closed_v1";
 
   // 部屋スラッグ→日本語名(正本= org_registry.yml の display_ja。ハブに出る部屋だけ写した)。Chami要望 2026-09-27 ⑤。
   var ROOM_JA = {
@@ -202,7 +205,20 @@
     renderList();
     renderRoomRoster();
     renderFooter();
-    if (state.filtered.length) selectPersona(state.filtered[0]);
+    if (isDetailClosed()) closeDetail();
+    else if (state.filtered.length) selectPersona(state.filtered[0]);
+  }
+
+  // ── 詳細を丸ごと閉じる(2026-11-23) ──
+  function isDetailClosed() {
+    try { return localStorage.getItem(DETAIL_CLOSED_KEY) === "1"; } catch (e) { return false; }
+  }
+  function closeDetail() {
+    try { localStorage.setItem(DETAIL_CLOSED_KEY, "1"); } catch (e) {}
+    state.selected = null;
+    renderList();
+    els.detail.classList.add("is-closed");
+    els.detail.innerHTML = '<div class="detail-empty">一覧からキャラクターを選ぶと、ここに詳細が開きます。</div>';
   }
 
   function onFetchError(err) {
@@ -269,6 +285,8 @@
   }
 
   function selectPersona(name) {
+    try { localStorage.setItem(DETAIL_CLOSED_KEY, "0"); } catch (e) {}
+    els.detail.classList.remove("is-closed");
     state.selected = name;
     renderList();
     renderDetail(name);
@@ -332,14 +350,17 @@
     var e = state.personas[name];
     if (!e) { els.detail.innerHTML = '<div class="detail-empty">データがありません。</div>'; return; }
     var html = "";
-    html += '<div class="detail-head"><h2>' + esc(name) + "</h2>" +
-      '<div class="detail-dept">' + esc(e.所属部門 ? deptJa(e.所属部門) : "所属部門: 未設定") + "</div></div>";
+    html += '<div class="detail-head"><div class="detail-head-text"><h2>' + esc(name) + "</h2>" +
+      '<div class="detail-dept">' + esc(e.所属部門 ? deptJa(e.所属部門) : "所属部門: 未設定") + "</div></div>" +
+      '<button type="button" class="detail-close" aria-label="' + esc(name) + 'の詳細を閉じる">閉じる</button></div>';
     html += renderAvatarSection(e.アイコン, name);
     html += renderToneSection(e.口調);
     html += renderNamingToSection((e.呼称 || {}).この人をどう呼ぶか);
     html += renderNamingFromSection((e.呼称 || {}).この人が誰をどう呼ぶか);
     // ⑥ 設定所在の各キャラ表示は廃止=まとめ置き場をページ下部に1回だけ出す(renderFooter)。
     els.detail.innerHTML = html;
+    var closeBtn = els.detail.querySelector(".detail-close");
+    if (closeBtn) closeBtn.addEventListener("click", closeDetail);
     wireCopyButtons();
     wireAvatarButtons(name);
     wireSectionToggles();

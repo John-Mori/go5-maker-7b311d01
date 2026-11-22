@@ -87,7 +87,14 @@ html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
 /* ── 右：詳細ペイン ── */
 .detail-pane{flex:1 1 auto;min-width:0;}
 .detail-empty{padding:40px 16px;text-align:center;color:var(--sub);font-size:13.5px;}
-.detail-head{margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--line);}
+.detail-head{margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--line);
+  display:flex;align-items:flex-start;gap:10px;}
+.detail-head-text{flex:1 1 auto;min-width:0;}
+/* 詳細を丸ごと閉じる(2026-11-23 Chami)=中身の幅・縮めない */
+.detail-close{width:auto;flex:0 0 auto;font:inherit;font-size:13px;font-weight:700;color:var(--accent);
+  background:transparent;border:1px solid var(--accent);border-radius:8px;padding:7px 14px;cursor:pointer;}
+.detail-close:hover{background:var(--accent);color:var(--accent-ink);}
+.detail-pane.is-closed .detail-empty{padding:14px 16px;}
 .detail-head h2{margin:0;font-size:19px;font-weight:900;color:var(--ink);}
 .detail-dept{margin-top:3px;font-size:12.5px;color:var(--accent);}
 
