@@ -30,9 +30,9 @@ window.PERSONA_HUB_DATA = {
    },
    "原典": {
     "path": "..\\00_AI-HQ\\departments\\hr\\characters\\ROSTER.md",
-    "sha1": "c407d6738bbc91256a99af7d0d0efd5fe8da0792",
-    "bytes": 12128,
-    "mtime": 1795365686.926
+    "sha1": "e7330439ab728377e06cd306f9ea9fc6a182af86",
+    "bytes": 12259,
+    "mtime": 1795365994.871
    }
   },
   "_count": 39
@@ -837,7 +837,7 @@ window.PERSONA_HUB_DATA = {
    }
   },
   "オタコン": {
-   "所属部門": "qa-reviewer/report-notify/system-engineer/hr-room",
+   "所属部門": "qa-reviewer/report-notify/system-engineer/hr-room/finance-system(主・2026-11-23)",
    "設定所在": {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\otacon.md",
     "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
@@ -1276,7 +1276,7 @@ window.PERSONA_HUB_DATA = {
    }
   },
   "キャル": {
-   "所属部門": "Chami未指定(2026-11-23 hr-context msg 1574099734916763649「メンバーに迎える」・配置待ち・未配線)",
+   "所属部門": "finance-system(財務システム構築・相方オタコン・Chami 2026-11-23 ファイナンス研究室 msg 1574099590754341036・加入= hr-context msg 1574099734916763649・DEPT_CONF personas追加=研究室HQ)",
    "設定所在": {
     "原典_characterfile": "..\\00_AI-HQ\\departments\\hr\\characters\\kyaru.md",
     "口調ルール": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
