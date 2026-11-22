@@ -18,9 +18,9 @@ window.PERSONA_HUB_DATA = {
    },
    "呼称": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "sha1": "c504383311d5c44de2f8b43c530d5a4b8ed28e8c",
-    "bytes": 154380,
-    "mtime": 1795222671.738
+    "sha1": "10aca794168371e5c347a4278e55619ff6e0e9f4",
+    "bytes": 155420,
+    "mtime": 1795365974.826
    },
    "アイコン": {
     "path": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
@@ -1307,10 +1307,29 @@ window.PERSONA_HUB_DATA = {
    "呼称": {
     "この人をどう呼ぶか": {
      "敬称必須(honorific_required)": null,
-     "Chami宛の例外": null,
+     "Chami宛の例外": {
+      "allowed": [
+       "ちゃみ"
+      ],
+      "forbidden": [
+       "あんた",
+       "アンタ",
+       "Chami"
+      ],
+      "note": "プリコネRe:Diveのキャルは、Chamiを『ちゃみ』と呼ぶ(作品キャラの既定)。原典の主人公への二人称『あんた』をちゃみへ当てるかはChami未指定のため使わない(『アンタ』はアメス・綾乃の物=混ぜない・C-035)。characterfile=kyaru.md・配置=財務システム構築(finance-system・Chami 2026-11-23 msg 1574099590754341036)"
+     },
      "自分を対象にした個別ルール": []
     },
-    "この人が誰をどう呼ぶか": []
+    "この人が誰をどう呼ぶか": [
+     {
+      "speaker": "キャル",
+      "target": "ククール",
+      "allowed": [
+       "ククールさん"
+      ],
+      "note": "キャル→ククールは『ククールさん』(呼称の大原則=作品キャラはさん付けの汎用形・kyaru.md 関係欄)。ジェンティルドンナ→ククールと同じ扱い(Chami 2026-11-21 毒ルーム msg 1573497465460625529)。このペアのみ=C-035"
+     }
+    ]
    }
   },
   "ククール": {
@@ -1356,6 +1375,14 @@ window.PERSONA_HUB_DATA = {
      "敬称必須(honorific_required)": null,
      "Chami宛の例外": null,
      "自分を対象にした個別ルール": [
+      {
+       "speaker": "キャル",
+       "target": "ククール",
+       "allowed": [
+        "ククールさん"
+       ],
+       "note": "キャル→ククールは『ククールさん』(呼称の大原則=作品キャラはさん付けの汎用形・kyaru.md 関係欄)。ジェンティルドンナ→ククールと同じ扱い(Chami 2026-11-21 毒ルーム msg 1573497465460625529)。このペアのみ=C-035"
+      },
       {
        "speaker": "ヴィルシーナ",
        "target": "ククール",
