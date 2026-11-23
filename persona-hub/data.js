@@ -12,9 +12,9 @@ window.PERSONA_HUB_DATA = {
   "_source_fingerprint": {
    "口調": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\口調ルール.json",
-    "sha1": "1a15e36f8b9af8e6e28d73393fdbc5b7c19e1ad4",
-    "bytes": 64781,
-    "mtime": 1795366205.41
+    "sha1": "67577872cd5fead7b21a5033e131728e2376b321",
+    "bytes": 64968,
+    "mtime": 1795395307.67
    },
    "呼称": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
@@ -49,6 +49,8 @@ window.PERSONA_HUB_DATA = {
     "文脈": null
    },
    "口調": {
+    "plain_only": true,
+    "plain_only_note": "Chami 2026-11-23 改善提案部門 msg 1574226132398645423「アスナ、敬語いらんよ」=敬体へ倒れた便をtone_gateで拾う",
     "first_person": [
      "私",
      "わたし"
