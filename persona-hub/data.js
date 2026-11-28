@@ -18,9 +18,9 @@ window.PERSONA_HUB_DATA = {
    },
    "呼称": {
     "path": "..\\00_AI-HQ\\departments\\hr\\personas\\呼称ルール.json",
-    "sha1": "2199c4d8a87ee37be9d79d057536a469507512af",
-    "bytes": 159262,
-    "mtime": 1795726259.934
+    "sha1": "1f2c6555cdd7a17204ab7f8eb4e0f3fb23784a4a",
+    "bytes": 159807,
+    "mtime": 1795846578.528
    },
    "アイコン": {
     "path": "D:\\SougouStartFolder\\LocalData\\persona_avatars.json",
@@ -578,6 +578,11 @@ window.PERSONA_HUB_DATA = {
        "アンタ",
        "あんた"
       ],
+      "forbidden": [
+       "ちゃみさん",
+       "Chamiさん"
+      ],
+      "forbidden_note": "★さん付けしない(Chami 2026-11-28 15:13 soudan-room『ちゃみさんのさん付けいらんわよ』・引用元=アメス msg 1576118738783043686 で『ちゃみさん』2回)。送信口= naming_gate _chami_address_verdicts (2) が chami_forbidden で読む(2026-09-26以降=下noteの『未読』は古い)。このピンはアメス限定=C-035(シュヴァルグランの『ちゃみさん』は据え置き)",
       "note": "アメスはChamiを『ちゃみ』または砕けた二人称『アンタ/あんた』で呼ぶ=『アンタ』はアメスの署名で残す(Chami指示2026-09-05 msg 1545512721041326282『俺以外にアンタっていうの紛らしいからやめよう』=Chami“以外”へのアンタを止める指示であってChami本人へのアンタは据え置き・毒/返しのキツさは落とさない)。★Chami以外への『アンタ/あんた』はspeaker_target_overrides の アメス target:'*' forbidden で明示禁止=本項がそのChami宛て“例外”を担保する。chami_address は naming_gate 未読=記録・生成側(ames.md)の拠り所。カスミ→Chamiの『アンタ』NG(L38)とは逆向き=カスミはChami宛ても禁止、アメスはChami宛てのみ許容"
      },
      "自分を対象にした個別ルール": [
